@@ -4,6 +4,8 @@
     python tools/console.py                     # http://127.0.0.1:8765 をブラウザで開く
     python tools/console.py --light --user=山田  # 共鳴を光の語板で。--user の相手の記憶を使う
     python tools/console.py --ai=qwen3-swallow  # 横に「ローカル AI の返事」も並べる（Ollama、tools/ollama_client.py）
+    python tools/console.py --batch --ai=モデル名  # 評点だけの画面（http://127.0.0.1:8766）: 試しの会話の発言に返事を付けて出すので、👍・👎 を押すだけ。
+                                                # --ai があれば、ローカル AI にも同じ返事を 1〜5 で評点させ、押した後に見せる（持ち主の評点と合うかを見るため）
 記録: 評点は非公開の置き場の ratings/ratings.jsonl に 1 行ずつ足す（会話の履歴・返事・評点・自信・設定）。
       話し相手の発言は個人の情報なので、リポジトリには入れない。
 外の部品は使わない（Python の標準の http.server だけ）。手元の PC の中だけで動かす（127.0.0.1）。
@@ -56,14 +58,54 @@ document.getElementById('f').onsubmit=async e=>{e.preventDefault();const t=docum
 </script></body></html>"""
 
 
+BATCH = """<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ことゆい 評点だけ</title><style>
+body{font-family:system-ui,"Yu Gothic UI",sans-serif;max-width:760px;margin:0 auto;padding:16px;background:#fcfcfb;color:#0b0b0b}
+.box{background:#fff;border:1px solid #e4e3df;border-radius:12px;padding:14px;margin:10px 0}
+.lab{font-size:12px;color:#52514e;margin-bottom:4px}.u{font-size:18px}.b{font-size:18px;color:#1c5cab}
+.btns{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}button{font-size:18px;padding:10px 18px;border-radius:10px;border:1px solid #c9c8c2;background:#fff;cursor:pointer}
+#good{border-color:#1baf7a}#bad{border-color:#e34948}#ai{font-size:13px;color:#52514e;margin-top:8px;white-space:pre-wrap}
+h1{font-size:18px}small{color:#52514e}
+</style></head><body><h1>ことゆい 評点だけ <small id="cnt"></small></h1>
+<div class="box"><div class="lab">相手（試しの会話の発言）</div><div class="u" id="u">読み込み中…</div></div>
+<div class="box"><div class="lab">ことゆいの返事 <span id="conf"></span></div><div class="b" id="b"></div>
+<div class="btns"><button id="good">👍 自然</button><button id="bad">👎 不自然</button><button id="skip">とばす</button></div><div id="ai"></div></div>
+<p><small>キーボード: J = 👍、K = 👎、L = とばす。押すと次の問に進みます。</small></p>
+<script>
+let cur=null,n=0,busy=false;
+async function next(){busy=true;document.getElementById('u').textContent='読み込み中…';document.getElementById('b').textContent='';
+ cur=await (await fetch('/next',{method:'POST',body:'{}'})).json();busy=false;
+ document.getElementById('u').textContent=cur.prompt;document.getElementById('b').textContent=cur.reply;document.getElementById('conf').textContent='（自信 '+cur.confidence.toFixed(1)+'）';}
+async function rate(v){if(busy||!cur)return;busy=true;
+ const r=await (await fetch('/rate',{method:'POST',body:JSON.stringify({id:cur.id,rating:v})})).json();
+ if(v!=='skip'){n++;document.getElementById('cnt').textContent=n+' 個';}
+ document.getElementById('ai').textContent=r.ai_score?('ひとつ前のローカル AI の評点: '+r.ai_score+'（'+(r.ai_reason||'')+'）'):'';
+ next();}
+document.getElementById('good').onclick=()=>rate('good');document.getElementById('bad').onclick=()=>rate('bad');document.getElementById('skip').onclick=()=>rate('skip');
+document.onkeydown=e=>{if(e.key==='j')rate('good');if(e.key==='k')rate('bad');if(e.key==='l')rate('skip')};
+next();
+</script></body></html>"""
+
+
+def prompts(seed=0, rated=()):
+    """評点だけの画面の問: 試しの会話（雑談）の発言 6〜50 文字を、決まった順に並べる（評点を付けた問は飛ばす）。"""
+    import random
+    ps = list(dict.fromkeys(t for src, turns in kotoyui.load_conversations()["test"] if src in ("rpc", "own")
+                            for t in turns if 6 <= len(t) <= 50))
+    random.Random(seed).shuffle(ps)
+    return [p for p in ps if p not in rated]
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--port", type=int, default=None, help="既定 8765（評点だけの画面は 8766）")
+    ap.add_argument("--batch", action="store_true", help="評点だけの画面")
     ap.add_argument("--light", action="store_true")
     ap.add_argument("--user", default=None)
     ap.add_argument("--char", default=None)
     ap.add_argument("--ai", default=None, help="Ollama のモデル名。並べて出す（比べる用、評点は付けない）")
     a = ap.parse_args()
+    a.port = a.port or (8766 if a.batch else 8765)
     bot = kotoyui.Bot(char=a.char, user=a.user, light=a.light)
     ai = None
     if a.ai:
@@ -73,6 +115,15 @@ def main():
     os.makedirs(os.path.dirname(out), exist_ok=True)
     lock = threading.Lock()
     turns = {}
+    queue = []
+    if a.batch:
+        rated = set()
+        if os.path.exists(out):
+            for line in open(out, encoding="utf-8"):
+                r = json.loads(line)
+                if r.get("mode") == "batch" and r.get("history"):
+                    rated.add(r["history"][0])
+        queue = prompts(rated=rated)
     info = f"{kotoyui.__version__}・共鳴 {'光の語板' if a.light else '数え上げ'}・{bot.char.prof.get('苗字', '')}{bot.char.prof.get('名前', '')}"
 
     def write(rec):
@@ -94,7 +145,7 @@ def main():
         def do_GET(self):
             if self.path == "/info":
                 return self.send(200, json.dumps(dict(info=info), ensure_ascii=False))
-            self.send(200, PAGE, "text/html; charset=utf-8")
+            self.send(200, BATCH if a.batch else PAGE, "text/html; charset=utf-8")
 
         def do_POST(self):
             raw = self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}"
@@ -116,16 +167,39 @@ def main():
                         rec["ai"] = f"（ローカル AI に届かない: {e}）"
                 turns[tid] = rec
                 return self.send(200, json.dumps(dict(id=tid, reply=reply, confidence=conf, ai=rec.get("ai")), ensure_ascii=False))
+            if self.path == "/next" and a.batch:
+                with lock:
+                    u = queue.pop(0) if queue else "（問がなくなりました）"
+                    reply, conf = bot.reply([u])
+                tid = f"{time.strftime('%Y%m%d%H%M%S')}_{len(turns)}"
+                rec = dict(id=tid, mode="batch", time=time.strftime("%Y-%m-%dT%H:%M:%S"), history=[u], reply=reply, confidence=conf,
+                           version=kotoyui.__version__, light=a.light, char=bot.char.prof.get("id"), rating=None)
+                turns[tid] = rec
+                if ai:                                                    # 評点は押した後に見せる（先に見ると持ち主の評点が引っ張られる）
+                    def judge(rec=rec):
+                        try:
+                            rec["ai_score"], rec["ai_reason"] = ai.rate(rec["history"], rec["reply"])
+                        except Exception as e:
+                            rec["ai_score"], rec["ai_reason"] = None, f"（ローカル AI に届かない: {e}）"
+                    rec["_judge"] = threading.Thread(target=judge)
+                    rec["_judge"].start()
+                return self.send(200, json.dumps(dict(id=tid, prompt=u, reply=reply, confidence=conf), ensure_ascii=False))
+            if self.path == "/rate" and a.batch and d.get("rating") == "skip":
+                return self.send(200, "{}")
             if self.path == "/rate":
                 if d.get("id") not in turns or d.get("rating") not in ("good", "bad"):
                     return self.send(400, json.dumps(dict(error="知らない返事か評点です")))
-                rec = dict(turns[d["id"]], rating=d["rating"], rated_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+                t = turns[d["id"]]
+                if t.get("_judge"):
+                    t["_judge"].join(timeout=60)
+                rec = {k: v for k, v in t.items() if not k.startswith("_")}
+                rec.update(rating=d["rating"], rated_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
                 write(rec)
-                return self.send(200, "{}")
+                return self.send(200, json.dumps(dict(ai_score=rec.get("ai_score"), ai_reason=rec.get("ai_reason")), ensure_ascii=False))
             self.send(404, "{}")
 
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
-    print(f"ことゆい 会話コンソール: http://127.0.0.1:{a.port}（{info}）。評点は {out} に。Ctrl+C で止める", flush=True)
+    print(f"ことゆい {'評点だけの画面' if a.batch else '会話コンソール'}: http://127.0.0.1:{a.port}（{info}{'、問 ' + str(len(queue)) if a.batch else ''}）。評点は {out} に。Ctrl+C で止める", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
