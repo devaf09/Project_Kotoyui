@@ -19,11 +19,11 @@ HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
 
 class Ollama:
-    def __init__(self, model, host=HOST, system="あなたは日本語で自然に雑談する話し相手です。短く 1〜2 文で返事をしてください。", timeout=120):
-        self.model, self.host, self.system, self.timeout = model, host.rstrip("/"), system, timeout
+    def __init__(self, model, host=HOST, system="あなたは日本語で自然に雑談する話し相手です。短く 1〜2 文で返事をしてください。", timeout=120, think=False):
+        self.model, self.host, self.system, self.timeout, self.think = model, host.rstrip("/"), system, timeout, think   # think=False: 考える途中を省いて速く（思考モデル）
 
     def _post(self, messages, temperature=0.7):
-        body = dict(model=self.model, messages=messages, stream=False, options=dict(temperature=temperature))
+        body = dict(model=self.model, messages=messages, stream=False, think=self.think, options=dict(temperature=temperature))
         req = urllib.request.Request(self.host + "/api/chat", data=json.dumps(body).encode("utf-8"), headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             text = json.loads(r.read().decode("utf-8"))["message"]["content"]
