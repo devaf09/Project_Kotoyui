@@ -27,6 +27,9 @@ SN2-Parts-2D（2 次元の SinWave の部品集）の光の部品（vendor/sn2_p
     指揮役（光の外の手順）: 共感（「〜んですね」）→ 内容（候補を 10 通りの重みで選んだ票）→ 質問（話題を続ける）。課題がありそうなら秘書の型で返す
 
 変更履歴（新しい版が上。改良したらここ・__version__・README の版・tests/ を一緒に更新する）
+    0.3.0 (2026-11-03)  共感の「〜んですね」を、気持ち・困りごとが出ている発言にだけ付ける（ほかは 2 割。Bot(empathy_plain=…)、人格の重み「共感の強さ_ふだん」）。
+                        持ち主の評点で「〜んですね」が多すぎて不自然だったため。ローカル AI の評点で比べた（tools/eval_ai.py）。
+                        会話コンソール（tools/console.py）・ローカル AI の接続（tools/ollama_client.py）。
     0.2.0 (2026-11-03)  次の発言の共鳴を、語板（1 語 = 1 台の光の器、Sin-CNN3 のライブラリ sincnn3 0.1.0 の器の形）で持てるようにした（LightResonance、
                         Bot(light=True) か --light。既定は数え上げのまま）。10 択で数え上げの PMI 59.0% に対して 57.9%（3 seed、実験09）。
     0.1.0 (2026-11-02)  Sin-CNN3 のテストボット02（tools/testbot02.py と実験115・119・120・121、コミット 9cbca0a）を、関数とクラスにまとめ直して取り込んだ
@@ -52,7 +55,7 @@ import time
 import zlib
 from collections import Counter, defaultdict
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PARTS_FILE = os.path.join(ROOT, "vendor", "sn2_parts_2d_v0_11_0.py")
@@ -596,7 +599,7 @@ FUNC = ("助詞", "助動詞", "補助記号", "接尾辞")
 class Bot:
     """会話の本体。材料の表・遷移グレイン（非公開の置き場に保存）・キャラクタ・時計・対話者をまとめ、reply(history) で返事を返す。"""
 
-    def __init__(self, char=None, user=None, now=None, rebuild=False, log=print, seed=0, light=False):
+    def __init__(self, char=None, user=None, now=None, rebuild=False, log=print, seed=0, light=False, empathy_plain=0.2):
         self.mat, self.tg = load_tables(rebuild, log)
         self.res = load_light_resonance(self.mat, rebuild, log) if light else self.mat   # 次の発言の共鳴: light = 語板の光（実験09）、既定 = 数え上げの PMI
         self.char = Character(char)
@@ -605,6 +608,7 @@ class Bot:
         self.user_name = self.user.d.get("名前") if self.user else None
         self.session_new = {}
         self.rng = random.Random(seed)
+        self.empathy_plain = empathy_plain                                       # 気持ちの出ていない発言に「〜んですね」を付ける割合（0.3.0、持ち主の評点で多すぎた）
 
     # ---- 共感: 相手の述語を「〜んですね」で返す（バックトラッキング）----
     def last_predicate(self, ts):
@@ -794,7 +798,9 @@ class Bot:
         sa = self.char.answer(u, history, self.clock)
         if sa:
             return sa, 1.0
-        bt = self.backtrack(u, history[:-1]) if self.rng.random() < W.get("共感の強さ", 1.0) else ""
+        feel = any(e in u for e in EMO_F) or problem_score(u) >= 1.0            # 気持ち・困りごとが出ている発言（共感の「〜んですね」が生きる所）
+        p_bt = W.get("共感の強さ", 1.0) if feel else W.get("共感の強さ_ふだん", self.empathy_plain)
+        bt = self.backtrack(u, history[:-1]) if self.rng.random() < p_bt else ""
         interest = W.get("課題解決への興味", 0.0)
         if interest > 0 and not isq(u) and problem_score(u) >= 1.0 / interest:
             return bt + self.secretary_offer(u, bt), 1.0
