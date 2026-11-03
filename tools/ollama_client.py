@@ -27,7 +27,10 @@ class Ollama:
         req = urllib.request.Request(self.host + "/api/chat", data=json.dumps(body).encode("utf-8"), headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             text = json.loads(r.read().decode("utf-8"))["message"]["content"]
-        return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()     # 考える途中の文（思考モデルの <think>）は外す
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)                # 考える途中の文（思考モデルの <think>）は外す
+        if "</think>" in text:                                                    # think=False でも、閉じの印だけ付いて考えが出ることがある
+            text = text.rsplit("</think>", 1)[1]
+        return text.strip()
 
     def chat(self, history):
         """会話の履歴（相手の発言から始まる交互の並び）→ 次の発言。"""
