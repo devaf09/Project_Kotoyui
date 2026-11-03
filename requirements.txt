@@ -1,0 +1,9 @@
+# ことゆいの本体・例・テスト（CPU だけで動く。GPU は実験を速く回すときだけ）
+torch>=2.0
+fugashi>=1.3
+unidic-lite>=1.0.8
+numpy>=1.24
+pytest>=7
+# 実験（experiments/）と図（tools/fig_*.py）で使う
+sentencepiece>=0.2
+matplotlib>=3.7
