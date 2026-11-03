@@ -12,7 +12,7 @@
 │   ├── assets/                       持ち主が書いた表の見本（公開してよいもの）
 │   │   ├── characters/               キャラクタのプロフィールと人格グレイン
 │   │   └── clock_grain.json          時計グレインの表
-│   ├── tools/                        データの取得・読み込みのツール
+│   ├── tools/                        データの取得・読み込み・会話コンソールのツール
 │   ├── experiments/ results/ docs/   実験・結果（数字だけ）・文書
 │   └── examples/                     試し方のコード例
 └── Project_Kotoyui_private/          ← 非公開の置き場（git の外。KOTOYUI_PRIVATE で変えられる）
@@ -27,6 +27,7 @@
     │   └── MANIFEST.json             取得元・取得日・ライセンス・指紋（tools/make_manifest.py）
     ├── models/                       数えた表・語板（kotoyui.py が初回に作る）
     ├── users/                        話し相手ごとの記憶（個人の情報）
+    ├── ratings/ratings.jsonl         会話コンソールの評点（1 行 = 返事 1 つ。履歴・返事・評点・自信・設定）
     └── docs/                         公開しない文書
 ```
 

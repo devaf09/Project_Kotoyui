@@ -74,6 +74,26 @@ bot = kotoyui.Bot(light=True)                       # char="自分のキャラ�
 reply, confidence = bot.reply(["犬を飼っているんですが、散歩が大変で"])
 ```
 
+### 4.1 ブラウザの会話コンソール（グッド・バッドの評点つき）
+
+```bash
+python tools/console.py --light          # http://127.0.0.1:8765 をブラウザで開く
+```
+
+返事ごとに 👍・👎 を押すと、非公開の置き場の `ratings/ratings.jsonl` に、会話の履歴・返事・評点・自信・設定が 1 行ずつ残ります（手元の PC の中だけで動きます。外の部品は使いません）。
+空のまま送ると、会話を最初からやり直します。
+
+### 4.2 ローカル AI（Ollama）と並べる
+
+[Ollama](https://ollama.com/) を入れてモデルを用意すると、`http://localhost:11434` の API に、`tools/ollama_client.py` からつなげます（外の部品は使いません）。
+
+```bash
+python tools/ollama_client.py <モデル名> "こんにちは"      # つながるか確かめる
+python tools/console.py --ai=<モデル名>                   # ことゆいの返事の下に、ローカル AI の返事も並べる
+```
+
+`Ollama(モデル名).rate(履歴, 返事)` で、返事の自然さの評点（1〜5）と理由も聞けます（評価役の補助。持ち主の評点の代わりではありません）。
+
 ## 5. 自分で集めた会話を足す
 
 ```bash

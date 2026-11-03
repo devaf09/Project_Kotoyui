@@ -54,7 +54,7 @@ reply, confidence = bot.reply(["犬を飼っているんですが、散歩が大
 ```
 
 環境・手順・うまく動かないときは **[docs/quickstart.md](docs/quickstart.md)**、データの置き場と形は **[docs/data_format.md](docs/data_format.md)**。
-自分で集めた会話は `python tools/import_dialogues.py 会話.txt` で足せます。キャラクタ（プロフィール・人格グレイン）と時計の表は、見本が assets/ にあり、自分の物に替えられます。
+自分で集めた会話は `python tools/import_dialogues.py 会話.txt` で足せます。ブラウザで話して 👍・👎 を付けるなら `python tools/console.py`、ローカル AI（Ollama）と並べるなら `--ai=モデル名`。キャラクタ（プロフィール・人格グレイン）と時計の表は、見本が assets/ にあり、自分の物に替えられます。
 
 ## くわしい説明
 
@@ -79,7 +79,7 @@ reply, confidence = bot.reply(["犬を飼っているんですが、散歩が大
 | docs/ | 説明資料・案の一覧・図（docs/images/）・会話の例（docs/samples/、青空文庫で作った分だけ） |
 | experiments/ | 実験のプログラム（expNN_名前.py）、見積もり（est_*.py）、条件の一覧（sweeps/） |
 | results/ | 結果（1 回 = 1 行の JSON） |
-| tools/ | データの取得（fetch_*）・自分の会話の読み込み（import_dialogues.py）・集計・図 |
+| tools/ | データの取得（fetch_*）・自分の会話の読み込み（import_dialogues.py）・会話コンソール（console.py）・ローカル AI との接続（ollama_client.py）・集計・図 |
 | tests/ | 部品ごとの確認 |
 
 ## ライセンスとデータの出典
