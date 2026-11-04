@@ -22,8 +22,9 @@ class Ollama:
     def __init__(self, model, host=HOST, system="あなたは日本語で自然に雑談する話し相手です。短く 1〜2 文で返事をしてください。", timeout=120, think=False):
         self.model, self.host, self.system, self.timeout, self.think = model, host.rstrip("/"), system, timeout, think   # think=False: 考える途中を省いて速く（思考モデル）
 
-    def _post(self, messages, temperature=0.7):
-        body = dict(model=self.model, messages=messages, stream=False, think=self.think, options=dict(temperature=temperature))
+    def _post(self, messages, temperature=0.7, max_tokens=256):
+        # max_tokens: 長さの上限。思考モデルは think=False でも考え続けて止まらないことがある（2026-11-04、1 問で 1 万語を超えた）ので必ず切る
+        body = dict(model=self.model, messages=messages, stream=False, think=self.think, options=dict(temperature=temperature, num_predict=max_tokens))
         req = urllib.request.Request(self.host + "/api/chat", data=json.dumps(body).encode("utf-8"), headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             text = json.loads(r.read().decode("utf-8"))["message"]["content"]
@@ -44,7 +45,7 @@ class Ollama:
         conv = "\n".join(f"{'A' if (len(history) - i) % 2 == 1 else 'B'}: {t}" for i, t in enumerate(history))
         q = (f"次の会話の続きとして、B の返事「{reply}」は自然ですか。1（不自然）〜5（とても自然）の整数で評価し、"
              f"1 行目に数字だけ、2 行目に短い理由を書いてください。\n\n{conv}")
-        out = self._post([dict(role="user", content=q)], temperature=0.0)
+        out = self._post([dict(role="user", content=q)], temperature=0.0, max_tokens=128)
         m = re.search(r"[1-5]", out)
         return (int(m.group()) if m else None), out.split("\n", 1)[-1].strip()
 
