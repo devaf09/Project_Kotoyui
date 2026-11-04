@@ -24,6 +24,8 @@ class Ollama:
 
     def _post(self, messages, temperature=0.7, max_tokens=256):
         # max_tokens: 長さの上限。思考モデルは think=False でも考え続けて止まらないことがある（2026-11-04、1 問で 1 万語を超えた）ので必ず切る
+        if not self.think and "qwen3" in self.model.lower():
+            return self._raw_nothink(messages, temperature, max_tokens)
         body = dict(model=self.model, messages=messages, stream=False, think=self.think, options=dict(temperature=temperature, num_predict=max_tokens))
         req = urllib.request.Request(self.host + "/api/chat", data=json.dumps(body).encode("utf-8"), headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
@@ -32,6 +34,15 @@ class Ollama:
         if "</think>" in text:                                                    # think=False でも、閉じの印だけ付いて考えが出ることがある
             text = text.rsplit("</think>", 1)[1]
         return text.strip()
+
+    def _raw_nothink(self, messages, temperature, max_tokens):
+        """Qwen3 系: 会話の型を自分で組み、考える欄を空にして答えから書かせる（Qwen3 Swallow RL は think=False でも英語で考え始め、
+        考える欄を許すと 1,000 語でも終わらなかったため。2026-11-04）。"""
+        p = "".join(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n" for m in messages) + "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+        body = dict(model=self.model, prompt=p, raw=True, stream=False, options=dict(temperature=temperature, num_predict=max_tokens, stop=["<|im_end|>"]))
+        req = urllib.request.Request(self.host + "/api/generate", data=json.dumps(body).encode("utf-8"), headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            return json.loads(r.read().decode("utf-8"))["response"].strip()
 
     def chat(self, history):
         """会話の履歴（相手の発言から始まる交互の並び）→ 次の発言。"""
