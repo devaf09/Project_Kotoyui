@@ -32,7 +32,7 @@
 |---|---|---|---|
 | I1 | 小さな世界（5 語・9 つの意味）で、分ける・違和感・介入の問い | i01_small_world.py、sweeps/i01.sh | results/i01.jsonl、NOTES.md |
 | I2 | 境目の分からない 2 つの物を融合した語板に、属性を 1 つずつ逆から入れて分離を調べる | i02_reverse.py | results/i02.jsonl、NOTES.md |
-| I4 | 文の数と世界の大きさに対して、答えられる問いがどう増えるか | i04_scale.py、sweeps/i04.sh | results/i04.jsonl、NOTES.md |
 | I3 | 分け方を逆からの判断（口 2 つ・競合する観点）に置き換え、否定に反例の強さを入れる | i03_reverse_split.py、sweeps/i03.sh | results/i03.jsonl、NOTES.md |
+| I4 | 文の数と世界の大きさに対して、答えられる問いがどう増えるか | i04_scale.py、sweeps/i04.sh | results/i04.jsonl、NOTES.md |
 
 実行（CPU だけ）: `CUDA_VISIBLE_DEVICES= python intervention/i01_small_world.py --seed 0`
