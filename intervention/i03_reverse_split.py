@@ -10,6 +10,9 @@ I1 の分け方は手の規則（文ごとの違いのしきい値、50 文ご�
      1 枚の中（I1 と同じ: 色が 2 つあるのに味は 1 つ。重み = 2 つ目の値を含む文の数）。
      否定に反例の強さを入れる（weighted）: 組ごとの重み = 両側の文の数の小さいほう。重みが --min_ref 以上の反例だけで否定する
      （混ざった 1〜2 文が作る見かけの反例を無視する。支持と多数決はしない: 支持の組は交絡していて、色の支持にはならないため）。
+  5. 見かけの反例の見分け（「全部（読み直し）」）: 1 枚の中の反例を作る 2 つ目の値が、同じ語のほかの板の主な値（観点の明るさの半分以上）なら、
+     その板からの混ざりとして、その反例は使わない（2026-11-04 追加。文ごとの起こりやすさで読み直す形は、混ざった文を学んだ板のほうが
+     起こりやすくなってしまい効かなかった）。
 物差しは I1 と同じ（分かれ方・振り分け・違和感・介入の問い・見たままの問い）。振り分けと違和感は、板の口ごとの明るさで文の起こりやすさを測って行う。
 結果: results/i03.jsonl
 実行: CUDA_VISIBLE_DEVICES= python intervention/i03_reverse_split.py --seed 0
@@ -143,7 +146,7 @@ def port_pairs(B, exclude_word=None):
     return out
 
 
-def inner_pairs(B, exclude_word=None):
+def inner_pairs(B, exclude_word=None, explain=False):
     """1 枚の中（I1 と同じ）: 原因の観点に 2 つの値があり、味は 1 つ。重み = 2 つ目に多い値を含む文の数（反例の強さ）。"""
     out = []
     L = B.light()
@@ -164,6 +167,18 @@ def inner_pairs(B, exclude_word=None):
             if others:
                 continue
             w = float(sorted(cnt.values())[-2])
+            if explain:                                             # 2 つ目の値が、同じ語のほかの板の「主な値」なら、その板からの混ざりとして使わない
+                j2 = sorted(cnt, key=cnt.get)[-2]
+                ids = [SLOT[(v, x)] for x in VIEWS[v]]
+                mixed = False
+                for r2, o in enumerate(B.leaves):
+                    if o is leaf or o.word != leaf.word or not B.known(r2, v, L):
+                        continue
+                    b2 = L[r2, ids] / L[r2, ids].sum()
+                    if b2[ids.index(j2)] >= 0.5:
+                        mixed = True
+                if mixed:
+                    continue
             out.append((leaf.word, {u: (1.0 if u == v else 0.0) for u in I1.CAUSE_VIEWS}, 0.0, "1 枚の中", w))
     return out
 
@@ -172,18 +187,21 @@ def board_pairs(B, exclude_word=None):
     """同じ語の板どうし（I1 の語板どうしと同じ）。重み = 小さいほうの板の文の数。"""
     L = B.light()
     out = []
-    idx = [r for r, w in enumerate(B.word) if w != exclude_word and B.known(r, "味", L) and all(B.known(r, v, L) for v in I1.CAUSE_VIEWS)]
+    need = I1.CAUSE_VIEWS if not LOOSE else ["色"]
+    idx = [r for r, w in enumerate(B.word) if w != exclude_word and B.known(r, "味", L) and all(B.known(r, v, L) for v in need)]
     for i, r1 in enumerate(idx):
         for r2 in idx[i + 1:]:
             if B.word[r1] != B.word[r2]:
                 continue
-            d = {v: 0.5 * np.abs(I1.view_norm(B, r1, v, L) - I1.view_norm(B, r2, v, L)).sum() for v in I1.CAUSE_VIEWS}
+            d = {v: 0.5 * np.abs(I1.view_norm(B, r1, v, L) - I1.view_norm(B, r2, v, L)).sum()
+                 if B.known(r1, v, L) and B.known(r2, v, L) else 0.0 for v in I1.CAUSE_VIEWS}   # 光の届かない観点は差 0 とみなす（--loose）
             dt = 0.5 * np.abs(I1.view_norm(B, r1, "味", L) - I1.view_norm(B, r2, "味", L)).sum()
             out.append((B.word[r1], d, dt, "板どうし", float(min(len(B.leaves[r1].sents), len(B.leaves[r2].sents)))))
     return out
 
 
 MIN_REF = 5.0
+LOOSE = False
 
 
 def effects(P, how):
@@ -211,7 +229,7 @@ def run(a):
         sents = [sorted(SLOT[x] for x in attrs_of(toks, w)) for _, toks in ss]
         leaves += build(w, sents, [s for s, _ in ss], a, log=log)
     B = LeafBoards(leaves)
-    rec = dict(exp="I3", seed=a.seed, n_train_per_sense=a.n_train, min_support=a.min_support, min_ref=a.min_ref, steps=a.steps, n_boards=len(leaves),
+    rec = dict(exp="I3", seed=a.seed, n_train_per_sense=a.n_train, min_support=a.min_support, min_ref=a.min_ref, loose=a.loose, steps=a.steps, n_boards=len(leaves),
                boards=[dict(word=l.word, n=len(l.sents), members=dict(Counter(l.senses))) for l in leaves], split_log=log)
     pure = sum(m.most_common(1)[0][1] for m in B.members)
     rec["purity"] = pure / sum(sum(m.values()) for m in B.members)
@@ -244,13 +262,15 @@ def run(a):
     Q = questions()
     res = {}
     for how in ("deny", "weighted", "corr"):
-        for src in ("板どうし", "板どうし+口どうし", "板どうし+1 枚の中", "全部"):
+        for src in ("板どうし", "板どうし+口どうし", "板どうし+1 枚の中", "全部", "全部（読み直し）"):
+            if src == "全部（読み直し）" and how != "deny":
+                continue
             per = defaultdict(lambda: [0, 0])
             effs = {}
             for q in Q:
                 key = q["word"]
                 if key not in effs:
-                    P = board_pairs(B, key) + (port_pairs(B, key) if src in ("板どうし+口どうし", "全部") else [])                         + (inner_pairs(B, key) if src in ("板どうし+1 枚の中", "全部") else [])
+                    P = board_pairs(B, key) + (port_pairs(B, key) if src in ("板どうし+口どうし", "全部") else [])                         + (inner_pairs(B, key) if src in ("板どうし+1 枚の中", "全部") else [])                         + (port_pairs(B, key) + inner_pairs(B, key, explain=True) if src == "全部（読み直し）" else [])
                     effs[key] = effects(P, how)
                 ans = I1.answer(B, q, effs[key])
                 per[q["kind"]][0] += ans == q["ans"]
@@ -269,13 +289,14 @@ def main():
     ap.add_argument("--n_train", type=int, default=50)
     ap.add_argument("--min_support", type=float, default=3.0, help="口ごとに、観点を含む文がこれ未満なら数えない")
     ap.add_argument("--min_ref", type=float, default=5.0, help="反例として信じる、両側の文の数の下限")
+    ap.add_argument("--loose", type=int, default=0, help="板どうしの組に、色と味だけ分かっている板も使う（ほかの観点の差は 0）")
     ap.add_argument("--steps", type=int, default=800)
     ap.add_argument("--max_depth", type=int, default=3)
     ap.add_argument("--out", default="intervention/results/i03.jsonl")
     a = ap.parse_args()
     torch.set_num_threads(2)
-    global MIN_REF
-    MIN_REF = a.min_ref
+    global MIN_REF, LOOSE
+    MIN_REF, LOOSE = a.min_ref, bool(a.loose)
     rec = run(a)
     print(json.dumps({k: v for k, v in rec.items() if k not in ("boards", "split_log", "pairs")}, ensure_ascii=False))
     os.makedirs(os.path.dirname(a.out), exist_ok=True)

@@ -13,3 +13,8 @@ for mr in 2 3; do
   $P --n_train 10 --min_ref $mr
   $P --n_train 10 --min_support 0 --min_ref $mr
 done
+# 板どうしの組を緩める（色と味だけ分かっていればよい）
+for n in 50 10; do
+  $P --n_train $n --loose 1
+  $P --n_train $n --loose 1 --min_support 0
+done
