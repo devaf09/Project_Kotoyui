@@ -49,6 +49,7 @@ def main():
     ap.add_argument("--n", type=int, default=150)
     ap.add_argument("--empathy", default="1.0,0.2,0.0", help="気持ちの出ていない発言に「〜んですね」を付ける割合（コンマで区切って比べる）")
     ap.add_argument("--light", action="store_true")
+    ap.add_argument("--assemble", default="full", choices=["full", "plain"], help="full = 共感の型 + 選んだ返事 + 質問、plain = 選んだ返事だけ")
     ap.add_argument("--agreement", action="store_true")
     a = ap.parse_args()
     if a.agreement:
@@ -63,7 +64,7 @@ def main():
     if os.path.exists(out):
         for line in open(out, encoding="utf-8"):
             r = json.loads(line)
-            if r.get("version") == kotoyui.__version__ and r.get("light") == a.light and r.get("ai") == a.ai:
+            if r.get("version") == kotoyui.__version__ and r.get("light") == a.light and r.get("ai") == a.ai and r.get("assemble", "full") == a.assemble:
                 done[(r["empathy_plain"], r["prompt"])] = r
 
     def rate(u, reply):
@@ -76,7 +77,7 @@ def main():
         return None, why
     summary = {}
     for v in [float(x) for x in a.empathy.split(",")]:
-        bot = kotoyui.Bot(seed=0, light=a.light, empathy_plain=v, log=lambda *_: None)
+        bot = kotoyui.Bot(seed=0, light=a.light, empathy_plain=v, assemble=a.assemble, log=lambda *_: None)
         scores, emp, t0 = [], 0, time.perf_counter()
         with open(out, "a", encoding="utf-8") as f:
             for u in qs:
@@ -91,7 +92,7 @@ def main():
                 emp += bool(EMPATHY.match(reply))
                 if sc:
                     scores.append(sc)
-                f.write(json.dumps(dict(time=time.strftime("%Y-%m-%dT%H:%M:%S"), version=kotoyui.__version__, empathy_plain=v, light=a.light,
+                f.write(json.dumps(dict(time=time.strftime("%Y-%m-%dT%H:%M:%S"), version=kotoyui.__version__, empathy_plain=v, light=a.light, assemble=a.assemble,
                                         ai=a.ai, prompt=u, reply=reply, confidence=conf, ai_score=sc, ai_reason=why), ensure_ascii=False) + "\n")
         summary[v] = dict(mean=statistics.mean(scores), good=sum(s >= 4 for s in scores) / len(scores), empathy=emp / len(qs), n=len(scores))
         print(f"共感_ふだん {v}: AI の平均 {summary[v]['mean']:.2f}・4 以上 {100 * summary[v]['good']:.0f}%・「〜んですね」付き {100 * summary[v]['empathy']:.0f}%"

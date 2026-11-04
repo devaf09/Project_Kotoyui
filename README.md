@@ -63,6 +63,7 @@ reply, confidence = bot.reply(["犬を飼っているんですが、散歩が大
 | [docs/overview.md](docs/overview.md) | 目標・現状・使っている技術・似た既存技術・既存にない技術（初めての方向け） |
 | [docs/quickstart.md](docs/quickstart.md) | 環境の用意と試し方 |
 | [docs/data_format.md](docs/data_format.md) | データの置き場と形（会話・キャラクタ・時計・作る表・結果） |
+| [docs/grammar_20261104.md](docs/grammar_20261104.md) | 文法・構文をどう処理しているか（2026-11-04 時点、流れの図つき） |
 | [docs/experiments_guide.md](docs/experiments_guide.md) | 実験ごとのやさしい説明 |
 | [NOTES.md](NOTES.md) | 実験ノート（数字の正本） |
 | [docs/kickoff.md](docs/kickoff.md) | 立ち上げのときの設計 |

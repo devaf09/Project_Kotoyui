@@ -675,7 +675,7 @@ FUNC = ("助詞", "助動詞", "補助記号", "接尾辞")
 class Bot:
     """会話の本体。材料の表・遷移グレイン（非公開の置き場に保存）・キャラクタ・時計・対話者をまとめ、reply(history) で返事を返す。"""
 
-    def __init__(self, char=None, user=None, now=None, rebuild=False, log=print, seed=0, light=False, empathy_plain=0.2):
+    def __init__(self, char=None, user=None, now=None, rebuild=False, log=print, seed=0, light=False, empathy_plain=0.2, assemble="full"):
         self.mat, self.tg = load_tables(rebuild, log)
         self.res = load_light_resonance(self.mat, rebuild, log) if light else self.mat   # 次の発言の共鳴: light = 語板の光（実験09）、既定 = 数え上げの PMI
         self.char = Character(char)
@@ -685,7 +685,8 @@ class Bot:
         self.session_new = {}
         self.rng = random.Random(seed)
         self.people = People(self.user.d.get("人物") if self.user else None)     # 人物グレイン（0.4.0）
-        self.empathy_plain = empathy_plain                                       # 気持ちの出ていない発言に「〜んですね」を付ける割合（0.3.0、持ち主の評点で多すぎた）
+        self.empathy_plain = empathy_plain
+        self.assemble = assemble                                                 # full = 共感の型 + 選んだ返事 + 質問、plain = 選んだ返事だけ（比べる用、2026-11-04）                                       # 気持ちの出ていない発言に「〜んですね」を付ける割合（0.3.0、持ち主の評点で多すぎた）
 
     # ---- 共感: 相手の述語を「〜んですね」で返す（バックトラッキング）----
     def last_predicate(self, ts):
@@ -885,7 +886,7 @@ class Bot:
             return sa, 1.0
         feel = any(e in u for e in EMO_F) or problem_score(u) >= 1.0            # 気持ち・困りごとが出ている発言（共感の「〜んですね」が生きる所）
         p_bt = W.get("共感の強さ", 1.0) if feel else W.get("共感の強さ_ふだん", self.empathy_plain)
-        bt = self.backtrack(u, history[:-1]) if self.rng.random() < p_bt else ""
+        bt = self.backtrack(u, history[:-1]) if self.rng.random() < p_bt and self.assemble == "full" else ""
         interest = W.get("課題解決への興味", 0.0)
         if interest > 0 and not isq(u) and problem_score(u) >= 1.0 / interest:
             return bt + self.secretary_offer(u, bt), 1.0
@@ -906,7 +907,7 @@ class Bot:
                 return bt + rq, conf
             parts_.append("（自信がないけど）")
         parts_.append(best)
-        if not isq(best) and len(best) < 30 and self.rng.random() < W.get("質問の多さ", 1.0) * W.get("話題を続ける強さ", 1.0):
+        if self.assemble == "full" and not isq(best) and len(best) < 30 and self.rng.random() < W.get("質問の多さ", 1.0) * W.get("話題を続ける強さ", 1.0):
             rq = self.related_question(u, history + [best])
             if rq:
                 parts_.append(rq)
