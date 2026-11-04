@@ -24,7 +24,7 @@ class Ollama:
 
     def _post(self, messages, temperature=0.7, max_tokens=256):
         # max_tokens: 長さの上限。思考モデルは think=False でも考え続けて止まらないことがある（2026-11-04、1 問で 1 万語を超えた）ので必ず切る
-        if not self.think and "qwen3" in self.model.lower():
+        if not self.think and "qwen3" in self.model.lower() and "instruct" not in self.model.lower():   # 考えない版（instruct）はそのままで良い
             return self._raw_nothink(messages, temperature, max_tokens)
         body = dict(model=self.model, messages=messages, stream=False, think=self.think, options=dict(temperature=temperature, num_predict=max_tokens))
         req = urllib.request.Request(self.host + "/api/chat", data=json.dumps(body).encode("utf-8"), headers={"Content-Type": "application/json"})
