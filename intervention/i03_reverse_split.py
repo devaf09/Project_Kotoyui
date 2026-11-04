@@ -260,7 +260,7 @@ def run(a):
     rec["anomaly_auroc"] = auroc(pos, neg)
     # 問い
     Q = questions()
-    res = {}
+    res, items = {}, {}
     for how in ("deny", "weighted", "corr"):
         for src in ("板どうし", "板どうし+口どうし", "板どうし+1 枚の中", "全部", "全部（読み直し）"):
             if src == "全部（読み直し）" and how != "deny":
@@ -275,8 +275,11 @@ def run(a):
                 ans = I1.answer(B, q, effs[key])
                 per[q["kind"]][0] += ans == q["ans"]
                 per[q["kind"]][1] += 1
+                if (how, src) in (("deny", "全部（読み直し）"), ("corr", "全部")):
+                    items.setdefault(how, []).append(bool(ans == q["ans"]))
             res[f"{how}|{src}"] = {k: v[0] / v[1] for k, v in per.items()}
     rec["qa"] = res
+    rec["qa_items"] = dict(kind=[q["kind"] for q in Q], **items)
     rec["pairs"] = [(w, {k: round(float(x), 2) for k, x in d.items()}, round(float(dt), 2), s, round(w_, 1))
                     for w, d, dt, s, w_ in board_pairs(B) + port_pairs(B) + inner_pairs(B)]
     rec["total_s"] = time.perf_counter() - t0
