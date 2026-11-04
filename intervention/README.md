@@ -37,5 +37,6 @@
 | I5 | 反例の文を固定し、ほかの語だけを増やす（知見が語の数に比例するか） | i05_more_words.py、sweeps/i05.sh | results/i05.jsonl、NOTES.md |
 | I6 | 否定の見直し・最小二乗と、熟しても味の変わらないウメ型を混ぜる | i06_revise.py、sweeps/i06.sh | results/i06.jsonl、NOTES.md |
 | I7 | 経験の器: 前提が崩れた場面を覚え、新しい世界で思い出して否定や「たぶん」を返す | i07_experience.py、sweeps/i07.sh | results/i07.jsonl、NOTES.md |
+| I8 | 判断（原因か・分けるか）を経験の器に 1 回通す光の判断に置き換える | i08_light_judge.py、sweeps/i08.sh | results/i08.jsonl、NOTES.md |
 
 実行（CPU だけ）: `CUDA_VISIBLE_DEVICES= python intervention/i01_small_world.py --seed 0`
