@@ -95,13 +95,23 @@ I3.judge = judge_hook
 
 
 class Memory:
-    def __init__(self, eps, seed, M=8, steps=1000, restarts=3):
+    def __init__(self, eps, seed, M=8, steps=1000, restarts=3, how="mix"):
+        """how: mix = 口を隠したまま学ぶ（I8）、balanced = 結論の種類ごとの数をそろえて学ぶ（多い種類の重みを下げる）、
+        labeled = 結論の種類ごとに口を 1 つ決め、その口にその種類の経験だけを学ばせる（口ごとに 1 種類ずつ学んでから融合。I8b）。"""
         self.vocab = sorted({t for e in eps for t in e})
         self.idx = {t: i for i, t in enumerate(self.vocab)}
         X = torch.zeros(len(eps), len(self.vocab))
         for i, e in enumerate(eps):
             for t in e:
                 X[i, self.idx[t]] = 1
+        lab = [next(t for t in e if t.startswith("結論:")) for e in eps]
+        cnt = Counter(lab)
+        wt = torch.tensor([1.0 / cnt[l] for l in lab]) if how != "mix" else torch.ones(len(eps))
+        wt = wt / wt.sum() * len(eps)
+        labels = sorted(cnt)
+        if how == "labeled":
+            M = len(labels)
+            port_of = torch.tensor([labels.index(l) for l in lab])
         best = None
         for r in range(restarts):                                   # I7 の「口に分かれず混ざる」対策: 数回学んで、起こりやすさの最も高いものを使う
             torch.manual_seed(seed * 10 + r)
@@ -109,7 +119,11 @@ class Memory:
             opt = torch.optim.Adam(dev.parameters(), lr=0.02)
             for _ in range(steps):
                 W = dev.forward_field(dev.ports).abs()[:, VAL0:VAL0 + len(self.vocab)] ** 2
-                loss = -(torch.logsumexp(X @ torch.log(W + 1e-9).T, 1) - math.log(M)).mean()
+                ll = X @ torch.log(W + 1e-9).T
+                if how == "labeled":
+                    loss = -(ll[torch.arange(len(eps)), port_of] * wt).mean()
+                else:
+                    loss = -((torch.logsumexp(ll, 1) - math.log(M)) * wt).mean()
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
@@ -187,13 +201,21 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--KB", type=int, default=12)
     ap.add_argument("--out", default="intervention/results/i08.jsonl")
+    ap.add_argument("--mem", default="mix", choices=["mix", "balanced", "labeled"])
+    ap.add_argument("--skip_rule", type=int, default=0)
+    ap.add_argument("--cache", default="intervention/results/i08_episodes_s{seed}.json", help="集めた経験を保存・再利用する")
     a = ap.parse_args()
     global MEM, SPLIT_LOG
     torch.set_num_threads(2)
     I3.MIN_REF, I3.LOOSE = 5.0, True
     t0 = time.perf_counter()
-    eps = collect(a.seed)
-    mem = Memory(eps, a.seed)
+    cache = a.cache.format(seed=a.seed)
+    if os.path.exists(cache):
+        eps = json.load(open(cache, encoding="utf-8"))
+    else:
+        eps = collect(a.seed)
+        json.dump(eps, open(cache, "w", encoding="utf-8"), ensure_ascii=False)
+    mem = Memory(eps, a.seed, how=a.mem)
     kinds = Counter(" ".join(t for t in e if t.startswith(("観点:", "競合:"))) or "?" for e in eps)
     t_mem = time.perf_counter() - t0
     for PB in (0, 2):
@@ -202,10 +224,10 @@ def main():
             S = fruits(NAMES[12:12 + a.KB], rng)
             S.update(plums(PLUMS[2:2 + PB], rng))
             qwords = NAMES[12:12 + a.KB] + PLUMS[2:2 + PB]
-            rec = dict(exp="I8", seed=a.seed, KB=a.KB, PB=PB, nB=nB, n_episodes=len(eps), episode_kinds=dict(kinds), mem_loss=mem.loss,
+            rec = dict(exp="I8", mem=a.mem, seed=a.seed, KB=a.KB, PB=PB, nB=nB, n_episodes=len(eps), episode_kinds=dict(kinds), mem_loss=mem.loss,
                        ports=mem.ports_summary())
             Q = None
-            for mode in ("rule", "light"):
+            for mode in (("light",) if a.skip_rule else ("rule", "light")):
                 MEM = mem if mode == "light" else None
                 SPLIT_LOG = []
                 mem.n_pass = 0
