@@ -10,6 +10,8 @@ I1 の分け方は手の規則（文ごとの違いのしきい値、50 文ご�
      1 枚の中（I1 と同じ: 色が 2 つあるのに味は 1 つ。重み = 2 つ目の値を含む文の数）。
      否定に反例の強さを入れる（weighted）: 組ごとの重み = 両側の文の数の小さいほう。重みが --min_ref 以上の反例だけで否定する
      （混ざった 1〜2 文が作る見かけの反例を無視する。支持と多数決はしない: 支持の組は交絡していて、色の支持にはならないため）。
+  6. 原因の効き目の出し方（2026-11-04 追加、I6）: lsq = 最小二乗（交絡を説明し尽くしで外す）、revise = 否定の見直し
+     （否定した観点を、支持の割合の高い順に見て、その観点でしか説明できない支持の組が反例の組より多ければ否定を取り消す）。
   5. 見かけの反例の見分け（「全部（読み直し）」）: 1 枚の中の反例を作る 2 つ目の値が、同じ語のほかの板の主な値（観点の明るさの半分以上）なら、
      その板からの混ざりとして、その反例は使わない（2026-11-04 追加。文ごとの起こりやすさで読み直す形は、混ざった文を学んだ板のほうが
      起こりやすくなってしまい効かなかった）。
@@ -209,6 +211,27 @@ def effects(P, how):
         return {v: 1.0 for v in I1.CAUSE_VIEWS}
     if not P:
         return {v: 0.0 for v in I1.CAUSE_VIEWS}
+    if how == "lsq":                                                # 最小二乗（Sin3 実験63 と同じ）: 味の差 ≈ Σ 効き目 × 観点の差。説明し尽くしで交絡を外す
+        X = np.array([[d[v] for v in I1.CAUSE_VIEWS] for _, d, _, _, _ in P])
+        y = np.array([dt for _, _, dt, _, _ in P])
+        co = np.linalg.lstsq(X, y, rcond=None)[0]
+        return {v: float(np.clip(co[i], 0, 1)) for i, v in enumerate(I1.CAUSE_VIEWS)}
+    if how == "revise":                                             # 否定の見直し: まず否定し、否定した観点を「支持 / (支持 + 反例)」の高い順に見直す。
+        e = effects(P, "deny")                                      # 観点 v でしか説明できない支持の組（いま認めている観点では説明できない、味の変わった組）が
+        cand = []                                                   # 反例の組より多ければ、否定を取り消す（効き目 = 支持 / (支持 + 反例)）。順に見るのは、
+        for v in I1.CAUSE_VIEWS:                                    # 色と熟し具合のように一緒に変わる観点で、両方を取り消さないため（説明し尽くし）。
+            if e[v] > 0:
+                continue
+            sup = sum(1 for _, d, dt, _, _ in P if d[v] >= 0.5 and dt >= 0.5)
+            ref = sum(1 for _, d, dt, _, _ in P if d[v] >= 0.5 and dt < 0.2)
+            if sup:
+                cand.append((sup / (sup + ref), v, ref))
+        for ratio, v, ref in sorted(cand, reverse=True):
+            only = sum(1 for _, d, dt, _, _ in P if d[v] >= 0.5 and dt >= 0.5
+                       and not any(e[u] > 0 and d[u] >= 0.5 for u in I1.CAUSE_VIEWS if u != v))
+            if only > ref:
+                e[v] = ratio
+        return e
     e = {}
     for v in I1.CAUSE_VIEWS:
         ref = [w for _, d, dt, _, w in P if d[v] >= 0.5 and dt < 0.2]
@@ -261,9 +284,11 @@ def run(a):
     # 問い
     Q = questions()
     res, items = {}, {}
-    for how in ("deny", "weighted", "corr"):
+    for how in ("deny", "weighted", "corr", "lsq", "revise"):
         for src in ("板どうし", "板どうし+口どうし", "板どうし+1 枚の中", "全部", "全部（読み直し）"):
-            if src == "全部（読み直し）" and how != "deny":
+            if how in ("lsq", "revise") and src != "全部（読み直し）":
+                continue
+            if how in ("weighted", "corr") and src == "全部（読み直し）":
                 continue
             per = defaultdict(lambda: [0, 0])
             effs = {}
@@ -275,7 +300,7 @@ def run(a):
                 ans = I1.answer(B, q, effs[key])
                 per[q["kind"]][0] += ans == q["ans"]
                 per[q["kind"]][1] += 1
-                if (how, src) in (("deny", "全部（読み直し）"), ("corr", "全部")):
+                if (how, src) in (("deny", "全部（読み直し）"), ("corr", "全部"), ("lsq", "全部（読み直し）"), ("revise", "全部（読み直し）")):
                     items.setdefault(how, []).append(bool(ans == q["ans"]))
             res[f"{how}|{src}"] = {k: v[0] / v[1] for k, v in per.items()}
     rec["qa"] = res

@@ -35,5 +35,7 @@
 | I3 | 分け方を逆からの判断（口 2 つ・競合する観点）に置き換え、否定に反例の強さを入れる | i03_reverse_split.py、sweeps/i03.sh | results/i03.jsonl、NOTES.md |
 | I4 | 文の数と世界の大きさに対して、答えられる問いがどう増えるか | i04_scale.py、sweeps/i04.sh | results/i04.jsonl、NOTES.md |
 | I5 | 反例の文を固定し、ほかの語だけを増やす（知見が語の数に比例するか） | i05_more_words.py、sweeps/i05.sh | results/i05.jsonl、NOTES.md |
+| I6 | 否定の見直し・最小二乗と、熟しても味の変わらないウメ型を混ぜる | i06_revise.py、sweeps/i06.sh | results/i06.jsonl、NOTES.md |
+| I7 | 経験の器: 前提が崩れた場面を覚え、新しい世界で思い出して否定や「たぶん」を返す | i07_experience.py、sweeps/i07.sh | results/i07.jsonl、NOTES.md |
 
 実行（CPU だけ）: `CUDA_VISIBLE_DEVICES= python intervention/i01_small_world.py --seed 0`
