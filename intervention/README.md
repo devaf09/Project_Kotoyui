@@ -31,5 +31,6 @@
 | 番号 | 内容 | プログラム | 結果 |
 |---|---|---|---|
 | I1 | 小さな世界（5 語・9 つの意味）で、分ける・違和感・介入の問い | i01_small_world.py、sweeps/i01.sh | results/i01.jsonl、NOTES.md |
+| I2 | 境目の分からない 2 つの物を融合した語板に、属性を 1 つずつ逆から入れて分離を調べる | i02_reverse.py | results/i02.jsonl、NOTES.md |
 
 実行（CPU だけ）: `CUDA_VISIBLE_DEVICES= python intervention/i01_small_world.py --seed 0`
