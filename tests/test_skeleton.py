@@ -76,3 +76,26 @@ def test_light_resonance_learns_a_small_table():
     for (x, y), p in Mat.pmis.items():
         assert abs(lr.lift(x)[y] - p) < 0.1
     assert lr.resonance({"雨"}, {"傘"}) > lr.resonance({"雨"}, {"散歩"}) > lr.resonance({"雨"}, {"かわいい"}) == 0.0
+
+
+def test_people_grain_tracks_third_persons():
+    """人物グレイン（0.4.0）: 話に出た相手の身内を覚え、第三者の話の手がかりがあれば、いちばん最近の第三者を指す。"""
+    pp = kotoyui.People()
+    assert pp.update("うちの母がガーデニングが好きで") == ["母"]
+    e = pp.p["母"]
+    assert e["身内"] == "相手" and e["続柄"] == "母" and "ガーデニング" in e["好きなこと"]
+    pp.update("そうなんですね")
+    pp.update("田中さんにも会ったよ")
+    assert pp.referent("来週旅行に行くらしいです") == "田中さん"          # いちばん最近の第三者
+    assert pp.referent("昨日は何を食べましたか？") == "自分"
+    assert pp.referent("昨日はカレーを食べました") == "相手"
+    saved = pp.to_dict()
+    assert "母" in saved and saved["母"]["身内"] == "相手"
+
+
+def test_people_grain_honorific_kin_is_not_a_name():
+    """「素敵なお母さま」は名前（母さま）ではなく、続柄の 母 として数える。"""
+    pp = kotoyui.People()
+    pp.update("うちの母が", "相手")
+    pp.update("素敵なお母さまですね", "自分")
+    assert "母さま" not in pp.p and pp.p["母"]["回数"] == 2

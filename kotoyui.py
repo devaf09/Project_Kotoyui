@@ -21,12 +21,17 @@ SN2-Parts-2D（2 次元の SinWave の部品集）の光の部品（vendor/sn2_p
         話題の切り替わり: 前の話題とのつながりが弱ければ、前の話題を切る
         キャラクタ（プロフィール + 人格グレイン）: 自己紹介・自分についての答え、返事の選び方の重み
         対話者グレイン: 話し相手の名前・好き・予定・困りごとを覚える（非公開の置き場だけに保存）
+        人物グレイン（0.4.0）: 会話に出た第三者（〜さん・家族・友達…）を、誰の身内か・好きなこと・最後に出た番で覚える
         時計グレイン: いまの時間帯・季節で、あいさつと季節外れの話題を整える
         口調（光の 2DWIG で置き換えていく所）: 返事の候補が丁寧か、くだけているか
         2DWIG・2DTG（光）: 実験01〜05 で確かめた光の部品（textlight.py）。選び方の点に順に入れる
     指揮役（光の外の手順）: 共感（「〜んですね」）→ 内容（候補を 10 通りの重みで選んだ票）→ 質問（話題を続ける）。課題がありそうなら秘書の型で返す
 
 変更履歴（新しい版が上。改良したらここ・__version__・README の版・tests/ を一緒に更新する）
+    0.4.0 (2026-11-04)  人物グレイン（People）: 会話に出た人（名前 +さん、家族・友達などの続柄）を、誰の身内か・好きなこと・最後に出た番で覚え、
+                        「〜らしい・〜って言ってた」など第三者の話の手がかりがあれば、いちばん最近の第三者を指していると見る（referent）。
+                        話し相手の身内は対話者グレインと一緒に保存し、次に話すとき「お母さんはお元気ですか？」と聞く。
+                        主語を隠して人称を当てる実験19〜21 で、発言 1 つの手がかりでは誰の話かが 55% ほどしか決まらなかったため、会話を通して人を追う。
     0.3.0 (2026-11-03)  共感の「〜んですね」を、気持ち・困りごとが出ている発言にだけ付ける（ほかは 2 割。Bot(empathy_plain=…)、人格の重み「共感の強さ_ふだん」）。
                         持ち主の評点で「〜んですね」が多すぎて不自然だったため。ローカル AI の評点で比べた（tools/eval_ai.py）。
                         会話コンソール（tools/console.py）・ローカル AI の接続（tools/ollama_client.py）。
@@ -55,7 +60,7 @@ import time
 import zlib
 from collections import Counter, defaultdict
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PARTS_FILE = os.path.join(ROOT, "vendor", "sn2_parts_2d_v0_11_0.py")
@@ -540,6 +545,10 @@ class Interlocutor:
             s += f"前に「{d['予定'][-1]['内容']}」とおっしゃっていましたが、どうでしたか？"
         elif d["好きなこと"]:
             s += f"最近も{d['好きなこと'][-1]}は楽しんでいますか？"
+        else:
+            kin = [n for n, e in d.get("人物", {}).items() if e.get("身内") == "相手" and e.get("続柄")]
+            if kin:                                                              # 人物グレイン: 前に話に出た相手の身内
+                s += f"{kin[0]}はお元気ですか？"
         return s
 
     def save(self, n_turns):
@@ -551,6 +560,70 @@ class Interlocutor:
             self.d[k] = self.d[k][-20:]
         self.d["話題"] = dict(sorted(self.d["話題"].items(), key=lambda kv: -kv[1])[:100])
         json.dump(self.d, open(self.path, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
+
+KIN = ("母", "父", "お母さん", "お父さん", "母親", "父親", "妻", "夫", "嫁", "旦那", "息子", "娘", "子供", "子ども", "兄", "姉", "弟", "妹",
+       "祖母", "祖父", "おばあちゃん", "おじいちゃん", "彼氏", "彼女", "友達", "友人", "上司", "先輩", "後輩", "同僚", "部下", "先生", "主人", "家族")
+PERSON_NAME = re.compile(r"([一-龥ァ-ヶー]{1,6}|[ぁ-ん]{2,4})(さん|様|さま|くん|ちゃん|先生|先輩)")
+OWNER = re.compile(r"(私|僕|俺|わたし|うち|自分)の$|うちの$")
+THIRD_CUE = re.compile(r"たが[っるり]|そうだ|そうです|らしい|みたい|と言って|って言って|んだって|って(さ|よ)")
+
+
+class People:
+    """人物グレイン（持ち主の計画 (2)、2026-11-04）: 会話に出てきた人を並べて持つ。話し手（相手）・自分（ことゆい）のほかに、
+    話題になった第三者（名前 +さん、家族・友達・上司などの続柄）を、呼び方・続柄・誰の身内か・好きなこと・最後に出た番・出た回数で覚える。
+    主語の省かれた発言が第三者の話らしいとき（〜らしい・〜って言ってた…、実験19 の手がかり）、いちばん最近の第三者を指していると見る。
+    いまはデジタルの表（実験19〜21 で、発言 1 つの手がかりでは誰の話かが 55% ほどしか決まらないと分かったので、会話を通して人を追う）。
+    話し相手の身内は、対話者グレイン（users/）に一緒に保存して、次に話すときに使う。"""
+
+    def __init__(self, saved=None):
+        self.p = {k: dict(v) for k, v in (saved or {}).items()}               # 呼び方 → {続柄, 身内, 好きなこと, 最後, 回数}
+        self.turn = 0
+
+    def update(self, u, speaker="相手"):
+        """発言 1 つから人を拾う。speaker は発言した側（"相手" か "自分"）。拾った呼び方のリストを返す。"""
+        self.turn += 1
+        found = []
+        for m in PERSON_NAME.finditer(u):
+            if m.group(1) in ("皆", "みな", "お客", "お兄", "お姉") or m.group(1) in KIN or u[max(0, m.start() - 1):m.start()] == "お":
+                continue                                                         # 「お母さま」「先生さん」などは続柄の方で拾う
+            found.append((m.group(0), None, m.start()))
+        for k in sorted(KIN, key=len, reverse=True):
+            for m in re.finditer(re.escape(k), u):
+                if any(s <= m.start() < s + len(n) for n, _, s in found):     # 長い呼び方の一部（お母さん の 母）は数えない
+                    continue
+                found.append((k, k, m.start()))
+        out = []
+        for name, kin, pos in found:
+            e = self.p.setdefault(name, dict(続柄=kin, 身内=None, 好きなこと=[], 最後=0, 回数=0))
+            if OWNER.search(u[:pos]) or (kin and u[max(0, pos - 3):pos] in ("うちの", "私の", "僕の", "俺の")):
+                e["身内"] = "相手" if speaker == "相手" else "自分"
+            mm = re.match(r"(?:は|が|も)?[^。！？]{0,6}?([一-龥ァ-ヶーa-zA-Zぁ-ん]{2,10}?)(?:が好き|にはまって|が趣味)", u[pos + len(name):])
+            if mm and mm.group(1) not in e["好きなこと"]:
+                e["好きなこと"].append(mm.group(1))
+            e["最後"], e["回数"] = self.turn, e["回数"] + 1
+            out.append(name)
+        return out
+
+    def recent(self, within=4):
+        """いちばん最近に出た第三者の呼び方（within 番より前なら None）。"""
+        live = [(e["最後"], n) for n, e in self.p.items() if self.turn - e["最後"] < within]
+        return max(live)[1] if live else None
+
+    def referent(self, u):
+        """主語の省かれた発言が誰の話か: "相手"（話し相手）・"自分"（ことゆい）・第三者の呼び方。"""
+        if THIRD_CUE.search(u):
+            r = self.recent()
+            if r:
+                return r
+        if re.search(r"(か[？?。]?|の[？?]|[？?])$", u.strip()):
+            return "自分"                                                    # 問いは、聞かれた側（ことゆい）の話
+        return "相手"
+
+    def to_dict(self, keep=30):
+        """保存用（話し相手の身内と、よく出た人だけ）。"""
+        top = sorted(self.p.items(), key=lambda kv: (kv[1]["身内"] == "相手", kv[1]["回数"]), reverse=True)[:keep]
+        return {k: dict(v, 最後=0) for k, v in top}
 
 
 PROB_EMO = ("大変", "困", "つら", "辛", "疲れ", "忙し", "悩", "心配", "不安", "面倒", "無理", "ヤバ", "やば", "焦")
@@ -608,6 +681,7 @@ class Bot:
         self.user_name = self.user.d.get("名前") if self.user else None
         self.session_new = {}
         self.rng = random.Random(seed)
+        self.people = People(self.user.d.get("人物") if self.user else None)     # 人物グレイン（0.4.0）
         self.empathy_plain = empathy_plain                                       # 気持ちの出ていない発言に「〜んですね」を付ける割合（0.3.0、持ち主の評点で多すぎた）
 
     # ---- 共感: 相手の述語を「〜んですね」で返す（バックトラッキング）----
@@ -778,7 +852,15 @@ class Bot:
         return "どんなところが一番大変ですか？ 何かお手伝いできることがあれば言ってくださいね。"
 
     def reply(self, history):
-        """相手の発言までの会話（古い順）→ (返事, 自信)。"""
+        """相手の発言までの会話（古い順）→ (返事, 自信)。人物グレインに、相手の発言と自分の返事に出た人を足す。"""
+        self.people.update(history[-1], "相手")
+        out, conf = self._reply(history)
+        self.people.update(out, "自分")
+        if self.user:
+            self.user.d["人物"] = self.people.to_dict()
+        return out, conf
+
+    def _reply(self, history):
         W = self.char.w
         u = history[-1]
         if self.user:
