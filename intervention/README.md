@@ -40,6 +40,7 @@
 | I8 | 判断（原因か・分けるか）を経験の器に 1 回通す光の判断に置き換える | i08_light_judge.py、sweeps/i08.sh | results/i08.jsonl、NOTES.md |
 | I8b | 器が混ざる問題: 口ごとに 1 種類ずつ学んでから融合する | i08_light_judge.py --mem、sweeps/i08b.sh | results/i08b.jsonl、NOTES.md |
 | I9 | 経験の結論を「答えが合ったか」（採点）で付ける | i09_feedback.py、sweeps/i09.sh | results/i09.jsonl、NOTES.md |
+| I10 | 属性の向き（親子）: 知らない品種を親（科）から確率つきで想定する | i10_hierarchy.py、sweeps/i10.sh | results/i10.jsonl、NOTES.md |
 
 仕組みの図: images/mech_1_board.png（語板と口）、mech_2_experience.png（経験の作り方）、mech_3_judge.png（判断のときの光の通し方）。
 
