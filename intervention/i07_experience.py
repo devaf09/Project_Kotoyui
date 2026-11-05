@@ -225,7 +225,7 @@ def main():
     ap.add_argument("--KB", type=int, default=6)
     ap.add_argument("--nA", type=int, default=50)
     ap.add_argument("--nB", type=int, default=10)
-    ap.add_argument("--out", default="intervention/results/i07.jsonl")
+    ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i07.jsonl")
     a = ap.parse_args()
     torch.set_num_threads(2)
     I3.MIN_REF, I3.LOOSE = 5.0, True

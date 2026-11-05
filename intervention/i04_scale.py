@@ -74,7 +74,7 @@ def main():
     ap.add_argument("--world", default="small", choices=["small", "large"])
     ap.add_argument("--n_train", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--out", default="intervention/results/i04.jsonl")
+    ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i04.jsonl")
     a = ap.parse_args()
     use_world(a.world)
     I3.MIN_REF, I3.LOOSE = 5.0, True

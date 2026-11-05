@@ -26,22 +26,28 @@
 | 見たままの問い | 「緑のトマトは渋い？」 |
 | 比べる相手 | 同じ文で学んだ GRU・小さなトランスフォーマー。問いと答えの例を足した場合も |
 
+## 記録の置き場
+
+記録（NOTES.md）・図・結果（results/）は公開しない（持ち主 2026-11-05）。プログラムの既定の出力先は `../Project_Kotoyui_private/intervention/`（リポジトリの外）。
+図のプログラムは環境変数 `KOTOYUI_PRIVATE_INTERVENTION` で置き場を変えられる。
+
 ## 実験
 
 | 番号 | 内容 | プログラム | 結果 |
 |---|---|---|---|
-| I1 | 小さな世界（5 語・9 つの意味）で、分ける・違和感・介入の問い | i01_small_world.py、sweeps/i01.sh | results/i01.jsonl、NOTES.md |
-| I2 | 境目の分からない 2 つの物を融合した語板に、属性を 1 つずつ逆から入れて分離を調べる | i02_reverse.py | results/i02.jsonl、NOTES.md |
-| I3 | 分け方を逆からの判断（口 2 つ・競合する観点）に置き換え、否定に反例の強さを入れる | i03_reverse_split.py、sweeps/i03.sh | results/i03.jsonl、NOTES.md |
-| I4 | 文の数と世界の大きさに対して、答えられる問いがどう増えるか | i04_scale.py、sweeps/i04.sh | results/i04.jsonl、NOTES.md |
-| I5 | 反例の文を固定し、ほかの語だけを増やす（知見が語の数に比例するか） | i05_more_words.py、sweeps/i05.sh | results/i05.jsonl、NOTES.md |
-| I6 | 否定の見直し・最小二乗と、熟しても味の変わらないウメ型を混ぜる | i06_revise.py、sweeps/i06.sh | results/i06.jsonl、NOTES.md |
-| I7 | 経験の器: 前提が崩れた場面を覚え、新しい世界で思い出して否定や「たぶん」を返す | i07_experience.py、sweeps/i07.sh | results/i07.jsonl、NOTES.md |
-| I8 | 判断（原因か・分けるか）を経験の器に 1 回通す光の判断に置き換える | i08_light_judge.py、sweeps/i08.sh | results/i08.jsonl、NOTES.md |
-| I8b | 器が混ざる問題: 口ごとに 1 種類ずつ学んでから融合する | i08_light_judge.py --mem、sweeps/i08b.sh | results/i08b.jsonl、NOTES.md |
-| I9 | 経験の結論を「答えが合ったか」（採点）で付ける | i09_feedback.py、sweeps/i09.sh | results/i09.jsonl、NOTES.md |
-| I10 | 属性の向き（親子）: 知らない品種を親（科）から確率つきで想定する | i10_hierarchy.py、sweeps/i10.sh | results/i10.jsonl、NOTES.md |
+| I1 | 小さな世界（5 語・9 つの意味）で、分ける・違和感・介入の問い | i01_small_world.py、sweeps/i01.sh | （非公開） |
+| I2 | 境目の分からない 2 つの物を融合した語板に、属性を 1 つずつ逆から入れて分離を調べる | i02_reverse.py | （非公開） |
+| I3 | 分け方を逆からの判断（口 2 つ・競合する観点）に置き換え、否定に反例の強さを入れる | i03_reverse_split.py、sweeps/i03.sh | （非公開） |
+| I4 | 文の数と世界の大きさに対して、答えられる問いがどう増えるか | i04_scale.py、sweeps/i04.sh | （非公開） |
+| I5 | 反例の文を固定し、ほかの語だけを増やす（知見が語の数に比例するか） | i05_more_words.py、sweeps/i05.sh | （非公開） |
+| I6 | 否定の見直し・最小二乗と、熟しても味の変わらないウメ型を混ぜる | i06_revise.py、sweeps/i06.sh | （非公開） |
+| I7 | 経験の器: 前提が崩れた場面を覚え、新しい世界で思い出して否定や「たぶん」を返す | i07_experience.py、sweeps/i07.sh | （非公開） |
+| I8 | 判断（原因か・分けるか）を経験の器に 1 回通す光の判断に置き換える | i08_light_judge.py、sweeps/i08.sh | （非公開） |
+| I8b | 器が混ざる問題: 口ごとに 1 種類ずつ学んでから融合する | i08_light_judge.py --mem、sweeps/i08b.sh | （非公開） |
+| I9 | 経験の結論を「答えが合ったか」（採点）で付ける | i09_feedback.py、sweeps/i09.sh | （非公開） |
+| I10 | 属性の向き（親子）: 知らない品種を親（科）から確率つきで想定する | i10_hierarchy.py、sweeps/i10.sh | （非公開） |
+| I11 | 確率に経験の量を入れ、言い方（きっと・たぶん・わからない）と正解率を合わせる | i11_calibrate.py、sweeps/i11.sh | （非公開） |
 
-仕組みの図: images/mech_1_board.png（語板と口）、mech_2_experience.png（経験の作り方）、mech_3_judge.png（判断のときの光の通し方）。
+仕組みの図は tools_fig_mechanism.py で作る（出力は非公開の置き場）。
 
 実行（CPU だけ）: `CUDA_VISIBLE_DEVICES= python intervention/i01_small_world.py --seed 0`

@@ -201,10 +201,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--KB", type=int, default=12)
-    ap.add_argument("--out", default="intervention/results/i08.jsonl")
+    ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i08.jsonl")
     ap.add_argument("--mem", default="mix", choices=["mix", "balanced", "labeled"])
     ap.add_argument("--skip_rule", type=int, default=0)
-    ap.add_argument("--cache", default="intervention/results/i08_episodes_s{seed}.json", help="集めた経験を保存・再利用する")
+    ap.add_argument("--cache", default="../Project_Kotoyui_private/intervention/results/i08_episodes_s{seed}.json", help="集めた経験を保存・再利用する")
     a = ap.parse_args()
     global MEM, SPLIT_LOG
     torch.set_num_threads(2)

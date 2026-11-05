@@ -3,6 +3,6 @@
 s=$1
 export CUDA_VISIBLE_DEVICES=
 for n in 50 10; do
-  python intervention/i03_reverse_split.py --seed $s --n_train $n --loose 1 --min_support 0 --out intervention/results/i03_fresh.jsonl
-  python intervention/i01_small_world.py --seed $s --n_train $n --baselines 0 --out intervention/results/i01_fresh.jsonl
+  python intervention/i03_reverse_split.py --seed $s --n_train $n --loose 1 --min_support 0 --out ../Project_Kotoyui_private/intervention/results/i03_fresh.jsonl
+  python intervention/i01_small_world.py --seed $s --n_train $n --baselines 0 --out ../Project_Kotoyui_private/intervention/results/i01_fresh.jsonl
 done

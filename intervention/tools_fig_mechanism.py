@@ -1,4 +1,4 @@
-"""仕組みの図（intervention/images/mech_*.png）: 語板と口・逆から入れる／経験の作り方／判断のときの光の通し方
+"""仕組みの図（非公開の置き場の images/mech_*.png）: 語板と口・逆から入れる／経験の作り方／判断のときの光の通し方
 
 実行: python intervention/tools_fig_mechanism.py
 """
@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+PRIV = os.environ.get("KOTOYUI_PRIVATE_INTERVENTION", os.path.join(HERE, "..", "..", "Project_Kotoyui_private", "intervention"))   # 記録・図・結果は非公開の置き場（持ち主 2026-11-05）
 plt.rcParams["font.family"] = ["Yu Gothic", "MS Gothic", "Meiryo", "sans-serif"]
 INK, INK2, MUTED = "#0b0b0b", "#52514e", "#8a8984"
 BLUE, ORANGE, AQUA, YELLOW, VIOLET = "#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#6250d6"
@@ -138,8 +139,8 @@ def fig_judge():
 
 
 def save(fig, name):
-    os.makedirs(os.path.join(HERE, "images"), exist_ok=True)
-    out = os.path.join(HERE, "images", name)
+    os.makedirs(os.path.join(PRIV, "images"), exist_ok=True)
+    out = os.path.join(PRIV, "images", name)
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(out)

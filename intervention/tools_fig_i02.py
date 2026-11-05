@@ -1,6 +1,6 @@
-"""実験I2 の図: 融合した語板（口 2 つ）に属性を 1 つずつ逆から入れ、口 A に戻る光の割合を並べる（intervention/images/i02_reverse.png）
+"""実験I2 の図: 融合した語板（口 2 つ）に属性を 1 つずつ逆から入れ、口 A に戻る光の割合を並べる（非公開の置き場の images/i02_reverse.png）
 
-intervention/results/i02.jsonl の seed 0、学び方 mix・口 2 つの行から。棒の色 = 正解（片方の物だけの属性 / 共通の属性）。濃い部分 = 口 A に戻る割合、薄い部分 = 口 B。
+非公開の置き場の results/i02.jsonl の seed 0、学び方 mix・口 2 つの行から。棒の色 = 正解（片方の物だけの属性 / 共通の属性）。濃い部分 = 口 A に戻る割合、薄い部分 = 口 B。
 実行: python intervention/tools_fig_i02.py
 """
 from __future__ import annotations
@@ -13,13 +13,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+PRIV = os.environ.get("KOTOYUI_PRIVATE_INTERVENTION", os.path.join(HERE, "..", "..", "Project_Kotoyui_private", "intervention"))   # 記録・図・結果は非公開の置き場（持ち主 2026-11-05）
 plt.rcParams["font.family"] = ["Yu Gothic", "MS Gothic", "Meiryo", "sans-serif"]
 PICK = ["リンゴ: 果物 + 人", "トマト: 完熟 + 未熟", "比べ: リンゴ/果物を半分ずつ（赤と緑がある）", "比べ: トマト/完熟を半分ずつ"]
 COL = {0: "#2a78d6", 1: "#eb6834", -1: "#8a8984"}
 
 
 def main(seed=0):
-    R = [json.loads(l) for l in open(os.path.join(HERE, "results", "i02.jsonl"), encoding="utf-8") if l.strip()]
+    R = [json.loads(l) for l in open(os.path.join(PRIV, "results", "i02.jsonl"), encoding="utf-8") if l.strip()]
     rows = {r["group"]: r for r in R if r["seed"] == seed and r["how"] == "mix" and r["M"] == 2}
     fig, axes = plt.subplots(1, 4, figsize=(15, 4.6))
     for ax, g in zip(axes, PICK):
@@ -43,8 +44,8 @@ def main(seed=0):
     fig.legend(h, ["1 つ目の物だけの属性", "2 つ目の物だけの属性", "共通の属性（比べでは全部）"], loc="lower center", ncol=3, frameon=False, fontsize=9)
     fig.suptitle(f"実験I2: 融合した語板に属性を 1 つずつ逆から入れる（口 2 つ、seed {seed}）", fontsize=12)
     fig.tight_layout(rect=(0, 0.07, 1, 0.94))
-    os.makedirs(os.path.join(HERE, "images"), exist_ok=True)
-    out = os.path.join(HERE, "images", "i02_reverse.png")
+    os.makedirs(os.path.join(PRIV, "images"), exist_ok=True)
+    out = os.path.join(PRIV, "images", "i02_reverse.png")
     fig.savefig(out, dpi=150)
     print(out)
 

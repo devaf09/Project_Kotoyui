@@ -320,7 +320,7 @@ def main():
     ap.add_argument("--loose", type=int, default=0, help="板どうしの組に、色と味だけ分かっている板も使う（ほかの観点の差は 0）")
     ap.add_argument("--steps", type=int, default=800)
     ap.add_argument("--max_depth", type=int, default=3)
-    ap.add_argument("--out", default="intervention/results/i03.jsonl")
+    ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i03.jsonl")
     a = ap.parse_args()
     torch.set_num_threads(2)
     global MIN_REF, LOOSE

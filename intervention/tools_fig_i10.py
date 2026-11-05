@@ -1,4 +1,4 @@
-"""実験I10 の図: 知らない品種の属性を、どこから想定するかで、本当の値に付けた確率がどう違うか（intervention/images/i10_hierarchy.png）
+"""実験I10 の図: 知らない品種の属性を、どこから想定するかで、本当の値に付けた確率がどう違うか（非公開の置き場の images/i10_hierarchy.png）
 
 棒 = 6 seed × 隠した品種 20 の平均（意味 1 つあたり 10 文）。右: 言い方（きっと / たぶん / わからない）ごとの正解率（較正）。
 実行: python intervention/tools_fig_i10.py
@@ -15,12 +15,13 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+PRIV = os.environ.get("KOTOYUI_PRIVATE_INTERVENTION", os.path.join(HERE, "..", "..", "Project_Kotoyui_private", "intervention"))   # 記録・図・結果は非公開の置き場（持ち主 2026-11-05）
 plt.rcParams["font.family"] = ["Yu Gothic", "MS Gothic", "Meiryo", "sans-serif"]
 M = [("親", "#2a78d6"), ("親 + 祖先で薄める", "#1baf7a"), ("祖先（果物全体）", "#eda100"), ("誤った親", "#eb6834"), ("一様", "#8a8984")]
 
 
 def main():
-    R = [json.loads(l) for l in open(os.path.join(HERE, "results", "i10.jsonl"), encoding="utf-8") if l.strip()]
+    R = [json.loads(l) for l in open(os.path.join(PRIV, "results", "i10.jsonl"), encoding="utf-8") if l.strip()]
     rs = [r for r in R if r["n"] == 10]
     fig, (ax, ax2) = plt.subplots(1, 2, figsize=(12, 4.3), gridspec_kw=dict(width_ratios=[1.4, 1]))
     V = ["色", "味", "形"]
@@ -52,7 +53,7 @@ def main():
             a_.spines[s].set_visible(False)
     fig.suptitle("実験I10: 親（科）から知らない子（品種）を想定する（6 seed、品種 1 つあたり 10 文）", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.93))
-    out = os.path.join(HERE, "images", "i10_hierarchy.png")
+    out = os.path.join(PRIV, "images", "i10_hierarchy.png")
     fig.savefig(out, dpi=150)
     print(out)
 

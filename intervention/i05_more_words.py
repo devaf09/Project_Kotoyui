@@ -69,7 +69,7 @@ def main():
     ap.add_argument("--K", type=int, default=6)
     ap.add_argument("--n_train", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--out", default="intervention/results/i05.jsonl")
+    ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i05.jsonl")
     a = ap.parse_args()
     S = make_senses(a.K, a.seed)
     use_senses(S, ["リンゴ"] + NAMES[:a.K])

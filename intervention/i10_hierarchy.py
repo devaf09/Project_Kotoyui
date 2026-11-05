@@ -127,7 +127,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n", type=int, default=10, help="品種 1 つあたりの文")
     ap.add_argument("--steps", type=int, default=400)
-    ap.add_argument("--out", default="intervention/results/i10.jsonl")
+    ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i10.jsonl")
     a = ap.parse_args()
     torch.set_num_threads(2)
     rng = random.Random(a.seed)

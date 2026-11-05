@@ -1,7 +1,7 @@
 #!/bin/bash
 # 実験I3（CPU だけ）。seed ごとに 1 本: bash intervention/sweeps/i03.sh 0
 s=$1
-P="python intervention/i03_reverse_split.py --seed $s --out intervention/results/i03.jsonl"
+P="python intervention/i03_reverse_split.py --seed $s --out ../Project_Kotoyui_private/intervention/results/i03.jsonl"
 export CUDA_VISIBLE_DEVICES=
 for n in 50 10; do
   $P --n_train $n

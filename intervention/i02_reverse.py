@@ -257,7 +257,7 @@ def main():
     ap.add_argument("--n", type=int, default=64)
     ap.add_argument("--plates", type=int, default=8)
     ap.add_argument("--steps", type=int, default=800)
-    ap.add_argument("--out", default="intervention/results/i02.jsonl")
+    ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i02.jsonl")
     a = ap.parse_args()
     torch.set_num_threads(4)
     rng = random.Random(a.seed)

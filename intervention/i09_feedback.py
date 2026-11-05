@@ -86,8 +86,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--KB", type=int, default=12)
-    ap.add_argument("--out", default="intervention/results/i09.jsonl")
-    ap.add_argument("--cache", default="intervention/results/i09_episodes_s{seed}.json")
+    ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i09.jsonl")
+    ap.add_argument("--cache", default="../Project_Kotoyui_private/intervention/results/i09_episodes_s{seed}.json")
     ap.add_argument("--tie", default="appearance", choices=["appearance", "unknown"],
                     help="採点が同じ組み合わせが複数あるとき: appearance = 見かけの多いほう、unknown = 決まらない観点は不明（世界 B では見たままを信じる）")
     ap.add_argument("--aggregate", type=int, default=0, help="同じ場面で語により結論が分かれたら「例外あり」にまとめる")

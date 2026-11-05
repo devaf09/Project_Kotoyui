@@ -1,6 +1,6 @@
-"""実験I1 の図: 介入の問い・見たままの問いの正解率を、答え方ごとに並べる（intervention/images/i01_qa.png）
+"""実験I1 の図: 介入の問い・見たままの問いの正解率を、答え方ごとに並べる（非公開の置き場の images/i01_qa.png）
 
-intervention/results/i01.jsonl（比べる相手は i01_baselines.jsonl）の、既定の設定（しきい値 0.5・分け直し・見直し・読み直しあり、光）の行から。
+非公開の置き場の results/i01.jsonl（比べる相手は i01_baselines.jsonl）の、既定の設定（しきい値 0.5・分け直し・見直し・読み直しあり、光）の行から。
 棒 = seed の平均、ひげ = 最小〜最大。灰色の点線 = いつも「いいえ」と答えたときの正解率。
 実行: python intervention/tools_fig_i01.py
 """
@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+PRIV = os.environ.get("KOTOYUI_PRIVATE_INTERVENTION", os.path.join(HERE, "..", "..", "Project_Kotoyui_private", "intervention"))   # 記録・図・結果は非公開の置き場（持ち主 2026-11-05）
 plt.rcParams["font.family"] = ["Yu Gothic", "MS Gothic", "Meiryo", "sans-serif"]
 KINDS = ["塗る", "熟す", "見たまま"]
 SERIES = [   # (名前, 値の取り出し, 色)
@@ -28,9 +29,9 @@ SERIES = [   # (名前, 値の取り出し, 色)
 
 
 def main():
-    R = [json.loads(l) for l in open(os.path.join(HERE, "results", "i01.jsonl"), encoding="utf-8") if l.strip()]
+    R = [json.loads(l) for l in open(os.path.join(PRIV, "results", "i01.jsonl"), encoding="utf-8") if l.strip()]
     BL = {(b["seed"], b["n_train_per_sense"]): b["baselines"]
-          for b in (json.loads(l) for l in open(os.path.join(HERE, "results", "i01_baselines.jsonl"), encoding="utf-8") if l.strip())}
+          for b in (json.loads(l) for l in open(os.path.join(PRIV, "results", "i01_baselines.jsonl"), encoding="utf-8") if l.strip())}
     base = [dict(r, baselines=BL[(r["seed"], r["n_train_per_sense"])]) for r in R
             if r["mode"] == "light" and r["theta"] == 0.5 and r["split"] and r["consolidate"] and r["reread"]
             and (r["seed"], r["n_train_per_sense"]) in BL]
@@ -62,8 +63,8 @@ def main():
     fig.legend(h, l, loc="lower center", ncol=3, frameon=False, fontsize=9)
     fig.suptitle("実験I1: 介入の問い（塗ったら・熟させたら）と見たままの問い", fontsize=12)
     fig.tight_layout(rect=(0, 0.13, 1, 0.95))
-    os.makedirs(os.path.join(HERE, "images"), exist_ok=True)
-    out = os.path.join(HERE, "images", "i01_qa.png")
+    os.makedirs(os.path.join(PRIV, "images"), exist_ok=True)
+    out = os.path.join(PRIV, "images", "i01_qa.png")
     fig.savefig(out, dpi=150)
     print(out)
 

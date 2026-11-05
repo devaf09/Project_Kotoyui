@@ -36,7 +36,7 @@ def main():
     ap.add_argument("--P", type=int, default=2)
     ap.add_argument("--n_train", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--out", default="intervention/results/i06.jsonl")
+    ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i06.jsonl")
     a = ap.parse_args()
     S = make_senses(a.K, a.seed)
     rng = random.Random(2000 + a.seed)

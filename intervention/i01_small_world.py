@@ -732,7 +732,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--baselines", type=int, default=1)
     ap.add_argument("--lm_steps", type=int, default=3000)
-    ap.add_argument("--out", default="intervention/results/i01.jsonl")
+    ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i01.jsonl")
     a = ap.parse_args()
     torch.set_num_threads(4)
     rec = run(a)

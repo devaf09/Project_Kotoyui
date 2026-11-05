@@ -22,3 +22,7 @@ __pycache__/
 results/queue.lock
 # 出どころ・ライセンスがはっきりしないデータ（野良データ、2026-10-25 持ち主の依頼）。中身も README も入れない
 data_wild/
+# 介入の研究の記録・図・結果は非公開の置き場 ../Project_Kotoyui_private/intervention/ に置く（持ち主 2026-11-05: 生成物は公開しない、コードは公開してよい）
+intervention/NOTES.md
+intervention/images/
+intervention/results/

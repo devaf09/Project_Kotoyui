@@ -1,4 +1,4 @@
-"""実験I4 の図: 教えの文の数（横、対数）に対する、正しく答えた問いの数（縦）（intervention/images/i04_scale.png）
+"""実験I4 の図: 教えの文の数（横、対数）に対する、正しく答えた問いの数（縦）（非公開の置き場の images/i04_scale.png）
 
 左: 正しく答えた問いの数（塗る + 熟す + 見たまま）。実線 = I3 の最終形、点線 = 相関だけ。色 = 世界（small / large）。
 右: 相関だけでは間違え、介入（否定）で正しく答えた問いの数（= 介入で得た知見）。
@@ -17,13 +17,14 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+PRIV = os.environ.get("KOTOYUI_PRIVATE_INTERVENTION", os.path.join(HERE, "..", "..", "Project_Kotoyui_private", "intervention"))   # 記録・図・結果は非公開の置き場（持ち主 2026-11-05）
 plt.rcParams["font.family"] = ["Yu Gothic", "MS Gothic", "Meiryo", "sans-serif"]
 COL = {"small": "#2a78d6", "large": "#eb6834"}
 NAME = {"small": "小さい世界（5 語・9 意味・問い 108）", "large": "大きい世界（10 語・18 意味・問い 312）"}
 
 
 def main():
-    R = [json.loads(l) for l in open(os.path.join(HERE, "results", "i04.jsonl"), encoding="utf-8") if l.strip()]
+    R = [json.loads(l) for l in open(os.path.join(PRIV, "results", "i04.jsonl"), encoding="utf-8") if l.strip()]
     G = defaultdict(list)
     for r in R:
         G[(r["world"], r["n_train_per_sense"])].append(r)
@@ -55,8 +56,8 @@ def main():
     axes[0].set_ylabel("問いの数")
     fig.suptitle("実験I4: 文の数と世界の大きさに対する、答えられる問い（6 seed）", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.93))
-    os.makedirs(os.path.join(HERE, "images"), exist_ok=True)
-    out = os.path.join(HERE, "images", "i04_scale.png")
+    os.makedirs(os.path.join(PRIV, "images"), exist_ok=True)
+    out = os.path.join(PRIV, "images", "i04_scale.png")
     fig.savefig(out, dpi=150)
     print(out)
 
