@@ -151,11 +151,19 @@ class Memory:
         return [[self.vocab[j] for j in np.argsort(-Wn[m])[:6]] for m in range(len(Wn))]
 
 
+SOFT = False                                                        # I12: 結論を 1 つに決めず、結論の明るさの割合をそのまま効き目にする（A の出力を B の入力に）
+
+
 def light_effects(P, mem, stats):
     e = {}
     for v in I1.CAUSE_VIEWS:
         scene, ns, nr = cause_scene(P, v)
         c = mem.recall(scene, ["本物", "例外あり", "見かけ", "不明"])
+        if SOFT:                                                    # 明るさの割合 = 光の強さとして次の器（答える器: 元の板と変えた後の板の明るさの重ね）へ渡す
+            tot = sum(c.values()) or 1.0
+            e[v] = (c["本物"] + c["例外あり"] * ns / max(ns + nr, 1) + (c["不明"] * ns / max(ns + nr, 1) if UNKNOWN_TRUST else 0.0)) / tot
+            stats.append(max(c, key=c.get))
+            continue
         lab = max(c, key=c.get)
         e[v] = 1.0 if lab == "本物" else (ns / max(ns + nr, 1) if lab == "例外あり" or (lab == "不明" and UNKNOWN_TRUST) else 0.0)
         stats.append(lab)
@@ -204,6 +212,7 @@ def main():
     ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i08.jsonl")
     ap.add_argument("--mem", default="mix", choices=["mix", "balanced", "labeled"])
     ap.add_argument("--skip_rule", type=int, default=0)
+    ap.add_argument("--soft", type=int, default=0, help="I12: 結論の明るさの割合をそのまま効き目にする")
     ap.add_argument("--cache", default="../Project_Kotoyui_private/intervention/results/i08_episodes_s{seed}.json", help="集めた経験を保存・再利用する")
     a = ap.parse_args()
     global MEM, SPLIT_LOG
@@ -217,6 +226,8 @@ def main():
         eps = collect(a.seed)
         json.dump(eps, open(cache, "w", encoding="utf-8"), ensure_ascii=False)
     mem = Memory(eps, a.seed, how=a.mem)
+    global SOFT
+    SOFT = bool(a.soft)
     kinds = Counter(" ".join(t for t in e if t.startswith(("観点:", "競合:"))) or "?" for e in eps)
     t_mem = time.perf_counter() - t0
     for PB in (0, 2):
@@ -225,7 +236,7 @@ def main():
             S = fruits(NAMES[12:12 + a.KB], rng)
             S.update(plums(PLUMS[2:2 + PB], rng))
             qwords = NAMES[12:12 + a.KB] + PLUMS[2:2 + PB]
-            rec = dict(exp="I8", mem=a.mem, seed=a.seed, KB=a.KB, PB=PB, nB=nB, n_episodes=len(eps), episode_kinds=dict(kinds), mem_loss=mem.loss,
+            rec = dict(exp="I8", mem=a.mem, soft=a.soft, seed=a.seed, KB=a.KB, PB=PB, nB=nB, n_episodes=len(eps), episode_kinds=dict(kinds), mem_loss=mem.loss,
                        ports=mem.ports_summary())
             Q = None
             for mode in (("light",) if a.skip_rule else ("rule", "light")):
