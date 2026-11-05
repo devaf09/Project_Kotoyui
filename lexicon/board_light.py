@@ -147,11 +147,11 @@ def fusion_test(dev, W, boards, S, SLOT, Q, n, steps, seed):
     truth = np.stack([Q[groups[k]].mean(0) for k in names])          # 親の本当の割合（子の平均）
     with torch.no_grad():
         ph = torch.stack([dev.phase[groups[k]].mean(0) for k in names])   # 位相の板の平均（器の融合）
-        avg_dev = BatchDevice(len(names), n=n, phase=ph)
+        avg_dev = BatchDevice(len(names), n=n, plates=ph.shape[2], phase=ph)
         W_avg = avg_dev.bright(A).numpy()
         # 位相は角度なので、平均は「単位円の上の平均の向き」でも試す
         z = torch.stack([torch.exp(1j * dev.phase[groups[k]]).mean(0) for k in names])
-        W_circ = BatchDevice(len(names), n=n, phase=torch.angle(z)).bright(A).numpy()
+        W_circ = BatchDevice(len(names), n=n, plates=z.shape[2], phase=torch.angle(z)).bright(A).numpy()
     _, W_pool = train(truth, n, steps, seed + 7)
     W_sum = np.stack([W[groups[k]].sum(0) for k in names])
 
