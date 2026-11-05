@@ -398,6 +398,7 @@ def view_norm(B, r, v, L):
 
 
 LAST_B = None
+VERB_RULE = True                                                    # T1: 動詞が変える観点の規則（塗る = 色）を外すときは False
 DIST = None                                                         # I14: 観点ごとの差の測り方を差し替える（None = 明るさを観点ごとに正規化した差、デジタル）
 
 
@@ -507,7 +508,10 @@ def answer(B, q, eff):
         else:
             dv = {u: 0.5 * np.abs(view_norm(B, r0, u, L) - view_norm(B, r1, u, L)).sum() if B.known(r0, u, L) and B.known(r1, u, L) else 0.0
                   for u in CAUSE_VIEWS}
-            c = min(1.0, eff[v] * dv[v])                            # 動詞が変える観点だけ（手で与えた規則）
+            if VERB_RULE:
+                c = min(1.0, eff[v] * dv[v])                        # 動詞が変える観点だけ（手で与えた規則）
+            else:                                                   # T1: 規則なし = 動詞がどの観点を変えるか知らないので、元と変えた後で違う観点は全部変わるとみなす
+                c = min(1.0, max(eff[u] * dv[u] for u in CAUSE_VIEWS))
             t1 = view_norm(B, r1, "味", L)
             t = t0 if t1 is None or t0 is None else (1 - c) * t0 + c * t1
     if t is None:

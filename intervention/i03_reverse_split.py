@@ -73,7 +73,7 @@ def judge(W, post, sents, min_support):
         h0 = s0 >= 0.05 * W[0].sum() and sup[0] >= min_support
         h1 = s1 >= 0.05 * W[1].sum() and sup[1] >= min_support
         if h0 and h1:
-            if 0.5 * np.abs(W[0, ids] / s0 - W[1, ids] / s1).sum() >= 0.5:
+            if 0.5 * np.abs(W[0, ids] / s0 - W[1, ids] / s1).sum() >= COMP:
                 comp.append(v)
         elif h0 != h1 and min(s0 / W[0].sum(), s1 / W[1].sum()) < 0.01:
             excl.append(v)
@@ -106,7 +106,7 @@ class LeafBoards(I1.Boards):
     """I1 の Boards の読み方（route・diff・known・view_dist）を、葉の板の明るさ（口の和）で使う。"""
 
     def __init__(self, leaves):
-        self.mode, self.dark, self.theta = "digital", 0.2, 0.5
+        self.mode, self.dark, self.theta = "digital", DARK, 0.5
         self.leaves = leaves
         self.word = [l.word for l in leaves]
         self.counts = [l.W.sum(0) * 1000 + 1e-9 for l in leaves]     # light() はこれを正規化して読む（= 光の明るさ）
@@ -204,6 +204,7 @@ def board_pairs(B, exclude_word=None):
 
 MIN_REF = 5.0
 LOOSE = False
+CHG, SAME, COMP, DARK = 0.5, 0.2, 0.5, 0.2                       # 手で決めた区切り（T1 で 1 つずつ動かす）: 変わった・変わらない・競合・暗い
 
 
 def effects(P, how):
@@ -222,20 +223,20 @@ def effects(P, how):
         for v in I1.CAUSE_VIEWS:                                    # 色と熟し具合のように一緒に変わる観点で、両方を取り消さないため（説明し尽くし）。
             if e[v] > 0:
                 continue
-            sup = sum(1 for _, d, dt, _, _ in P if d[v] >= 0.5 and dt >= 0.5)
-            ref = sum(1 for _, d, dt, _, _ in P if d[v] >= 0.5 and dt < 0.2)
+            sup = sum(1 for _, d, dt, _, _ in P if d[v] >= CHG and dt >= CHG)
+            ref = sum(1 for _, d, dt, _, _ in P if d[v] >= CHG and dt < SAME)
             if sup:
                 cand.append((sup / (sup + ref), v, ref))
         for ratio, v, ref in sorted(cand, reverse=True):
-            only = sum(1 for _, d, dt, _, _ in P if d[v] >= 0.5 and dt >= 0.5
-                       and not any(e[u] > 0 and d[u] >= 0.5 for u in I1.CAUSE_VIEWS if u != v))
+            only = sum(1 for _, d, dt, _, _ in P if d[v] >= CHG and dt >= CHG
+                       and not any(e[u] > 0 and d[u] >= CHG for u in I1.CAUSE_VIEWS if u != v))
             if only > ref:
                 e[v] = ratio
         return e
     e = {}
     for v in I1.CAUSE_VIEWS:
-        ref = [w for _, d, dt, _, w in P if d[v] >= 0.5 and dt < 0.2]
-        sup = [w for _, d, dt, _, w in P if d[v] >= 0.5 and dt >= 0.5]
+        ref = [w for _, d, dt, _, w in P if d[v] >= CHG and dt < SAME]
+        sup = [w for _, d, dt, _, w in P if d[v] >= CHG and dt >= CHG]
         if how == "deny":                                           # 1 つでも反例があれば否定（I1 と同じ）
             e[v] = 1.0 if (sup and not ref) else 0.0
         else:                                                       # weighted: 反例そのものが確か（両側に文が MIN_REF 以上）なときだけ否定

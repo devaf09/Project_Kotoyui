@@ -11,6 +11,7 @@
   4. 試し用で、注意の明るさで点を直す: 注意が光るほど、もとの点の代わりに「クラスの親の点」（同じクラスの知っている名詞の明るさの和）を使う。
        直した点 = (1 − 注意) × もとの点 + 注意 × 親の点。
   5. 注意が光る組は答えない（「わからない」）: 注意の低い順に答えたときの、もとの点の正解率（答える割合 100・70・50・30%）。
+  6. I16b: 親の点の誤りでも注意の器を作り、2 つの注意の暗いほうの点を信じる（2026-11-05 追加）。
   物差し: 注意の明るさが、もとの点の誤りをどれだけ見分けるか（AUROC）。直した点での崩した文の見分け（AUROC）。比べ: もとの点、親の点だけ。
 結果: ../Project_Kotoyui_private/intervention/results/i16.jsonl
 実行: python intervention/i16_attention_real.py --seed 0
@@ -184,6 +185,24 @@ def main():
     rec["答える割合ごとの正解率"] = {f"{int(c * 100)}%": float(correct[order[:int(len(order) * c)]].mean()) for c in (1.0, 0.7, 0.5, 0.3)}
     rnd = np.random.default_rng(a.seed).permutation(len(order))
     rec["答える割合ごとの正解率（でたらめに選ぶ）"] = {f"{int(c * 100)}%": float(correct[rnd[:int(len(rnd) * c)]].mean()) for c in (1.0, 0.7, 0.5, 0.3)}
+    # I16b（持ち主 2026-11-05「親が間違っている可能性も伝わっている」）: 親の点の誤りにも注意が光るか。親の点の誤りで別の注意の器を作り、
+    # 2 つの注意を比べて、注意の暗いほうの点を信じる（もとの点と親の点の、誤りやすさの比べ）。
+    pE = np.array([parent_score(n, v, r) for n, v, r, _, _ in E])
+    thp = float(np.median(pE))
+    labs_p = [1 if ((y == 1 and ps < thp) or (y == 0 and ps >= thp)) else 0 for (n, v, r, y, k), ps in zip(E, pE)]
+    eps_p = [[f"動詞:{v}", f"役:{r}", f"クラス:{cls_of.get(n, 'なし')}", f"点:{bucket(ps)}"] for (n, v, r, _, _), ps in zip(E, pE)]
+    mem_p = Memory2(eps_p, labs_p, a.seed + 1)
+    att_p = np.array([mem_p.attention([f"動詞:{v}", f"役:{r}", f"クラス:{cls_of.get(n, 'なし')}", f"点:{bucket(ps)}"]) for (n, v, r, _, _), ps in zip(T, pT)])
+    wrongP = ((yT == 1) & (pT < thp)) | ((yT == 0) & (pT >= thp))
+    rec["もとの注意が親の点の誤りを見分ける"] = auroc(att[wrongP], att[~wrongP])
+    rec["親の注意が親の点の誤りを見分ける"] = auroc(att_p[wrongP], att_p[~wrongP])
+    rec["親の点の誤りの割合"] = float(wrongP.mean())
+    # 点の尺度をそろえる（順位に直す）: 注意の暗いほうの点を使う
+    rs, rp = sT.argsort().argsort() / len(sT), pT.argsort().argsort() / len(pT)
+    pick = np.where(att <= att_p, rs, rp)
+    rec["注意の暗いほうを信じる"] = {k: auroc(pick[(kT == "本物")], pick[(kT == k)]) for k in ("役", "名詞")}
+    rec["答えの正しさ: 注意の暗いほうを信じる"] = float(np.mean(np.where(att <= att_p, ~wrongT, ~wrongP)))
+    rec["答えの正しさ: もとの点だけ / 親の点だけ"] = (float((~wrongT).mean()), float((~wrongP).mean()))
     rec["注意の明るさ（平均）"] = {"もとの点が誤り": float(att[wrongT].mean()), "もとの点が正しい": float(att[~wrongT].mean())}
     rec["total_s"] = time.perf_counter() - t0
     print(json.dumps(rec, ensure_ascii=False), flush=True)
