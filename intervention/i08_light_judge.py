@@ -40,6 +40,7 @@ from i07_experience import fruits, plums, all_pairs  # noqa: E402
 
 VAL0 = 8
 SPLIT_LOG = []                                                      # 分けるかの判断の記録（経験集めのとき）
+UNKNOWN_TRUST = False                                               # I9: 経験が「不明」なら、見たまま（支持の割合）を信じる
 MEM = None                                                          # 世界 B で判断に使う器
 
 
@@ -156,7 +157,7 @@ def light_effects(P, mem, stats):
         scene, ns, nr = cause_scene(P, v)
         c = mem.recall(scene, ["本物", "例外あり", "見かけ", "不明"])
         lab = max(c, key=c.get)
-        e[v] = 1.0 if lab == "本物" else (ns / max(ns + nr, 1) if lab == "例外あり" else 0.0)
+        e[v] = 1.0 if lab == "本物" else (ns / max(ns + nr, 1) if lab == "例外あり" or (lab == "不明" and UNKNOWN_TRUST) else 0.0)
         stats.append(lab)
     return e
 

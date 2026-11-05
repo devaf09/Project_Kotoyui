@@ -39,5 +39,8 @@
 | I7 | 経験の器: 前提が崩れた場面を覚え、新しい世界で思い出して否定や「たぶん」を返す | i07_experience.py、sweeps/i07.sh | results/i07.jsonl、NOTES.md |
 | I8 | 判断（原因か・分けるか）を経験の器に 1 回通す光の判断に置き換える | i08_light_judge.py、sweeps/i08.sh | results/i08.jsonl、NOTES.md |
 | I8b | 器が混ざる問題: 口ごとに 1 種類ずつ学んでから融合する | i08_light_judge.py --mem、sweeps/i08b.sh | results/i08b.jsonl、NOTES.md |
+| I9 | 経験の結論を「答えが合ったか」（採点）で付ける | i09_feedback.py、sweeps/i09.sh | results/i09.jsonl、NOTES.md |
+
+仕組みの図: images/mech_1_board.png（語板と口）、mech_2_experience.png（経験の作り方）、mech_3_judge.png（判断のときの光の通し方）。
 
 実行（CPU だけ）: `CUDA_VISIBLE_DEVICES= python intervention/i01_small_world.py --seed 0`
