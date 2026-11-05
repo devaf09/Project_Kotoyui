@@ -179,6 +179,13 @@ def main():
         for p in post.values():
             for s, x in p.items():
                 acc[s] += x
+        for w in W:                                                  # 動詞のクラスも選べるように、動詞の出現 × 動詞の語義の割合
+            nv = pos_of[w]["動詞"]
+            if nv:
+                vs = {s: x for s, x in SE.prior.get(w, {}).items() if s.endswith("-v")}
+                tv_ = sum(vs.values())
+                for s, x in vs.items():
+                    acc[s] += nv * x / tv_
         return acc
 
     def verb_classes(lemma):
