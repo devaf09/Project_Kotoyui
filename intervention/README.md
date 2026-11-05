@@ -47,6 +47,11 @@
 | I9 | 経験の結論を「答えが合ったか」（採点）で付ける | i09_feedback.py、sweeps/i09.sh | （非公開） |
 | I10 | 属性の向き（親子）: 知らない品種を親（科）から確率つきで想定する | i10_hierarchy.py、sweeps/i10.sh | （非公開） |
 | I11 | 確率に経験の量を入れ、言い方（きっと・たぶん・わからない）と正解率を合わせる | i11_calibrate.py、sweeps/i11.sh | （非公開） |
+| I12 | 経験の器の明るさの割合をそのまま答える器へ渡す（A の出力を B の入力に） | i08_light_judge.py --soft、sweeps/i12.sh | （非公開） |
+| I13 | 融合（劣化あり） | i13_fusion.py、sweeps/i13.sh | （非公開） |
+| I13b・c | 消去（明るさの引き算）と注意の経験 | i13b_erase.py、sweeps/i13b.sh | （非公開） |
+| I14 | 差分検証を光で（明るさの引き算・干渉・位相合わせ） | i14_light_diff.py、sweeps/i14.sh | （非公開） |
+| I15 | 本物の語板 v1 で、上位語のクラスから知らない語の性質・動きを想定 | i15_real_hierarchy.py、sweeps/i15.sh | （非公開） |
 
 仕組みの図は tools_fig_mechanism.py で作る（出力は非公開の置き場）。
 
