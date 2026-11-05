@@ -52,6 +52,7 @@
 | I13b・c | 消去（明るさの引き算）と注意の経験 | i13b_erase.py、sweeps/i13b.sh | （非公開） |
 | I14 | 差分検証を光で（明るさの引き算・干渉・位相合わせ） | i14_light_diff.py、sweeps/i14.sh | （非公開） |
 | I15 | 本物の語板 v1 で、上位語のクラスから知らない語の性質・動きを想定 | i15_real_hierarchy.py、sweeps/i15.sh | （非公開） |
+| I16 | 本物の文で注意の経験（崩した文の見分けで間違えた場面を覚えて光らせる） | i16_attention_real.py、sweeps/i16.sh | （非公開） |
 
 仕組みの図は tools_fig_mechanism.py で作る（出力は非公開の置き場）。
 
