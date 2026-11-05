@@ -397,6 +397,10 @@ def view_norm(B, r, v, L):
     return b / s if s > 0 else None
 
 
+LAST_B = None
+DIST = None                                                         # I14: 観点ごとの差の測り方を差し替える（None = 明るさを観点ごとに正規化した差、デジタル）
+
+
 def pairs(B, exclude_word=None):
     """原因を比べる組: (語, Δ{観点}, Δ味)。同じ語・人でない語板どうし + 1 枚の中（観点に 2 つの値、味は 1 つ）。"""
     L = B.light()
@@ -407,8 +411,12 @@ def pairs(B, exclude_word=None):
         for r2 in food[i + 1:]:
             if B.word[r1] != B.word[r2]:
                 continue
-            d = {v: 0.5 * np.abs(view_norm(B, r1, v, L) - view_norm(B, r2, v, L)).sum() for v in CAUSE_VIEWS}
-            dt = 0.5 * np.abs(view_norm(B, r1, "味", L) - view_norm(B, r2, "味", L)).sum()
+            if DIST is None:
+                d = {v: 0.5 * np.abs(view_norm(B, r1, v, L) - view_norm(B, r2, v, L)).sum() for v in CAUSE_VIEWS}
+                dt = 0.5 * np.abs(view_norm(B, r1, "味", L) - view_norm(B, r2, "味", L)).sum()
+            else:
+                d = {v: DIST(B, r1, r2, v) for v in CAUSE_VIEWS}
+                dt = DIST(B, r1, r2, "味")
             out.append((B.word[r1], d, dt, "語板どうし"))
     inner = [r for r, w in enumerate(B.word) if w != exclude_word and B.known(r, "味", L)]
     for r in inner:                                                # 1 枚の中: 2 つの値がある観点（光の届かない観点は同じ物なので差 0）
@@ -635,6 +643,8 @@ def run(a):
         B.occ = [new_occ[r] for r in keep]
         B._cache = None
         B.fit(3 * B.new_steps)
+    global LAST_B
+    LAST_B = B                                                      # I14 などが語板を使い回すため
     rec = dict(exp="I1", n_train_per_sense=a.n_train, mode=a.mode, theta=a.theta, consolidate=a.consolidate, reread=a.reread, split=a.split, merged=merged, splits=splits, seed=a.seed, n_train=len(train), n_boards=len(B.counts), table_tv=B.tv())
     # (1) 分かれ方
     gold_n = Counter(w for w, _ in SENSES.values())
