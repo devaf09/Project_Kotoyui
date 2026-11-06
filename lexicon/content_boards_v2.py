@@ -149,7 +149,7 @@ def main():
     ap.add_argument("--conllu", nargs="+", required=True, help="1 文ずつの文（v1 と同じ順に）")
     ap.add_argument("--docs", nargs="*", default=[], help="前後の文がある文書（parse_docs.py）")
     ap.add_argument("--docs_extra", nargs="*", default=[], help="学びにだけ使う文書（青空文庫など。試しの文書には入れない）")
-    ap.add_argument("--private_docs", nargs="*", default=[], help="公開しない資料（Web 小説など）。学びにだけ使う。使うと出力の置き場の名前は -np で終わる必要がある")
+    ap.add_argument("--private_docs", nargs="*", default=[], help="公開しない資料（Web 小説など）。学びにだけ使う。使うと出力の置き場の名前は _wn で終わる必要がある")
     ap.add_argument("--wordnet", required=True)
     ap.add_argument("--out", default=os.path.join(PRIV, "data", "boards", "v2"))
     ap.add_argument("--n_words", type=int, default=20000)
@@ -162,8 +162,8 @@ def main():
     ap.add_argument("--dedup", type=float, default=0.0, help="クラスの鎖を飛ばす（0 = v2 と同じ、0.7 など = v2.1）")
     ap.add_argument("--seed_classes", action="store_true", help="具体的なクラス（SEEDS）を必ず入れる（v2.1）")
     a = ap.parse_args()
-    if a.private_docs and not a.out.rstrip("/\\").endswith("-np"):
-        raise SystemExit("公開しない資料（--private_docs）を使うときは、出力の置き場の名前を -np で終わらせる（例: v2_2w-np）")
+    if a.private_docs and not a.out.rstrip("/\\").endswith("_wn"):
+        raise SystemExit("公開しない資料（--private_docs）を使うときは、出力の置き場の名前を _wn で終わらせる（例: v2_3_wn）")
     global DEDUP, USE_SEEDS
     DEDUP = a.dedup
     USE_SEEDS = a.seed_classes
@@ -453,7 +453,7 @@ def main():
              for d in test_docs]
     json.dump(boards, open(os.path.join(a.out, "content_boards.json"), "w", encoding="utf-8"), ensure_ascii=False)
     json.dump(dict(公開してよいか=not a.private_docs, 公開しない資料=a.private_docs, 資料=dict(文=a.conllu, 文書=a.docs, 学びだけの文書=a.docs_extra),
-                   名前の決まり="公開しない資料を混ぜた語板は、置き場の名前が -np で終わる（例: v2_2w-np）。そこから作った器・明るさも同じ置き場に置く"),
+                   名前の決まり="公開しない資料を混ぜた語板は、置き場の名前が _wn で終わる（例: v2_3_wn）。そこから作った器・明るさも同じ置き場に置く"),
               open(os.path.join(a.out, "sources.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     json.dump(dict(slots=slots, classes={cname[c]: c for c in classes}), open(os.path.join(a.out, "slots.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     json.dump(triples, open(os.path.join(a.out, "test_triples.json"), "w", encoding="utf-8"), ensure_ascii=False)
