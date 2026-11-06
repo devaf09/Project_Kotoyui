@@ -15,6 +15,8 @@ I22 では、桁ごとの照射の手順（どの出口を次のどの入口へ�
         替える画素の数を 1 → 2 と増やしながら、「いまの例が合い、覚えの例も壊れない」替え方を探す（介入）。
         それで直らなければ、照射 1 つ（入口 2 つと演算）を決め直し、違った桁の答えの行をその出口へつなぐ（空いている照射から、次に使っている照射の組み直し）。
         見つかれば、替えた画素を行のいちばん明るい画素より明るくする。
+      I28b（--sleep K）: 見送りが K 回続いたら、つなぎの板を空（かすかな雑音）に戻し、覚えの例と見送った例を易しい順
+        （2 桁の数の数、答えの桁数）に並べて学び直す（忘れて整理する）。
         見つからなければ見送る。解き直した回数を数える（総当たりの数と比べる）。
   - 教えの順: でたらめ / 易しい順（1 桁どうし → 2 桁を含む）。
 物差し: 0〜99 の組（I22 と同じ範囲）の正解率、学んだ手順が I22 の手の手順と同じ働きか、解き直しの回数、見送りの数。
@@ -263,11 +265,18 @@ def easy_key(xy, op):
     return ((x >= 10) + (y >= 10), carry)
 
 
+def sleep_key(ex):
+    """整理し直すときの易しさ: 2 桁の数の数、答えの桁数（学ぶ側に見えるものだけ。桁上りの有無は使わない）。"""
+    x, y, t = ex
+    return ((x >= 10) + (y >= 10), len(str(t)))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n_train", type=int, default=300)
     ap.add_argument("--max_flips", type=int, default=2)
+    ap.add_argument("--sleep", type=int, default=0, help="見送りがこの数だけ続いたら、忘れて整理し直す（0 = しない）")
     ap.add_argument("--no_free", action="store_true", help="空いている照射を使う探し方を外す（比べ）")
     ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i28.jsonl")
     a = ap.parse_args()
@@ -280,7 +289,7 @@ def main():
     ob.notice()
     tab = table_of(ob)
     alu = CarryALU(ob)
-    rec = dict(exp="I28", seed=a.seed, n_train=a.n_train, max_flips=a.max_flips, free=not a.no_free, n_step=N_STEP, runs={})
+    rec = dict(exp="I28", seed=a.seed, n_train=a.n_train, max_flips=a.max_flips, free=not a.no_free, sleep=a.sleep, n_step=N_STEP, runs={})
     # 手の手順（I22）が、この口と照射の形で全部合うかを先に確かめる
     rec["hand"] = {op: sum(run(hand_choice(op), x, y, tab) == G.FN[op](x, y) for x, y in PAIRS[op]) / len(PAIRS[op]) for op in OPS}
     rec["i22"] = {op: sum(alu.compute(x, op, y) == G.FN[op](x, y) for x, y in PAIRS[op]) / len(PAIRS[op]) for op in OPS}
@@ -297,9 +306,23 @@ def main():
             if order == "易しい順":
                 train.sort(key=lambda xy: easy_key(xy, op))
             st = {"solves": 0, "見送り": 0, "空き照射": 0, "組み直し": 0, **{f"替えた{k}": 0 for k in range(1, a.max_flips + 1)}}
-            memory, curve = [], []
+            memory, curve, skipped, streak = [], [], [], 0
+            st["整理"] = 0
             for n, (x, y) in enumerate(train, 1):
-                learn_one(board, x, y, G.FN[op](x, y), memory, tab, st, a.max_flips, use_free=not a.no_free)
+                got = learn_one(board, x, y, G.FN[op](x, y), memory, tab, st, a.max_flips, use_free=not a.no_free)
+                if got == "見送り":
+                    skipped.append((x, y, G.FN[op](x, y)))
+                    streak += 1
+                else:
+                    streak = 0
+                if a.sleep and streak >= a.sleep:                    # 止まった: つなぎの板を空にし、覚えの例と見送った例を易しい順に学び直す
+                    st["整理"] += 1
+                    replay = sorted(set(memory + skipped[-40:]), key=sleep_key)
+                    board = RouteBoard(np.random.default_rng(a.seed * 31 + OPS.index(op) + 1000 * st["整理"]))
+                    memory, skipped, streak = [], [], 0
+                    for x2, y2, t2 in replay:
+                        if learn_one(board, x2, y2, t2, memory, tab, st, a.max_flips, use_free=not a.no_free) == "見送り":
+                            skipped.append((x2, y2, t2))
                 if n in (10, 30, 100, 300, 1000):
                     ch = board.mask()
                     curve.append((n, sum(run(ch, u, v, tab) == G.FN[op](u, v) for u, v in PAIRS[op]) / len(PAIRS[op])))

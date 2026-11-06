@@ -3,3 +3,4 @@
 export CUDA_VISIBLE_DEVICES=
 for s in 0 1 2 3 4 5; do python intervention/i28_route_board.py --seed $s & done; wait
 for s in 0 1 2 3 4 5; do python intervention/i28_route_board.py --seed $s --no_free & done; wait
+for s in 0 1 2 3 4 5; do python intervention/i28_route_board.py --seed $s --sleep 10 & done; wait   # I28b: 止まったら忘れて整理し直す
