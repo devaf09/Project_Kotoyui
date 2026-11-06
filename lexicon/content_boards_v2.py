@@ -150,6 +150,7 @@ def main():
     ap.add_argument("--docs", nargs="*", default=[], help="前後の文がある文書（parse_docs.py）")
     ap.add_argument("--docs_extra", nargs="*", default=[], help="学びにだけ使う文書（青空文庫など。試しの文書には入れない）")
     ap.add_argument("--private_docs", nargs="*", default=[], help="公開しない資料（Web 小説など）。学びにだけ使う。使うと出力の置き場の名前は _wn で終わる必要がある")
+    ap.add_argument("--extra_weight", default="1", help="学びだけの文書（--docs_extra・--private_docs）の文の重み。auto = 内容語の延べ数がほかの文と同じになる重み（v2.3）")
     ap.add_argument("--wordnet", required=True)
     ap.add_argument("--out", default=os.path.join(PRIV, "data", "boards", "v2"))
     ap.add_argument("--n_words", type=int, default=20000)
@@ -194,15 +195,25 @@ def main():
         base = len(train)
         for k, s in enumerate(docs[d]):
             train.append((s, (base + max(0, k - a.window), base + min(len(docs[d]), k + a.window + 1))))
+    n_main = len(train) - sum(len(v) for v in extra.values())          # 先頭 n_main 文がふつうの文、残りが学びだけの文書
+    ntok = lambda ss: sum(1 for s, _ in ss for t in s if t["upos"] in CONTENT)  # noqa: E731
+    if a.extra_weight == "auto":
+        ew = ntok(train[:n_main]) / max(ntok(train[n_main:]), 1) if n_main < len(train) else 1.0
+    else:
+        ew = float(a.extra_weight)
+    swt = [1.0] * n_main + [ew] * (len(train) - n_main)              # 文の重み（数えるときに掛ける）
+    print("学びだけの文書の重み", round(ew, 4), flush=True)
     print("文", len(sents), "学び", len(train1), "試し", len(test), "文書", len(names), "学びの文書", len(train_docs), "文書の文", len(train) - len(train1), flush=True)
 
-    freq, pos_of = Counter(), defaultdict(Counter)
-    for s, _ in train:
+    freq, wfreq, pos_of = Counter(), Counter(), defaultdict(Counter)
+    for (s, _), wt in zip(train, swt):
         for t in s:
             if t["upos"] in CONTENT:
                 freq[t["lemma"]] += 1
+                wfreq[t["lemma"]] += wt
                 pos_of[t["lemma"]][CONTENT[t["upos"]]] += 1
-    words = [w for w, c in freq.most_common() if c >= a.min_freq][:a.n_words]
+    # 語の並び = 重みを掛けた回数の順（先頭の語ほど光の器に学ばせる）。語に入るかは素の回数（--min_freq）で決める
+    words = [w for w, c in wfreq.most_common() if freq[w] >= a.min_freq][:a.n_words]
     W = set(words)
     print("候補の語", len(words), flush=True)
     wn = WordNet(a.wordnet)
@@ -342,6 +353,7 @@ def main():
 
     raw = defaultdict(lambda: defaultdict(Counter))
     for j, (s, rngj) in enumerate(train):
+        wt = swt[j]
         by_i = {t["i"]: t for t in s}
         kids = defaultdict(list)
         for t in s:
@@ -366,49 +378,49 @@ def main():
                 continue
             P = CONTENT.get(t["upos"])
             R = raw[w]
-            R["A"][f"役:{ROLE.get(t['dep'], 'その他')}"] += 1
+            R["A"][f"役:{ROLE.get(t['dep'], 'その他')}"] += wt
             head = by_i.get(t["head"])
             own = leafp.get((j, t["i"]), Counter())
             for c, v in topic.items():
                 x = v - own.get(c, 0)
                 if x > 1e-6:
-                    R["G"][f"話題:{cname[c]}"] += x
+                    R["G"][f"話題:{cname[c]}"] += x * wt
             if P == "名詞":
                 for sy, x in post.get((j, t["i"]), {}).items():
                     for c in SE.anc(sy):
-                        R["D"][f"クラス:{cname[c]}"] += x
+                        R["D"][f"クラス:{cname[c]}"] += x * wt
             for kk in kids[t["i"]]:
                 if kk["dep"] == "case" and kk["upos"] == "ADP":
                     tag = "格" if kk["lemma"] in CASES else "取り立て"
-                    R["A"][f"{tag}:{kk['lemma']}"] += 1
+                    R["A"][f"{tag}:{kk['lemma']}"] += wt
                 elif kk["dep"] == "cop":
-                    R["A"]["述語:コピュラ"] += 1
+                    R["A"]["述語:コピュラ"] += wt
                 elif kk["dep"] == "aux":
-                    R["A"][f"助動詞:{kk['lemma']}"] += 1
+                    R["A"][f"助動詞:{kk['lemma']}"] += wt
                 elif kk["dep"] == "mark":
-                    R["A"][f"接続:{kk['lemma']}"] += 1
+                    R["A"][f"接続:{kk['lemma']}"] += wt
                 if P == "名詞" and kk["upos"] == "ADJ" and kk["dep"] in ("amod", "acl"):
-                    R["B"][f"性質:{kk['lemma']}"] += 1
+                    R["B"][f"性質:{kk['lemma']}"] += wt
                 if P == "動詞" and kk["upos"] == "ADV" and kk["dep"] == "advmod":
-                    R["B"][f"様子:{kk['lemma']}"] += 1
+                    R["B"][f"様子:{kk['lemma']}"] += wt
                 if P in ("動詞", "形容詞") and kk["dep"] in ("nsubj", "obj") and is_noun(kk):
                     for c, x in leafp.get((j, kk["i"]), {}).items():
-                        R["C"][f"{'主語' if kk['dep'] == 'nsubj' else '目的語'}:{cname[c]}"] += x
+                        R["C"][f"{'主語' if kk['dep'] == 'nsubj' else '目的語'}:{cname[c]}"] += x * wt
             if P == "名詞" and head is not None:
                 if head["upos"] == "ADJ" and t["dep"] == "nsubj":
-                    R["B"][f"性質:{head['lemma']}"] += 1
+                    R["B"][f"性質:{head['lemma']}"] += wt
                 if head["upos"] == "VERB":
                     if t["dep"] == "nsubj":
-                        R["C"][f"{head['lemma']}/する"] += 1
+                        R["C"][f"{head['lemma']}/する"] += wt
                     elif t["dep"] == "obj":
-                        R["C"][f"{head['lemma']}/される"] += 1
+                        R["C"][f"{head['lemma']}/される"] += wt
                     elif t["dep"] == "obl":
                         cs = [kk["lemma"] for kk in kids[t["i"]] if kk["dep"] == "case" and kk["lemma"] in ("で", "に")]
                         if cs:
-                            R["C"][f"{head['lemma']}/{cs[0]}"] += 1
+                            R["C"][f"{head['lemma']}/{cs[0]}"] += wt
             if P == "形容詞" and head is not None and is_noun(head) and t["dep"] in ("amod", "acl"):
                 for c, x in leafp.get((j, head["i"]), {}).items():
-                    R["C"][f"修飾先:{cname[c]}"] += x
+                    R["C"][f"修飾先:{cname[c]}"] += x * wt
     # 名詞で D が付かなかった語（文に出ても語義の候補がない）と、動詞・形容詞の D・E は語の事前の割合（絞ったもの）から
     for w in words:
         P = pos_of[w].most_common(1)[0][0]
