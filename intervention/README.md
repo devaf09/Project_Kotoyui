@@ -66,8 +66,11 @@
 | I27a | 圧縮と展開を比べて A / B を決める: 話を語ごとの板に縮め、曖昧な例文の両方の読みを、話の板と食い違わないかで選ぶ | i27a_story_check.py | （非公開） |
 | I27b | 迷ったときだけ聞き返す: 話の板で決まらない例文を、一般常識の語板の迷いの強い順に聞き、聞く回数あたりの伸びを測る | i27b_ask_when_unsure.py | （非公開） |
 | 図 6〜9 | 気付き・介入を判断する板の図（判断の板、入れ替えの気付き、桁上りの照射、算術の流れ） | tools_fig_judge.py | （非公開） |
+| 図 10〜13 | 算数の板の中身のビットマップ（一般常識の数の板、演算の帯と気付き、バッファ板、命令デコーダの経験の器） | tools_fig_boards.py | （非公開） |
 | T1 | ツッコミどころ: 手で決めたもの（動詞の規則・区切り）を外す | t1_ablation.py、sweeps/t1.sh | （非公開） |
 
 仕組みの図は tools_fig_mechanism.py で作る（出力は非公開の置き場）。
+
+仕組みの説明は [docs/mechanisms.md](docs/mechanisms.md)、デジタルの重み・手で決めた部分の一覧は [docs/digital_weights.md](docs/digital_weights.md)。
 
 実行（CPU だけ）: `CUDA_VISIBLE_DEVICES= python intervention/i01_small_world.py --seed 0`
