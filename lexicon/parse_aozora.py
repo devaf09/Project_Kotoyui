@@ -24,7 +24,7 @@ RUBY = re.compile(r"《[^》]*》")
 NOTE = re.compile(r"［＃[^］]*］")
 GAIJI = re.compile(r"※［[^］]*］")
 SPLIT = re.compile(r"(?<=[。！？])|\n")
-ID_IN_NAME = re.compile(r"(\d{3,6})")
+ID_IN_NAME = re.compile(r"^(\d+)_")   # 青空文庫のファイル名は「作品ID_ruby_番号」（例 789_ruby_5639.zip、5_ruby_21311.txt）
 
 
 def decode(b):
@@ -90,8 +90,8 @@ def main():
     for p in files:
         if len(rows) >= a.max_sents:
             break
-        m = ID_IN_NAME.findall(os.path.basename(p))
-        wid = m[0].lstrip("0") if m else os.path.basename(p)
+        m = ID_IN_NAME.match(os.path.basename(p))
+        wid = (m.group(1).lstrip("0") or "0") if m else os.path.basename(p)
         if ok is not None and wid not in ok:
             skipped["一覧に無い"] += 1
             continue
