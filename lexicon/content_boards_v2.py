@@ -102,15 +102,45 @@ class Senses:
         return self.anc_cache[s]
 
 
+DEDUP = 0.0   # main で --dedup から入れる
+USE_SEEDS = False   # main で --seed_classes から入れる
+# 必ず入れる具体的なクラス（v2.1、童話や日常の文に要る物の種類。回数の多い抽象的なクラスに枠を取られないように）
+SEEDS = ["00017222-n", "13104059-n", "11669921-n", "12205694-n",               # 植物・木・花・草
+         "00015388-n", "01861778-n", "01503061-n", "02512053-n", "02159955-n", "01661091-n",   # 動物・哺乳・鳥・魚・虫・爬虫類
+         "00007846-n", "10235549-n",                                             # 人・親族
+         "07555863-n", "07705931-n", "07707451-n", "07881800-n",                 # 食べ物・果物・野菜・飲み物
+         "04451818-n", "03094503-n", "03051540-n", "02913152-n", "03259505-n", "04524313-n", "04565375-n",
+         "03405725-n", "03183080-n", "03621049-n", "03964744-n", "13384557-n",   # 道具・器・衣類・建物・住まい・乗物・武器・家具・機器・台所道具・玩具・お金
+         "05220461-n", "00019128-n", "09225146-n", "09239740-n", "09334396-n", "14580897-n", "14625458-n",
+         "11524662-n",                                                           # 身体部位・自然物・水・天体・陸地・材料・金属・天気
+         "00027167-n", "15113229-n", "00026192-n"]                               # 場所・時代（期間）・気持ち
+
+
 def choose_classes(wn, weights, n_noun=80, n_verb=20, min_depth=4):
-    """weights: {語義: 重み}（出現の回数 × 語義の割合）。上位の概念ごとに重みを集め、多い順に選ぶ。"""
+    """weights: {語義: 重み}（出現の回数 × 語義の割合）。上位の概念ごとに重みを集め、多い順に選ぶ。
+    DEDUP > 0 のとき、すでに選んだクラスの祖先か子孫で、覆う重みがその DEDUP 倍以上（ほぼ同じ語の集まり）のものは飛ばす
+    （生物 / 生き物、脊椎動物 / 脊索動物 / 哺乳 のような鎖で枠を使わず、植物・道具などの深めのクラスに枠を回す）。"""
     cover = defaultdict(float)
     for s, w in weights.items():
         for a in wn.ancestors(s):
             cover[a] += w
     order = sorted(cover, key=lambda s: -cover[s])
-    noun = [s for s in order if s.endswith("-n") and wn.depth(s) >= min_depth][:n_noun]
-    verb = [s for s in order if s.endswith("-v") and wn.depth(s) >= 1][:n_verb]
+
+    def pick(cands, n, out=None):
+        out = list(out or [])                                        # out に先に入れたもの（種）は飛ばさない
+        for s in cands:
+            if len(out) >= n:
+                break
+            if DEDUP > 0:
+                anc = wn.ancestors(s)
+                if any((b in anc or s in wn.ancestors(b)) and min(cover[s], cover[b]) >= DEDUP * max(cover[s], cover[b]) for b in out):
+                    continue
+            out.append(s)
+        return out
+    seeds = [s for s in SEEDS if cover.get(s, 0) > 0] if USE_SEEDS else []
+    rest = [s for s in order if s.endswith("-n") and wn.depth(s) >= min_depth and s not in seeds]
+    noun = pick(rest, n_noun, seeds[:n_noun])
+    verb = pick([s for s in order if s.endswith("-v") and wn.depth(s) >= 1], n_verb)
     return noun + verb
 
 
@@ -127,7 +157,12 @@ def main():
     ap.add_argument("--window", type=int, default=2)
     ap.add_argument("--em", type=int, default=3)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--dedup", type=float, default=0.0, help="クラスの鎖を飛ばす（0 = v2 と同じ、0.7 など = v2.1）")
+    ap.add_argument("--seed_classes", action="store_true", help="具体的なクラス（SEEDS）を必ず入れる（v2.1）")
     a = ap.parse_args()
+    global DEDUP, USE_SEEDS
+    DEDUP = a.dedup
+    USE_SEEDS = a.seed_classes
     os.makedirs(a.out, exist_ok=True)
     rng = random.Random(a.seed)
     # 1 文ずつの文: v1 と同じ分け方
@@ -413,7 +448,7 @@ def main():
     json.dump(tdocs, open(os.path.join(a.out, "test_docs.json"), "w", encoding="utf-8"), ensure_ascii=False)
     # 語義の例（外れが減ったかを見る）
     ex = {}
-    for w in ["トム", "メアリー", "犬", "本", "リンゴ", "手", "木", "目", "東京", "先生", "電話", "家"]:
+    for w in ["トム", "メアリー", "犬", "本", "リンゴ", "手", "木", "目", "東京", "先生", "電話", "家", "竹", "猫", "包丁", "着物"]:
         b = next((x for x in boards if x["name"] == w), None)
         if b and "D" in b["attrs"]:
             ex[w] = list(b["attrs"]["D"].items())[:4]
