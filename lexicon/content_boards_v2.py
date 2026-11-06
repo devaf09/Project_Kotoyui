@@ -148,6 +148,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--conllu", nargs="+", required=True, help="1 文ずつの文（v1 と同じ順に）")
     ap.add_argument("--docs", nargs="*", default=[], help="前後の文がある文書（parse_docs.py）")
+    ap.add_argument("--docs_extra", nargs="*", default=[], help="学びにだけ使う文書（青空文庫など。試しの文書には入れない）")
     ap.add_argument("--wordnet", required=True)
     ap.add_argument("--out", default=os.path.join(PRIV, "data", "boards", "v2"))
     ap.add_argument("--n_words", type=int, default=20000)
@@ -179,9 +180,14 @@ def main():
     random.Random(a.seed + 1).shuffle(names)
     n_dt = int(len(names) * a.doc_test_frac)
     test_docs, train_docs = names[:n_dt], names[n_dt:]
+    extra = defaultdict(list)
+    for p in a.docs_extra:
+        for d, s in read_conllu_docs(p):
+            extra[d].append(s)
     # 学びの文の並び: (文, 前後の文の番号の範囲)。1 文ずつの文は自分だけ
     train = [(s, None) for s in train1]
-    for d in train_docs:
+    docs.update(extra)
+    for d in train_docs + sorted(extra):
         base = len(train)
         for k, s in enumerate(docs[d]):
             train.append((s, (base + max(0, k - a.window), base + min(len(docs[d]), k + a.window + 1))))
