@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import sys
@@ -26,6 +27,9 @@ from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i27a_story_check import story_boards  # noqa: E402
+from i27c_compress_units import FORMAL  # noqa: E402
+
+FORMAL2 = FORMAL | {"わけ", "つもり", "方", "時", "気", "の", "ん", "事", "物", "所", "為", "訳", "筈", "儘"}   # 形式名詞（機能語に近い名詞）
 
 NOUN = ("NOUN", "PROPN")
 
@@ -69,9 +73,9 @@ def make_items(works, seed, per_work=1500):
             h_else = bool(m_on[m][h] - {li})                     # 正解の組がほかの行にもあるか
             for dk in ("でたらめ", "紛らわしい", "両方に根拠"):
                 if dk == "でたらめ":
-                    pool = [d for d in common if d != h]
+                    pool = [d for d in common if d != h and d not in FORMAL2]   # 紛らわしい語に形式名詞は使わない
                 elif dk == "紛らわしい" or h_else:
-                    pool = [d for d, ls in m_on[m].items() if d != h and ls - {li}]
+                    pool = [d for d, ls in m_on[m].items() if d != h and ls - {li} and d not in FORMAL2]
                 else:
                     pool = []
                 if not pool:
@@ -123,7 +127,7 @@ def sim_vec(a, b):
 NLP = None
 
 
-def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0):
+def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0, skip_formal=False, freq_discount=False):
     """行ごとの候補の根拠。spread > 0 なら、同じ組だけでなく、候補に似た名詞に M が係った数も（似ている度合い × spread）足す（B1）。"""
     w = works[x["work"]]
     bs = w["_boards"]
@@ -136,9 +140,11 @@ def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0):
             v = b.get(c, {}).get(key, 0)
             if spread:
                 for n, attrs in b.items():
-                    if n in x["cand"] or not attrs.get(key):
+                    if n in x["cand"] or not attrs.get(key) or (skip_formal and n in FORMAL2):
                         continue
                     sm = sim_in_work(w, x, c, n, key) if how == "作品の属性" else sim_vec(c, n)
+                    if freq_discount:                   # よく出る語ほど何にでも似るので、出た数の対数で割り引く
+                        sm /= math.log(2 + sum(w["_vec"].get(n, {}).values()))
                     if sm > th:
                         v += spread * sm * attrs[key]
             row.append(v)
@@ -224,7 +230,10 @@ def main():
     NLP = spacy.load("ja_ginza")
     rec["spread"] = {}
     for name, kw in (("似た語へ広げる 作品の属性 λ1", dict(spread=1.0)), ("似た語へ広げる 作品の属性 λ1 似0.3以上", dict(spread=1.0, th=0.3)),
-                     ("似た語へ広げる 語ベクトル λ1 似0.5以上", dict(spread=1.0, how="語ベクトル", th=0.5))):
+                     ("似た語へ広げる 語ベクトル λ1 似0.5以上", dict(spread=1.0, how="語ベクトル", th=0.5)),
+                     ("広げる 作品の属性 λ1 形式名詞を除く", dict(spread=1.0, skip_formal=True)),
+                     ("広げる 作品の属性 λ3 形式名詞を除く + 頻度で割り引く", dict(spread=3.0, skip_formal=True, freq_discount=True)),
+                     ("広げる 語ベクトル λ1 似0.5以上 形式名詞を除く", dict(spread=1.0, how="語ベクトル", th=0.5, skip_formal=True))):
         rec["spread"][name] = run(works, items, (0,), **kw)
     print(json.dumps(rec, ensure_ascii=False, indent=1))
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
