@@ -1,0 +1,298 @@
+"""介入の研究 実験I27g: 行ごとに縮めた板で、中ほどの行を 2 通りに展開し、同じ名前の板を束ねて人物の統一感を見て、前後の行から展開を補う
+
+持ち主（2026-11-07）: 「行単位で圧縮を行い、中ほどの行をどちらの種類でも展開を行う、あと、行ごとに同じ名前のバッファ板があればその属性を統合して、
+全体として統一性があるか、特に人名、キャラクタで統一感があるかを調べてほしい。それから属性による展開で、正解率がある程度で頭打ちになるから、
+そうしたら今度は前後の行の属性から選択を補完して正解率が上がるか試してほしい、とくに前後の行を展開して補完した場合と、
+圧縮した（行のまとめられた板だけ）からの補完の差を調べてほしい」。
+入力は作品ごとの行の並び（童話の 20 行版の文、または Web 小説のテキストの行）。Web 小説で回した結果・板は _wn を付け、非公開の置き場だけに置く。
+  A. 行ごとの圧縮と、中ほどの行（各作品の行の真ん中 3 分の 1）の展開:
+       可逆（ネストをたどる、I27e）と、関連性（ネストを捨て、兄弟の組の前後で並べ直す、I27f の「対」。順は試しの行以外から学ぶ）。
+       関連性の展開は GiNZA で読み直し、値の帯の組の F1 で比べる。
+  B. 同じ名前の板を束ねる: 行ごとに、名詞のまとまり（I27c）の板に属性を集める
+       （修飾:M、する:V（が・は で係った述語）、される:V（を）、で・に:V、持つ:X（「N の X」の N））。
+       人物 = 2 行以上で述語の主語になったまとまり。人名 = その中で中心が固有名詞のもの。
+       統一感: (1) 行の板から名前を隠して、ほかの行で束ねた板のどれにいちばん近いか（余弦）で名前を当てる。
+              (2) 同じ人物の行の板どうしの近さと、違う人物の行の板との近さを比べる。
+  C. 属性による展開と、前後の行からの補い（中ほどの行が試し）:
+       問い: 行の中の名詞 N に係っていた語（修飾）と、N が主語になった述語（する）を、縮めた行の板（N と、そこに係り口があることだけ）から当てる。
+       属性による展開: N の束ねた板（ほかの行から）の、同じ種類の属性の数えで選ぶ。束ねに使う行を増やすと正解率がどこで頭打ちになるかを見る。
+       前後の行からの補い: 前後 w 行の語を候補と加点に足す。2 通り:
+         展開した前後: 前後の行の語すべて（値の帯をすべて開いた形）。
+         縮めた前後: 前後の行のまとめた板だけ（述語の中心と、そこに係る名詞の中心だけ）。
+       前後の語の重み = N との関連（ほかの行で N と同じ行に出た数、0 なら 0.1）。属性の数えに足して選ぶ。
+物差し: 展開の一致と F1、名前当ての正解率（偶然・いちばん多い人物と比べる）、近さの差、属性の当て方の正解率と、答えが候補に入っていた割合。
+結果: --out（童話は ../Project_Kotoyui_private/intervention/results/i27g.jsonl、Web 小説は i27g_wn.jsonl）。
+実行: python intervention/i27g_line_boards.py --tales <tales_v1_parsed.json> | --texts <作品1.txt> <作品2.txt> ... --out <jsonl>
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import random
+import sys
+from collections import Counter, defaultdict
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from i27c_compress_units import units  # noqa: E402
+from i27e_restore import compress, restore  # noqa: E402
+from i27f_generate import edges, f1, learn_pairs, realize, to_toks  # noqa: E402
+
+NOUN = ("NOUN", "PROPN", "PRON")
+
+
+def load_works(a, nlp):
+    works = []
+    if a.tales:
+        for t in json.load(open(a.tales, encoding="utf-8")):
+            works.append(dict(name=t["name"], lines=[dict(text=s["text"], toks=s["toks"]) for s in t["parsed"]["20"]]))
+    for p in a.texts or []:
+        lines = [x.strip() for x in open(p, encoding="utf-8") if x.strip()]
+        if a.max_lines:
+            lines = lines[: a.max_lines]
+        works.append(dict(name=os.path.basename(p), lines=[dict(text=x, toks=to_toks(nlp(x))) for x in lines]))
+    return works
+
+
+def middle(n):
+    return set(range(n // 3, n - n // 3))
+
+
+def line_boards(toks):
+    """行の中の名詞のまとまり → 属性の数え。あわせて、そのまとまりが主語か、中心が固有名詞か、属性の答え（修飾・する）。"""
+    tok2u, us = units(toks)
+    out = {}
+    for ui, u in enumerate(us):
+        if u["kind"] != "名詞":
+            continue
+        h = u["head"]
+        b = Counter()
+        mods = []
+        for i, w in enumerate(toks):
+            if w["head"] == h and tok2u[i] != ui and w["pos"] in ("ADJ", "VERB", "NOUN", "PROPN") and w["dep"] in ("acl", "amod", "nmod"):
+                b["修飾:" + w["lemma"]] += 1
+                mods.append((w["lemma"], w["dep"]))
+        hw = toks[h]
+        p = toks[hw["head"]]
+        subj = False
+        preds = []
+        if hw["head"] != h:
+            if hw["dep"] == "nsubj" and p["pos"] in ("VERB", "ADJ"):
+                b["する:" + p["lemma"]] += 1
+                subj = True
+                preds.append(p["lemma"])
+            elif hw["dep"] == "obj" and p["pos"] == "VERB":
+                b["される:" + p["lemma"]] += 1
+            elif hw["dep"] == "obl" and p["pos"] in ("VERB", "ADJ"):
+                b["で・に:" + p["lemma"]] += 1
+            elif hw["dep"] == "nmod" and p["pos"] in NOUN:
+                b["持つ:" + p["lemma"]] += 1
+        name = u["text"]
+        if name in out:
+            out[name]["board"].update(b)
+            out[name]["mods"] += mods
+            out[name]["preds"] += preds
+            out[name]["subj"] |= subj
+        else:
+            out[name] = dict(board=b, subj=subj, propn=hw["pos"] == "PROPN", mods=mods, preds=preds)
+    return out
+
+
+def skeleton(toks):
+    """行のまとめた板: 述語の中心と、そこに係る名詞の中心の見出しだけ（修飾は捨てる）。"""
+    keep = set()
+    for i, w in enumerate(toks):
+        if w["pos"] in ("VERB", "ADJ") and w["dep"] in ("ROOT", "advcl", "conj", "ccomp", "csubj"):
+            keep.add(w["lemma"])
+            for j, x in enumerate(toks):
+                if x["head"] == i and x["pos"] in NOUN and x["dep"] in ("nsubj", "obj", "obl", "iobj"):
+                    keep.add(x["lemma"])
+    return Counter(keep)
+
+
+def cos(a, b):
+    num = sum(v * b.get(k, 0) for k, v in a.items())
+    da = math.sqrt(sum(v * v for v in a.values()))
+    db = math.sqrt(sum(v * v for v in b.values()))
+    return num / (da * db) if da and db else 0.0
+
+
+def expand_part(works, nlp):
+    train = []
+    for w in works:
+        mid = middle(len(w["lines"]))
+        train.append(dict(name=w["name"], parsed={"20": [ln for i, ln in enumerate(w["lines"]) if i not in mid]}))
+    pairs = learn_pairs(train, -1)
+    rng = random.Random(0)
+    res = dict(n=0, reversible_exact=0, reversible_noisy_exact=0, assoc_same=0, assoc_f1=0.0, nest_f1_ceiling=0.0)
+    for w in works:
+        for i in sorted(middle(len(w["lines"]))):
+            toks = w["lines"][i]["toks"]
+            tok2u, us = units(toks)
+            boards, roots = compress(toks, tok2u, us)
+            res["n"] += 1
+            res["reversible_exact"] += restore(boards, roots, us, 0.0, rng) == list(range(len(toks)))
+            res["reversible_noisy_exact"] += restore(boards, roots, us, 0.2, rng) == list(range(len(toks)))
+            oc, _ = edges(toks)
+            ref = "".join(t["text"] for t in toks)
+            for how, key in (("関連（対）", "assoc"), ("元", "nest")):
+                seq = realize(toks, how, pairs, rng)
+                txt = "".join(toks[k]["text"] for k in seq)
+                nc, _ = edges(to_toks(nlp(txt)))
+                if key == "assoc":
+                    res["assoc_same"] += txt == ref
+                    res["assoc_f1"] += f1(oc, nc)
+                else:
+                    res["nest_f1_ceiling"] += f1(oc, nc)
+    n = max(1, res["n"])
+    return {k: (v / n if k != "n" else v) for k, v in res.items()}
+
+
+def unity_part(works):
+    res = []
+    for w in works:
+        lb = [line_boards(ln["toks"]) for ln in w["lines"]]
+        subj_lines = Counter(nm for b in lb for nm, x in b.items() if x["subj"])
+        chars = {nm for nm, c in subj_lines.items() if c >= 2}
+        propn = {nm for nm in chars if any(b.get(nm, {}).get("propn") for b in lb)}
+        merged = {c: Counter() for c in chars}
+        for b in lb:
+            for nm, x in b.items():
+                if nm in chars:
+                    merged[nm].update(x["board"])
+        hits, n, base_hits = 0, 0, 0
+        most = max(chars, key=lambda c: sum(merged[c].values())) if chars else None
+        within, between = [], []
+        confuse = Counter()
+        per = defaultdict(lambda: [0, 0])
+        for li, b in enumerate(lb):
+            for nm, x in b.items():
+                if nm not in chars or not x["board"]:
+                    continue
+                others = {c: merged[c] - (x["board"] if c == nm else Counter()) for c in chars}
+                sims = {c: cos(x["board"], m) for c, m in others.items()}
+                pred = max(sims, key=lambda c: (sims[c], sum(others[c].values())))
+                n += 1
+                hits += pred == nm
+                base_hits += most == nm
+                per[nm][0] += pred == nm
+                per[nm][1] += 1
+                if pred != nm:
+                    confuse[(nm, pred)] += 1
+                for lj, b2 in enumerate(lb):
+                    if lj == li:
+                        continue
+                    for nm2, x2 in b2.items():
+                        if nm2 in chars and x2["board"]:
+                            (within if nm2 == nm else between).append(cos(x["board"], x2["board"]))
+        top = {c: [k for k, _ in merged[c].most_common(8)] for c in sorted(chars, key=lambda c: -sum(merged[c].values()))[:8]}
+        res.append(dict(work=w["name"], n_lines=len(lb), n_chars=len(chars), n_names=len(propn), n_mentions=n,
+                        acc=hits / max(1, n), chance=1 / max(1, len(chars)), most_frequent=base_hits / max(1, n),
+                        acc_names=(sum(per[c][0] for c in propn) / max(1, sum(per[c][1] for c in propn))),
+                        within=sum(within) / max(1, len(within)), between=sum(between) / max(1, len(between)),
+                        confusions=[[a, b, c] for (a, b), c in confuse.most_common(5)], top_attrs=top,
+                        per_char={c: per[c] for c in chars}))
+    return res
+
+
+def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), beta=1.0, seed=0):
+    rng = random.Random(seed)
+    targets = []                               # (作品, 行, 名詞, 種類, 答え, 品詞の口)
+    lbs, sks, allw = [], [], []
+    for wi, w in enumerate(works):
+        lb = [line_boards(ln["toks"]) for ln in w["lines"]]
+        lbs.append(lb)
+        sks.append([skeleton(ln["toks"]) for ln in w["lines"]])
+        allw.append([Counter(t["lemma"] for t in ln["toks"] if t["pos"] in ("NOUN", "PROPN", "VERB", "ADJ")) for ln in w["lines"]])
+        pos_of = {}
+        for ln in w["lines"]:
+            for t in ln["toks"]:
+                pos_of.setdefault(t["lemma"], t["pos"])
+        w["_pos"] = pos_of
+        for li in sorted(middle(len(lb))):
+            for nm, x in lb[li].items():
+                for m, dep in x["mods"]:
+                    targets.append((wi, li, nm, "修飾", m, dep))
+                for p in x["preds"]:
+                    targets.append((wi, li, nm, "する", p, "pred"))
+
+    def merged_board(wi, li, nm, frac, order):
+        b = Counter()
+        lines = [lj for lj in order[wi] if lj != li][: max(1, int(round(frac * (len(lbs[wi]) - 1))))]
+        for lj in lines:
+            if nm in lbs[wi][lj]:
+                b.update(lbs[wi][lj][nm]["board"])
+        return b
+
+    def slot_ok(wi, lem, kind, dep):
+        p = works[wi]["_pos"].get(lem, "")
+        if kind == "する":
+            return p in ("VERB", "ADJ")
+        return p in (("NOUN", "PROPN") if dep == "nmod" else ("ADJ", "VERB"))
+    names_in = []
+    for lb in lbs:
+        d = defaultdict(set)
+        for lj, b in enumerate(lb):
+            for nm in b:
+                d[nm].add(lj)
+        names_in.append(d)
+    orders = [list(range(len(lb))) for lb in lbs]
+    for o in orders:
+        rng.shuffle(o)
+    out = dict(n_targets=len(targets), plateau={}, completion={})
+    for frac in fracs:
+        hit = cov = 0
+        for wi, li, nm, kind, ans, dep in targets:
+            b = merged_board(wi, li, nm, frac, orders)
+            cands = {k.split(":", 1)[1]: v for k, v in b.items() if k.startswith(kind + ":")}
+            cov += ans in cands
+            if cands:
+                hit += max(cands, key=lambda c: (cands[c], c)) == ans
+        out["plateau"][str(frac)] = dict(acc=hit / max(1, len(targets)), coverage=cov / max(1, len(targets)))
+    for w_ in win:
+        for mode in ("属性だけ", "展開した前後", "縮めた前後"):
+            hit = cov = 0
+            for wi, li, nm, kind, ans, dep in targets:
+                b = merged_board(wi, li, nm, 1.0, orders)
+                cands = Counter({k.split(":", 1)[1]: v for k, v in b.items() if k.startswith(kind + ":")})
+                if mode != "属性だけ":
+                    ctx = Counter()
+                    for lj in range(li - w_, li + w_ + 1):
+                        if lj == li or not (0 <= lj < len(lbs[wi])):
+                            continue
+                        ctx.update(allw[wi][lj] if mode == "展開した前後" else sks[wi][lj])
+                    for lem, c in ctx.items():
+                        if lem != nm and slot_ok(wi, lem, kind, dep):
+                            # 前後の行に出た語を、N との関連（ほかの行で N と同じ行に出た数）で重みを付けて足す
+                            co = sum(1 for lj in names_in[wi].get(nm, ()) if lj != li and lem in allw[wi][lj])
+                            cands[lem] += beta * min(c, 1) * (co if co else 0.1)
+                cov += ans in cands
+                if cands:
+                    hit += max(cands, key=lambda c: (cands[c], c)) == ans
+            out["completion"][f"{mode}|{w_}"] = dict(acc=hit / max(1, len(targets)), coverage=cov / max(1, len(targets)))
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tales", default=None)
+    ap.add_argument("--texts", nargs="*", default=None)
+    ap.add_argument("--max_lines", type=int, default=0)
+    ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i27g.jsonl")
+    ap.add_argument("--tag", default="tales")
+    a = ap.parse_args()
+    import spacy                                                     # CPU で動かす
+    nlp = spacy.load("ja_ginza")
+    works = load_works(a, nlp)
+    rec = dict(exp="I27g", tag=a.tag, works=len(works), lines=sum(len(w["lines"]) for w in works),
+               expand=expand_part(works, nlp), unity=unity_part(works), completion=completion_part(works))
+    print(json.dumps(dict(rec, unity=[{k: v for k, v in u.items() if k not in ("top_attrs", "per_char")} for u in rec["unity"]]),
+                     ensure_ascii=False, indent=1))
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    with open(a.out, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+if __name__ == "__main__":
+    main()
