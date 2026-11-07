@@ -81,13 +81,69 @@ def make_items(works, seed, per_work=1500):
                     cand = [d, h] if side == "遠い方が正解" else [h, d]
                     items.append(dict(work=wi, line=li, m=m, cand=cand, gold=h, distract=dk, side=side))
         w["_boards"] = boards
+        vec = defaultdict(Counter)                            # 作品の中の名詞の属性（似た語を探す用）
+        for b in boards:
+            for k, c in b.items():
+                vec[k].update(c)
+        w["_vec"] = vec
     return items
 
 
-def evidence(works, x, win):
-    bs = works[x["work"]]["_boards"]
+def sim_in_work(w, x, a, b, key):
+    """作品の中の属性の余弦。問いの属性（修飾:M）と、試しの行の分は除く。"""
+    own = w["_boards"][x["line"]]
+    va, vb = w["_vec"].get(a, {}), w["_vec"].get(b, {})
+
+    def get(v, word, k):
+        return v.get(k, 0) - own.get(word, {}).get(k, 0)
+    ks = [k for k in va if k != key and k in vb]
+    dot = sum(get(va, a, k) * get(vb, b, k) for k in ks)
+    if dot <= 0:
+        return 0.0
+    na = sum(get(va, a, k) ** 2 for k in va if k != key) ** 0.5
+    nb = sum(get(vb, b, k) ** 2 for k in vb if k != key) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
+VEC = {}
+
+
+def sim_vec(a, b):
+    import numpy as np
+    for wd in (a, b):
+        if wd not in VEC:
+            lx = NLP.vocab[wd]
+            VEC[wd] = lx.vector / (np.linalg.norm(lx.vector) + 1e-9) if lx.has_vector else None
+    if VEC[a] is None or VEC[b] is None:
+        return 0.0
+    c = float(VEC[a] @ VEC[b])
+    return c if 0 < c < 0.999 else 0.0                       # 辞書に無い語が同じ行に落ちた組（1.00）は除く
+
+
+NLP = None
+
+
+def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0):
+    """行ごとの候補の根拠。spread > 0 なら、同じ組だけでなく、候補に似た名詞に M が係った数も（似ている度合い × spread）足す（B1）。"""
+    w = works[x["work"]]
+    bs = w["_boards"]
     key = "修飾:" + x["m"]
-    return [[bs[lj].get(c, {}).get(key, 0) for c in x["cand"]] for lj in order(x["line"], len(bs), win)]
+    out = []
+    for lj in order(x["line"], len(bs), win):
+        b = bs[lj]
+        row = []
+        for c in x["cand"]:
+            v = b.get(c, {}).get(key, 0)
+            if spread:
+                for n, attrs in b.items():
+                    if n in x["cand"] or not attrs.get(key):
+                        continue
+                    sm = sim_in_work(w, x, c, n, key) if how == "作品の属性" else sim_vec(c, n)
+                    if sm > th:
+                        v += spread * sm * attrs[key]
+            row.append(v)
+        out.append(row)
+    return out
 
 
 def read_rule(ev):
@@ -117,7 +173,7 @@ def read_wave(ev, eps=0.3, q=0.6):
     return top, (conv + 1) / max(1, len(hist)), not got
 
 
-def run(works, items, wins):
+def run(works, items, wins, **ekw):
     rec = {}
     for win in wins:
         r = {}
@@ -129,7 +185,7 @@ def run(works, items, wins):
             near = rule_ok = wave_ok = silent = silent_err = 0
             rf = []
             for x in xs:
-                ev = evidence(works, x, win)
+                ev = evidence(works, x, win, **ekw)
                 gi = x["cand"].index(x["gold"])
                 near += gi == 0
                 rule_ok += read_rule(ev) == gi
@@ -163,6 +219,13 @@ def main():
     items = make_items(works, a.seed)
     rec = dict(exp="I27l", tag=a.tag, works=len(works), lines=sum(len(w["lines"]) for w in works), n=len(items),
                result=run(works, items, (10, 50, 200, 0)))
+    global NLP
+    import spacy
+    NLP = spacy.load("ja_ginza")
+    rec["spread"] = {}
+    for name, kw in (("似た語へ広げる 作品の属性 λ1", dict(spread=1.0)), ("似た語へ広げる 作品の属性 λ1 似0.3以上", dict(spread=1.0, th=0.3)),
+                     ("似た語へ広げる 語ベクトル λ1 似0.5以上", dict(spread=1.0, how="語ベクトル", th=0.5))):
+        rec["spread"][name] = run(works, items, (0,), **kw)
     print(json.dumps(rec, ensure_ascii=False, indent=1))
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "a", encoding="utf-8") as f:
