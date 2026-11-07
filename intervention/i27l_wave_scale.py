@@ -153,6 +153,7 @@ def sim_vec(a, b):
 
 
 NLP = None
+QUICK = ("似た語へ広げる 作品の属性 λ1", "広げる 同じ修飾 λ3", "広げる 同じ修飾 + 語ベクトル λ1")
 
 
 def sim_mod(w, x, a, b, m):
@@ -267,6 +268,7 @@ def main():
     ap.add_argument("--tag", default="")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--quick", action="store_true", help="大きい量で回すとき: 読む幅は 50 行と全部、広げ方は 3 通りだけ")
     a = ap.parse_args()
     if a.cache:
         works = json.load(open(a.cache, encoding="utf-8"))
@@ -275,7 +277,7 @@ def main():
         works = [dict(name=str(i), lines=t["parsed"]["20"]) for i, t in enumerate(tales)]
     items = make_items(works, a.seed)
     rec = dict(exp="I27l", tag=a.tag, works=len(works), lines=sum(len(w["lines"]) for w in works), n=len(items),
-               result=run(works, items, (10, 50, 200, 0)))
+               result=run(works, items, (50, 0) if a.quick else (10, 50, 200, 0)))
     global NLP
     import spacy
     NLP = spacy.load("ja_ginza")
@@ -290,6 +292,8 @@ def main():
                      ("広げる 同じ修飾 λ3", dict(spread=3.0, how="同じ修飾")),
                      ("広げる 同じ修飾 + 語ベクトル λ1", dict(spread=1.0, how="同じ修飾 + 語ベクトル")),
                      ("広げる 作品の属性 λ3 分ける + 頻度で割り引く", dict(spread=3.0, split=True, freq_discount=True))):
+        if a.quick and name not in QUICK:
+            continue
         rec["spread"][name] = run(works, items, (0,), **kw)
     print(json.dumps(rec, ensure_ascii=False, indent=1))
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
