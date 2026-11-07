@@ -263,7 +263,7 @@ def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), bet
                 ctx.update(allw[wi][lj] if mode == "展開した前後" else sks[wi][lj])
         return ctx
 
-    def run(w_, mode, fill, beta_):
+    def run(w_, mode, fill, beta_, rec=None):
         hit = top5 = cov = 0
         for wi, li, nm, kind, ans, dep in targets:
             b = merged_board(wi, li, nm, 1.0, orders)
@@ -275,10 +275,12 @@ def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), bet
                         co = sum(1 for lj in names_in[wi].get(nm, ()) if lj != li and lem in allw[wi][lj])
                         cands[lem] += beta_ * min(c, 1) * (co if co else 0.1)
             cov += ans in cands
-            if cands:
-                rk = sorted(cands, key=lambda c: (-cands[c], c))
+            rk = sorted(cands, key=lambda c: (-cands[c], c)) if cands else []
+            if rk:
                 hit += rk[0] == ans
                 top5 += ans in rk[:5]
+            if rec is not None:
+                rec.append(rk[:5])
         n = max(1, len(targets))
         return dict(acc=hit / n, top5=top5 / n, coverage=cov / n)
     out["sweep"] = {}
@@ -290,7 +292,59 @@ def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), bet
             out["sweep"][f"{mode}|{w_}|無いときだけ"] = run(w_, mode, "無いときだけ", beta)
             for b_ in (0.3, 3.0):
                 out["sweep"][f"{mode}|{w_}|足す β{b_}"] = run(w_, mode, "足す", b_)
+    ex = {}
+    for mode in ("属性だけ", "展開した前後", "縮めた前後"):
+        ex[mode] = []
+        run(3, mode, "足す", 0.3, ex[mode])
+    out["_examples"] = [dict(t=t, picks={m: ex[m][i] for m in ex}) for i, t in enumerate(targets)]
     return out
+
+
+def write_examples(works, examples, path, n, ctx=5, seed=0):
+    """補いの例: 前後の行で直った / 壊れた / どれも当たり / どれも外れを混ぜて n 個。中ほどの行は関連性で作り直した文も付ける。"""
+    rng = random.Random(seed)
+    groups = defaultdict(list)
+    for e in examples:
+        wi, li, nm, kind, ans, dep = e["t"]
+        ok = {m: bool(p) and p[0] == ans for m, p in e["picks"].items()}
+        if not ok["属性だけ"] and ok["展開した前後"] and ok["縮めた前後"]:
+            g = "前後で直った（両方）"
+        elif not ok["属性だけ"] and ok["展開した前後"]:
+            g = "展開した前後だけで直った"
+        elif not ok["属性だけ"] and ok["縮めた前後"]:
+            g = "縮めた前後だけで直った"
+        elif ok["属性だけ"] and not (ok["展開した前後"] and ok["縮めた前後"]):
+            g = "前後で壊れた"
+        elif all(ok.values()):
+            g = "どれも当たり"
+        else:
+            g = "どれも外れ"
+        groups[g].append(e)
+    quota = {"前後で直った（両方）": 3, "展開した前後だけで直った": 4, "縮めた前後だけで直った": 4, "前後で壊れた": 4, "どれも当たり": 2, "どれも外れ": 3}
+    train = [dict(name=w["name"], parsed={"20": [ln for i, ln in enumerate(w["lines"]) if i not in middle(len(w["lines"]))]}) for w in works]
+    pairs = learn_pairs(train, -1)
+    out = ["# I27g 補いの例（非公開: Web 小説の本文を含む。_wn）", "",
+           f"前後 {ctx} 行つき。問い = 中ほどの行の名詞 N に係っていた語（修飾）か、N が主語の述語（する）。補いは前後 3 行・β 0.3。上位 5 を左から。", ""]
+    k = 0
+    for g, q in quota.items():
+        pick = rng.sample(groups[g], min(q, len(groups[g])))
+        out += [f"## {g}（全 {len(groups[g])} 問中 {len(pick)}）", ""]
+        for e in sorted(pick, key=lambda e: (e["t"][0], e["t"][1])):
+            k += 1
+            wi, li, nm, kind, ans, dep = e["t"]
+            w = works[wi]
+            toks = w["lines"][li]["toks"]
+            gen = "".join(toks[j]["text"] for j in realize(toks, "関連（対）", pairs, rng))
+            out += [f"### {k}. 作品 {chr(65 + wi)}・{li + 1} 行目　N = {nm}（{kind}）　答え = {ans}", ""]
+            for lj in range(max(0, li - ctx), min(len(w["lines"]), li + ctx + 1)):
+                mark = "▶ " if lj == li else "　 "
+                out.append(f"    {mark}{lj + 1:>4}: {w['lines'][lj]['text']}")
+            out += ["", f"- 関連性で作り直した行: {gen}"]
+            for m, p in e["picks"].items():
+                out.append(f"- {m}: {' / '.join(p) if p else '（候補なし）'}{'　○' if p and p[0] == ans else ''}")
+            out.append("")
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
 
 
 def main():
@@ -300,6 +354,8 @@ def main():
     ap.add_argument("--max_lines", type=int, default=0)
     ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i27g.jsonl")
     ap.add_argument("--tag", default="tales")
+    ap.add_argument("--examples", default=None, help="補いの例を前後 5 行つきで書く md（非公開、本文を含む）")
+    ap.add_argument("--n_examples", type=int, default=20)
     ap.add_argument("--cache", default=None, help="解析した行を JSON で置く / 読む（非公開の置き場）")
     a = ap.parse_args()
     import spacy                                                     # CPU で動かす
@@ -312,6 +368,9 @@ def main():
             json.dump(works, open(a.cache, "w", encoding="utf-8"), ensure_ascii=False)
     rec = dict(exp="I27g", tag=a.tag, works=len(works), lines=sum(len(w["lines"]) for w in works),
                expand=expand_part(works, nlp), unity=unity_part(works), completion=completion_part(works))
+    examples = rec["completion"].pop("_examples")
+    if a.examples:
+        write_examples(works, examples, a.examples, a.n_examples)
     print(json.dumps(dict(rec, unity=[{k: v for k, v in u.items() if k not in ("top_attrs", "per_char")} for u in rec["unity"]]),
                      ensure_ascii=False, indent=1))
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
