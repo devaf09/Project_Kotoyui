@@ -288,34 +288,78 @@ def read_wave(ev, eps=0.3, q=0.6):
     return top, (conv + 1) / max(1, len(hist)), not got
 
 
-def run(works, items, wins, **ekw):
+_JOB = {}
+
+
+def _one(k):
+    """1 問を読む（並列の働き手が呼ぶ。作品・問い・広げ方は fork のときに _JOB で受け継ぐ）。"""
+    works, items, win, ekw = _JOB["works"], _JOB["items"], _JOB["win"], _JOB["ekw"]
+    x = items[k]
+    ev = evidence(works, x, win, **ekw)
+    gi = x["cand"].index(x["gold"])
+    t, f, s = read_wave(ev)
+    return gi == 0, read_rule(ev) == gi, t == gi, f, s, t
+
+
+JOBS = 1
+ANSWERS = {}                                            # (広げ方の名前, 読む幅) → 問いごとの波の答え（例を書き出す用）
+
+
+def run(works, items, wins, name="同じ組だけ", **ekw):
     rec = {}
     for win in wins:
+        _JOB.update(works=works, items=items, win=win, ekw=ekw)
+        if JOBS > 1:
+            import multiprocessing as mp
+            with mp.get_context("fork").Pool(JOBS) as pool:
+                res = pool.map(_one, range(len(items)), chunksize=max(1, len(items) // (JOBS * 20)))
+        else:
+            res = [_one(k) for k in range(len(items))]
+        ANSWERS[(name, win)] = [r[5] for r in res]
         r = {}
         groups = defaultdict(list)
-        for x in items:
-            groups[(x["distract"], x["side"])].append(x)
-            groups[(x["distract"], "合わせて")].append(x)
-        for g, xs in sorted(groups.items()):
-            near = rule_ok = wave_ok = silent = silent_err = 0
-            rf = []
-            for x in xs:
-                ev = evidence(works, x, win, **ekw)
-                gi = x["cand"].index(x["gold"])
-                near += gi == 0
-                rule_ok += read_rule(ev) == gi
-                t, f, s = read_wave(ev)
-                wave_ok += t == gi
-                silent += s
-                silent_err += s and t != gi
-                if not s:
-                    rf.append(f)
-            n = len(xs)
+        for k, x in enumerate(items):
+            groups[(x["distract"], x["side"])].append(k)
+            groups[(x["distract"], "合わせて")].append(k)
+        for g, ks in sorted(groups.items()):
+            near = sum(res[k][0] for k in ks)
+            rule_ok = sum(res[k][1] for k in ks)
+            wave_ok = sum(res[k][2] for k in ks)
+            silent = sum(res[k][4] for k in ks)
+            silent_err = sum(res[k][4] and not res[k][2] for k in ks)
+            rf = [res[k][3] for k in ks if not res[k][4]]
+            n = len(ks)
             r["/".join(g)] = dict(n=n, 近い方=near / n, 規則=rule_ok / n, 波=wave_ok / n, 静か=silent / n,
                                   静かの誤り=silent_err / max(1, silent), 波_静か以外=(wave_ok - (silent - silent_err)) / max(1, n - silent),
                                   収束まで読んだ割合=sum(rf) / max(1, len(rf)))
         rec[str(win or "全部")] = r
     return rec
+
+
+def dump_examples(works, items, path, n=20, seed=0):
+    """問いを n 個でたらめに選び、前後 1 行と、広げ方ごとの波の答えを書く（非公開の置き場だけに置く）。"""
+    rng = random.Random(seed)
+    ks = rng.sample(range(len(items)), min(n, len(items)))
+    out = ["# I27l 問いの例（非公開）", "",
+           "問いの作り方: 行の中の「M → H」（修飾が名詞に直に係る所）に、紛らわしい名詞 D を足して曖昧にする。"
+           "遠い方が正解 = 「M D の H」、近い方が正解 = 「M H の D」。答えはいつも H。", ""]
+    for j, k in enumerate(ks, 1):
+        x = items[k]
+        lines = works[x["work"]]["lines"]
+        li = x["line"]
+        d = [c for c in x["cand"] if c != x["gold"]][0]
+        shape = f"{x['m']} {d} の {x['gold']}" if x["side"] == "遠い方が正解" else f"{x['m']} {x['gold']} の {d}"
+        out += [f"## {j}. 作品 {works[x['work']]['name']} {li} 行目　{x['distract']}・{x['side']}", "",
+                f"- 曖昧にした形: 「{shape}」　候補 = {x['cand']}　答え = {x['gold']}"]
+        for lj in (li - 1, li, li + 1):
+            if 0 <= lj < len(lines):
+                out.append(f"- {'▶' if lj == li else '　'} {lines[lj]['text']}")
+        for (nm, win), ans in ANSWERS.items():
+            got = x["cand"][ans[k]]
+            out.append(f"- [{'○' if got == x['gold'] else '×'}] {nm}（読む幅 {win or '全部'}）→ {got}")
+        out.append("")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out))
 
 
 def main():
@@ -325,8 +369,14 @@ def main():
     ap.add_argument("--tag", default="")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--jobs", type=int, default=1, help="並列の数（CPU の働き手）")
+    ap.add_argument("--dump", default=None, help="問いの例を書く md（非公開の置き場）")
+    ap.add_argument("--dump_n", type=int, default=20)
+    ap.add_argument("--only", default=None, help="この名前の広げ方だけ回す（| で区切る）")
     ap.add_argument("--quick", action="store_true", help="大きい量で回すとき: 読む幅は 50 行と全部、広げ方は 3 通りだけ")
     a = ap.parse_args()
+    global JOBS
+    JOBS = a.jobs
     if a.cache:
         works = json.load(open(a.cache, encoding="utf-8"))
     else:
@@ -356,11 +406,16 @@ def main():
                      ("広げる 作品の属性 λ3 分ける + 頻度で割り引く", dict(spread=3.0, split=True, freq_discount=True))):
         if a.quick and name not in QUICK:
             continue
-        rec["spread"][name] = run(works, items, (0,), **kw)
+        if a.only and name not in a.only.split("|"):
+            continue
+        rec["spread"][name] = run(works, items, (0,), name=name, **kw)
+        print(name, "done", flush=True)
     print(json.dumps(rec, ensure_ascii=False, indent=1))
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    if a.dump:
+        dump_examples(works, items, a.dump, a.dump_n, a.seed)
 
 
 if __name__ == "__main__":
