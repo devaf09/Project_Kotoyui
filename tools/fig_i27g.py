@@ -48,6 +48,7 @@ def fig_expand(r, path):
 
 def fig_unity(r, path):
     us = [u for u in r["unity"] if u["n_mentions"] > 0]
+    labels = [u["work"][:8] if not u["work"][:1].isdigit() else f"作品 {chr(65 + i)}" for i, u in enumerate(us)]
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.0), facecolor=SURF, gridspec_kw=dict(width_ratios=[3, 2]))
     ax = axes[0]
     style(ax, "名前を隠して、束ねた板から人物を当てる")
@@ -55,14 +56,14 @@ def fig_unity(r, path):
     w = 0.26
     for k, (key, lab, col) in enumerate((("acc", "束ねた板で当てる", S1), ("most_frequent", "いちばん多い人物", S2), ("chance", "偶然", S3))):
         ax.bar([i + (k - 1) * w for i in x], [u[key] for u in us], width=w, color=col, label=lab, edgecolor=SURF, linewidth=1.5)
-    ax.set_xticks(list(x), [u["work"][:8] for u in us], rotation=45, ha="right", fontsize=8)
+    ax.set_xticks(list(x), labels, rotation=45, ha="right", fontsize=8)
     ax.set_ylim(0, 1.05)
     ax.legend(fontsize=8, frameon=False, loc="upper right")
     ax = axes[1]
     style(ax, "行の板どうしの近さ（余弦）")
     ax.bar([i - 0.2 for i in x], [u["within"] for u in us], width=0.4, color=S1, label="同じ人物", edgecolor=SURF, linewidth=1.5)
     ax.bar([i + 0.2 for i in x], [u["between"] for u in us], width=0.4, color=S2, label="違う人物", edgecolor=SURF, linewidth=1.5)
-    ax.set_xticks(list(x), [u["work"][:8] for u in us], rotation=45, ha="right", fontsize=8)
+    ax.set_xticks(list(x), labels, rotation=45, ha="right", fontsize=8)
     ax.legend(fontsize=8, frameon=False)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
@@ -72,26 +73,34 @@ def fig_unity(r, path):
 def fig_completion(r, path):
     c = r["completion"]
     fr = sorted(c["plateau"], key=float)
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.0), facecolor=SURF)
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.0), facecolor=SURF)
     ax = axes[0]
-    style(ax, f"属性による展開: 束ねる行を増やす（問い {c['n_targets']}）")
+    style(ax, f"属性による展開（問い {c['n_targets']}）")
     ax.plot([float(f) for f in fr], [c["plateau"][f]["acc"] for f in fr], color=S1, lw=2, marker="o", ms=6, label="正解率")
     ax.plot([float(f) for f in fr], [c["plateau"][f]["coverage"] for f in fr], color=S2, lw=2, marker="o", ms=6, label="答えが候補にある")
     ax.set_xlabel("束ねに使ったほかの行の割合", fontsize=9, color=INK2)
     ax.legend(fontsize=8, frameon=False)
     ax.set_ylim(0, max(0.05, max(c["plateau"][f]["coverage"] for f in fr)) * 1.25)
-    ax = axes[1]
-    style(ax, "前後の行から補う（正解率）")
     wins = sorted({int(k.split("|")[1]) for k in c["completion"]})
-    for mode, col in (("属性だけ", S3), ("展開した前後", S1), ("縮めた前後", S2)):
-        ys = [c["completion"][f"{mode}|{w}"]["acc"] for w in wins]
-        ax.plot(wins, ys, color=col, lw=2, marker="o", ms=6, label=mode)
-        ax.text(wins[-1] + 0.08, ys[-1], f"{ys[-1]:.2f}", fontsize=8, color=INK, va="center")
-    ax.set_xticks(wins, [f"前後 {w} 行" for w in wins])
-    ax.set_xlim(wins[0] - 0.3, wins[-1] + 0.5)
-    ax.legend(fontsize=8, frameon=False)
-    top = max(v["acc"] for v in c["completion"].values())
-    ax.set_ylim(0, max(0.05, top) * 1.3)
+    sw = c.get("sweep", {})
+
+    def get(mode, w, key):
+        k = f"{mode}|{w}|足す β0.3"
+        return (sw[k] if k in sw else c["completion"][f"{mode}|{w}"])[key]
+    for ax, key, title in ((axes[1], "acc", "前後の行から補う: 正解率（1 位）"), (axes[2], "coverage", "前後の行から補う: 答えが候補にある")):
+        style(ax, title)
+        top = 0
+        for mode, col in (("属性だけ", S3), ("展開した前後", S1), ("縮めた前後", S2)):
+            ys = [c["completion"][f"{mode}|{w}"][key] if mode == "属性だけ" else get(mode, w, key) for w in wins]
+            top = max(top, max(ys))
+            ax.plot(wins, ys, color=col, lw=2, marker="o", ms=6, label=mode)
+            if key == "coverage":                                          # 正解率の方は値が重なるので、凡例と表に任せる
+                ax.text(wins[-1] + 0.08, ys[-1], f"{ys[-1]:.3f}", fontsize=8, color=INK, va="center")
+        ax.set_xticks(wins, [f"前後 {w} 行" for w in wins])
+        ax.set_xlim(wins[0] - 0.3, wins[-1] + 0.6)
+        ax.set_ylim(0, max(0.05, top) * 1.3)
+        ax.legend(fontsize=8, frameon=False, loc="lower right")
+    fig.text(0.99, 0.01, "前後の語の重み β = 0.3（結果に掃引あり）", ha="right", fontsize=8, color=INK2)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
