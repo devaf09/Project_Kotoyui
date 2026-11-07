@@ -111,10 +111,10 @@ def skeleton(toks):
     return Counter(keep)
 
 
-def cos(a, b):
+def cos(a, b, db=None):
     num = sum(v * b.get(k, 0) for k, v in a.items())
     da = math.sqrt(sum(v * v for v in a.values()))
-    db = math.sqrt(sum(v * v for v in b.values()))
+    db = math.sqrt(sum(v * v for v in b.values())) if db is None else db
     return num / (da * db) if da and db else 0.0
 
 
@@ -161,6 +161,9 @@ def unity_part(works):
             for nm, x in b.items():
                 if nm in chars:
                     merged[nm].update(x["board"])
+        norms = {c: math.sqrt(sum(v * v for v in merged[c].values())) for c in chars}
+        sizes = {c: sum(merged[c].values()) for c in chars}
+        rng = random.Random(0)
         hits, n, base_hits = 0, 0, 0
         most = max(chars, key=lambda c: sum(merged[c].values())) if chars else None
         within, between = [], []
@@ -170,9 +173,9 @@ def unity_part(works):
             for nm, x in b.items():
                 if nm not in chars or not x["board"]:
                     continue
-                others = {c: merged[c] - (x["board"] if c == nm else Counter()) for c in chars}
-                sims = {c: cos(x["board"], m) for c, m in others.items()}
-                pred = max(sims, key=lambda c: (sims[c], sum(others[c].values())))
+                sims = {c: cos(x["board"], merged[c], norms[c]) for c in chars if c != nm}
+                sims[nm] = cos(x["board"], merged[nm] - x["board"])           # 自分の行は束ねから除く
+                pred = max(sims, key=lambda c: (sims[c], sizes[c]))
                 n += 1
                 hits += pred == nm
                 base_hits += most == nm
@@ -180,7 +183,8 @@ def unity_part(works):
                 per[nm][1] += 1
                 if pred != nm:
                     confuse[(nm, pred)] += 1
-                for lj, b2 in enumerate(lb):
+                for lj in rng.sample(range(len(lb)), min(len(lb), 200)):      # 近さは 200 行までの見本で測る
+                    b2 = lb[lj]
                     if lj == li:
                         continue
                     for nm2, x2 in b2.items():
@@ -219,9 +223,9 @@ def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), bet
 
     def merged_board(wi, li, nm, frac, order):
         b = Counter()
-        lines = [lj for lj in order[wi] if lj != li][: max(1, int(round(frac * (len(lbs[wi]) - 1))))]
-        for lj in lines:
-            if nm in lbs[wi][lj]:
+        k = max(1, int(round(frac * (len(lbs[wi]) - 1))))
+        for lj in names_in[wi].get(nm, ()):
+            if lj != li and rank[wi][lj] - (rank[wi][lj] > rank[wi][li]) < k:     # 並べ替えた順で先頭 k 行（自分の行を除く）に入る行だけ
                 b.update(lbs[wi][lj][nm]["board"])
         return b
 
@@ -240,6 +244,7 @@ def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), bet
     orders = [list(range(len(lb))) for lb in lbs]
     for o in orders:
         rng.shuffle(o)
+    rank = [{lj: r for r, lj in enumerate(o)} for o in orders]
     out = dict(n_targets=len(targets), plateau={}, completion={})
     for frac in fracs:
         hit = cov = 0
