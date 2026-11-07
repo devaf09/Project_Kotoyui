@@ -27,6 +27,7 @@ import math
 import os
 import random
 import sys
+from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i27a_story_check import story_boards  # noqa: E402
@@ -50,7 +51,7 @@ def sent_boards(tale, lv, j, cache):
         one = {"parsed": {lv: [tale["parsed"][lv][j]]}}
         full = story_boards(one, (lv,))
         cb = copy_board(one, (lv,))
-        cache[k] = (clean_board(full, cb), cb)
+        cache[k] = (clean_board(full, cb), cb, full)
     return cache[k]
 
 
@@ -73,9 +74,16 @@ def build(tales, labels):
                     mlem = toks[us[ui]["head"]]["lemma"]
                     ev = []                                      # 読む順の文ごとの (きれいな根拠, 写し) を候補ごとに
                     for l2, j in stream(t, lv, si):
-                        cl, cb = sent_boards(t, l2, j, cache)
-                        ev.append([(story_has(cl, toks, us, u, mlem), story_has(cb, toks, us, u, mlem)) for u in cand])
-                    items.append(dict(id=pid, level=lv, gold=g, cand=[us[u]["text"] for u in cand], ev=ev))
+                        cl, cb, full = sent_boards(t, l2, j, cache)
+                        m_else = any(c.get("修飾:" + mlem, 0) > 0 for c in cl.values())
+                        row = []
+                        for u in cand:
+                            c = story_has(cl, toks, us, u, mlem)
+                            present = any(full.get(k2) for k2 in (us[u]["text"], toks[us[u]["head"]]["lemma"]))
+                            # 打ち消し: その文に u が出ているのに M は付かず、M ははっきり別の語に付いている
+                            row.append((c, story_has(cb, toks, us, u, mlem), int(present and not c and m_else)))
+                        ev.append(row)
+                    items.append(dict(id=pid, tale=ti, level=lv, gold=g, cand=[us[u]["text"] for u in cand], ev=ev))
     return items
 
 
@@ -83,14 +91,17 @@ def right(x, r):
     return x["gold"] == "両方" or r == x["gold"]
 
 
-def wave(x, rng, eps=0.3, q=0.6, copy_phase="random", w_copy=1.0):
+def wave(x, rng, eps=0.3, q=0.6, copy_phase="random", w_copy=1.0, w_neg=0.0, prior=None):
     n = len(x["cand"])
-    amp = [complex(eps if k == 0 else 0.0) for k in range(n)]
-    hist = []
+    amp = [complex(eps if k == 0 else 0.0) for k in range(n)] if prior is None else [complex(eps * v) for v in prior]
+    hist, got = [], False
     for row in x["ev"]:
-        for k, (c, p) in enumerate(row):
+        got = got or any(c or (p and w_copy) or (ng and w_neg) for c, p, ng in row)
+        for k, (c, p, ng) in enumerate(row):
             if c:
                 amp[k] += c                                       # きれいな根拠は位相 0
+            if ng and w_neg and abs(amp[k]) > 0:              # 打ち消し（位相 π）。0 を越えて逆向きに明るくはしない
+                amp[k] -= amp[k] / abs(amp[k]) * min(w_neg * ng, abs(amp[k]))
             if p and w_copy:
                 for _ in range(p):
                     ph = rng.uniform(0, 2 * math.pi) if copy_phase == "random" else 0.0
@@ -98,8 +109,7 @@ def wave(x, rng, eps=0.3, q=0.6, copy_phase="random", w_copy=1.0):
         b = [abs(a) ** 2 for a in amp]
         tot = sum(b)
         top = max(range(n), key=lambda k: (b[k], -k))
-        lit = b[top] > eps ** 2 + 1e-9                          # ε だけの明るさは根拠ではない（収束に数えない）
-        hist.append((top, b[top] / tot if lit else 0.0))
+        hist.append((top, b[top] / tot if got and tot else 0.0))   # 根拠が来るまでは収束に数えない
     b = [abs(a) ** 2 for a in amp]
     top = max(range(n), key=lambda k: (b[k], -k))
     # 収束: いちばん明るい仮説が q 以上で、そのあと最後まで同じ
@@ -110,26 +120,50 @@ def wave(x, rng, eps=0.3, q=0.6, copy_phase="random", w_copy=1.0):
         else:
             break
     flipped = any(h[1] >= q and h[0] != top for h in hist)
-    silent = b[top] <= eps ** 2 + 1e-9
+    silent = not got
     return x["cand"][top], conv + 1, len(hist), flipped, silent
 
 
 def rule(x, use_copy):
     tot = [0] * len(x["cand"])
     for row in x["ev"]:
-        for k, (c, p) in enumerate(row):
+        for k, (c, p, _) in enumerate(row):
             tot[k] += c + (p if use_copy else 0)
     pos = [k for k, v in enumerate(tot) if v > 0]
     return x["cand"][pos[0] if len(pos) == 1 else 0]
 
 
-def evaluate(items, seeds=6, **kw):
+def experience_priors(tales, labels, seeds=2):
+    """I27j の経験の器（話を 3 つに分け、ほかの話の経験で学ぶ）の出口の明るさを、候補ごとの初めの振幅にする（I12 の形で渡す）。"""
+    from i08_light_judge import Memory
+    from i27h_judge_text import build_items
+    from i27j_light_judge_text import concl_t, scene_t
+    hi = build_items(tales, labels)
+    tids = sorted({x["tale"] for x in hi})
+    out = {}
+    for f in [tids[k::3] for k in range(3)]:
+        eps = [scene_t(x) + [f"結論:{concl_t(x)}"] for x in hi if x["tale"] not in f and concl_t(x)]
+        mems = [Memory(eps, sd, how="labeled") for sd in range(seeds)]
+        for x in hi:
+            if x["tale"] not in f:
+                continue
+            n = len(x["cand"])
+            b = Counter()
+            for mem in mems:
+                b.update(mem.recall(scene_t(x), ("近", "遠", "中")))
+            v = [b["近"]] + [b["中"]] * (n - 2) + [b["遠"]]
+            top = max(v) or 1.0
+            out[x["id"]] = [math.sqrt(max(0.0, w) / top) for w in v]
+    return out
+
+
+def evaluate(items, seeds=6, priors=None, **kw):
     acc, acc_s, conv, asked = [], [], [], []
     grp = {g: [0, 0] for g in ("静か", "考え直し", "そのほか")}
     short = [x for x in items if x["level"] != "20"]
     for sd in range(seeds):
         rng = random.Random(sd)
-        res = {x["id"]: wave(x, rng, **kw) for x in items}
+        res = {x["id"]: wave(x, rng, prior=(priors or {}).get(x["id"]), **kw) for x in items}
         acc.append(sum(right(x, res[x["id"]][0]) for x in items) / len(items))
         acc_s.append(sum(right(x, res[x["id"]][0]) for x in short) / len(short))
         lit = [x for x in items if not res[x["id"]][4]]
@@ -151,6 +185,7 @@ def main():
     ap.add_argument("--tales", required=True)
     ap.add_argument("--labels", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--priors", action="store_true", help="I27j の経験の器の明るさを初めの振幅にする（torch を使う、CPU）")
     a = ap.parse_args()
     tales = json.load(open(a.tales, encoding="utf-8"))
     labels = json.load(open(a.labels, encoding="utf-8"))
@@ -163,8 +198,17 @@ def main():
     rec["near"] = dict(acc=sum(right(x, x["cand"][0]) for x in items) / len(items),
                        acc_short=sum(right(x, x["cand"][0]) for x in short) / len(short))
     rec["wave"] = {}
-    for name, kw in (("波 写しはでたらめな位相", dict()), ("波 写しも位相 0（そろう）", dict(copy_phase="zero")),
-                     ("波 写しを除く", dict(w_copy=0.0)), ("波 q0.8", dict(q=0.8)), ("波 ε0.1", dict(eps=0.1))):
+    pri = experience_priors(tales, labels) if a.priors else None
+    conds = [("波 写しはでたらめな位相", dict()), ("波 写しも位相 0（そろう）", dict(copy_phase="zero")),
+             ("波 写しを除く", dict(w_copy=0.0)), ("波 q0.8", dict(q=0.8)), ("波 ε0.1", dict(eps=0.1)),
+             ("波 + 打ち消し 0.5", dict(w_neg=0.5)), ("波 + 打ち消し 1", dict(w_neg=1.0)),
+             ("波 写しを除く + 打ち消し 0.5", dict(w_copy=0.0, w_neg=0.5))]
+    if pri:
+        for e in (0.3, 0.6, 1.0):
+            conds += [(f"波 + 経験の初め ε{e}", dict(priors=pri, eps=e)),
+                      (f"波 写しを除く + 経験の初め ε{e}", dict(priors=pri, eps=e, w_copy=0.0)),
+                      (f"波 写しを除く + 経験の初め ε{e} + 打ち消し 0.5", dict(priors=pri, eps=e, w_copy=0.0, w_neg=0.5))]
+    for name, kw in conds:
         rec["wave"][name] = evaluate(items, **kw)
     print(json.dumps(rec, ensure_ascii=False, indent=1))
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
