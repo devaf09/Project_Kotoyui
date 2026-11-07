@@ -109,6 +109,14 @@ def make_items(works, seed, per_work=1500):
             for k, c in nb.items():
                 vecs[k].update(c)
         w["_boards_s"], w["_vecs"], w["_split"] = bss, vecs, split
+        # 関わりの種類ごとの似方: 名詞 → 受けた連体の修飾（acl / amod）の数え。行ごとにも持つ（試しの行の分を引くため）
+        w["_mods_line"] = [Counter() for _ in lines]
+        vm = defaultdict(Counter)
+        for li, ln in enumerate(lines):
+            for m, h in line_mods(ln["toks"]):
+                vm[h][m] += 1
+                w["_mods_line"][li][(h, m)] += 1
+        w["_vmod"] = vm
     return items
 
 
@@ -147,6 +155,21 @@ def sim_vec(a, b):
 NLP = None
 
 
+def sim_mod(w, x, a, b, m):
+    """「同じ連体の修飾を受けたか」だけで測る似方。問いの修飾 M と、試しの行の分は除く。"""
+    own = w["_mods_line"][x["line"]]
+    va, vb = w["_vmod"].get(a, {}), w["_vmod"].get(b, {})
+
+    def get(v, word, k):
+        return v.get(k, 0) - own.get((word, k), 0)
+    dot = sum(get(va, a, k) * get(vb, b, k) for k in va if k != m and k in vb)
+    if dot <= 0:
+        return 0.0
+    na = sum(get(va, a, k) ** 2 for k in va if k != m) ** 0.5
+    nb = sum(get(vb, b, k) ** 2 for k in vb if k != m) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
 def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0, skip_formal=False, freq_discount=False, split=False):
     """行ごとの候補の根拠。spread > 0 なら、同じ組だけでなく、候補に似た名詞に M が係った数も（似ている度合い × spread）足す（B1）。"""
     w = works[x["work"]]
@@ -163,7 +186,14 @@ def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0, skip_form
                     base = n.split("|")[0]
                     if base in x["cand"] or not attrs.get(key) or (skip_formal and base in FORMAL2):
                         continue
-                    sm = sim_in_work(w, x, c, n, key, split) if how == "作品の属性" else sim_vec(c, base)
+                    if how == "作品の属性":
+                        sm = sim_in_work(w, x, c, n, key, split)
+                    elif how == "同じ修飾":
+                        sm = sim_mod(w, x, c, base, x["m"])
+                    elif how == "同じ修飾 + 語ベクトル":
+                        sm = max(sim_mod(w, x, c, base, x["m"]), sim_vec(c, base) if sim_vec(c, base) >= 0.5 else 0.0)
+                    else:
+                        sm = sim_vec(c, base)
                     if freq_discount:                   # よく出る語ほど何にでも似るので、出た数の対数で割り引く
                         sm /= math.log(2 + sum(w["_vecs" if split else "_vec"].get(n, {}).values()))
                     if sm > th:
@@ -256,6 +286,9 @@ def main():
                      ("広げる 作品の属性 λ3 形式名詞を除く + 頻度で割り引く", dict(spread=3.0, skip_formal=True, freq_discount=True)),
                      ("広げる 語ベクトル λ1 似0.5以上 形式名詞を除く", dict(spread=1.0, how="語ベクトル", th=0.5, skip_formal=True)),
                      ("広げる 作品の属性 λ1 関連の多い語板を前後の品詞で分ける", dict(spread=1.0, split=True)),
+                     ("広げる 同じ修飾 λ1", dict(spread=1.0, how="同じ修飾")),
+                     ("広げる 同じ修飾 λ3", dict(spread=3.0, how="同じ修飾")),
+                     ("広げる 同じ修飾 + 語ベクトル λ1", dict(spread=1.0, how="同じ修飾 + 語ベクトル")),
                      ("広げる 作品の属性 λ3 分ける + 頻度で割り引く", dict(spread=3.0, split=True, freq_discount=True))):
         rec["spread"][name] = run(works, items, (0,), **kw)
     print(json.dumps(rec, ensure_ascii=False, indent=1))
