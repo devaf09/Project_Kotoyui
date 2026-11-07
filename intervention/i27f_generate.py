@@ -10,6 +10,8 @@ I27e で、ネストがあれば文は完全に戻った。ここではネスト
     どちらも、見出しで見たことが無ければ係り方と品詞、それも無ければ係り方だけで引く。かぎかっこは落とす。
   - 比べ:
       元の順（ネストあり、I27e）・でたらめな順・関連性の順。
+      節だけネスト: 述語の板（動詞・形容詞）に前から係る語だけ元の順を覚え、名詞句の中と助詞・助動詞は関連性（対）で並べる。
+      句だけネスト: その逆（名詞の板に前から係る語だけ元の順）。順の記憶がどこで効くかを見る。
       作った文を GiNZA で読み直し（もう一度縮める）、値の帯（語 → 係った語と係り方の組）が元とどれだけ同じかを数える（F1）。
       上限の目安: 元の文をいまの GiNZA で読み直したときの F1（解析の版の違いの分）。
   - 名詞句の中の修飾（I27c の曖昧な所）が、読み直しでも同じ語に係ったかを別に数える。
@@ -126,7 +128,14 @@ def realize(toks, how, order=None, rng=None):
     """値の帯（木の親子と係り方）だけから並びを作る。how: 元 / でたらめ / 関連。返り値: トークン番号の並び。"""
     kids, roots = tree(toks)
 
-    def rank(sd, ks):
+    def rank(sd, ks, h=None):
+        if how in ("節だけネスト", "句だけネスト") and sd == "前":
+            pred = toks[h]["pos"] in ("VERB", "ADJ", "AUX")
+            if (how == "節だけネスト") == pred:                       # 述語の板（節）/ 名詞の板（句）だけ、元の順を覚えている
+                return sorted(ks)
+            return sorted(ks, key=lambda k: -sum(before(order, sd, toks[k], toks[j]) for j in ks if j != k))
+        if how in ("節だけネスト", "句だけネスト"):
+            return sorted(ks, key=lambda k: -sum(before(order, sd, toks[k], toks[j]) for j in ks if j != k))
         if how == "元":
             return sorted(ks)
         if how == "でたらめ":
@@ -139,8 +148,8 @@ def realize(toks, how, order=None, rng=None):
 
     def walk(i):
         ks = kids.get(i, [])
-        pre = rank("前", [k for k in ks if side(toks[k]) == "前"])
-        post = rank("後", [k for k in ks if side(toks[k]) == "後"])
+        pre = rank("前", [k for k in ks if side(toks[k]) == "前"], i)
+        post = rank("後", [k for k in ks if side(toks[k]) == "後"], i)
         out = []
         for k in pre:
             out += walk(k)
@@ -189,7 +198,7 @@ def main():
     nlp = spacy.load("ja_ginza")
     tales = json.load(open(a.tales, encoding="utf-8"))
     rng = random.Random(0)
-    hows = ("元", "でたらめ", "関連", "関連（対）")
+    hows = ("元", "でたらめ", "関連", "関連（対）", "節だけネスト", "句だけネスト")
     tot = {h: dict(same=0, fc=0.0, ff=0.0, amb_kept=0) for h in hows + ("読み直し",)}
     n = n_amb = 0
     lines = ["# I27f 値の帯から作った文（非公開: 童話の語を含む）", ""]
@@ -211,7 +220,7 @@ def main():
             ref = "".join(w["text"] for w in toks if w["text"] not in QUOTE)
             texts = {"読み直し": "".join(w["text"] for w in toks)}
             for h in hows:
-                seq = realize(toks, h, pairs if h == "関連（対）" else order, rng)
+                seq = realize(toks, h, pairs if h in ("関連（対）", "節だけネスト", "句だけネスト") else order, rng)
                 texts[h] = "".join(toks[k]["text"] for k in seq)
             for h, txt in texts.items():
                 nt = to_toks(nlp(txt))
