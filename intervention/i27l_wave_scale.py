@@ -199,10 +199,13 @@ def cross_row(works, x, mu, lam, top=50):
     own = w["_vmod"]
     m = x["m"]
 
-    def other(h):                                   # ほかの作品だけの数え
-        o = Counter(G.get(h, {}))
-        o.subtract(own.get(h, {}))
-        return +o
+    def other(h):                                   # ほかの作品だけの数え（作品と語ごとに 1 回だけ作る）
+        k = (x["work"], h)
+        if k not in _OTHER:
+            o = Counter(G.get(h, {}))
+            o.subtract(own.get(h, {}))
+            _OTHER[k] = +o
+        return _OTHER[k]
     row = []
     for c in x["cand"]:
         oc = other(c)
@@ -219,6 +222,7 @@ def cross_row(works, x, mu, lam, top=50):
 
 
 SHARED = None
+_OTHER = {}
 
 
 def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0, skip_formal=False, freq_discount=False, split=False,
