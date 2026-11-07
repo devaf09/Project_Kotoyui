@@ -201,7 +201,7 @@ def unity_part(works):
     return res
 
 
-def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), beta=1.0, seed=0):
+def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), beta=1.0, seed=0, all_lines=False, policies=False):
     rng = random.Random(seed)
     targets = []                               # (作品, 行, 名詞, 種類, 答え, 品詞の口)
     lbs, sks, allw = [], [], []
@@ -215,7 +215,7 @@ def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), bet
             for t in ln["toks"]:
                 pos_of.setdefault(t["lemma"], t["pos"])
         w["_pos"] = pos_of
-        for li in sorted(middle(len(lb))):
+        for li in (range(len(lb)) if all_lines else sorted(middle(len(lb)))):
             for nm, x in lb[li].items():
                 for m, dep in x["mods"]:
                     targets.append((wi, li, nm, "修飾", m, dep))
@@ -263,7 +263,7 @@ def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), bet
                 ctx.update(allw[wi][lj] if mode == "展開した前後" else sks[wi][lj])
         return ctx
 
-    def run(w_, mode, fill, beta_, rec=None):
+    def run(w_, mode, fill, beta_, rec=None, scored=None):
         hit = top5 = cov = 0
         for wi, li, nm, kind, ans, dep in targets:
             b = merged_board(wi, li, nm, 1.0, orders)
@@ -281,6 +281,8 @@ def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), bet
                 top5 += ans in rk[:5]
             if rec is not None:
                 rec.append(rk[:5])
+            if scored is not None:
+                scored.append([[c, round(cands[c], 3)] for c in rk[:10]])
         n = max(1, len(targets))
         return dict(acc=hit / n, top5=top5 / n, coverage=cov / n)
     out["sweep"] = {}
@@ -297,6 +299,17 @@ def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), bet
         ex[mode] = []
         run(3, mode, "足す", 0.3, ex[mode])
     out["_examples"] = [dict(t=t, picks={m: ex[m][i] for m in ex}) for i, t in enumerate(targets)]
+    if policies:                                   # 判断の板（I27h の Web 小説版）用: 補い方ごとの上位 10 候補と点
+        pol = {"属性だけ": (3, "属性だけ", "足す", 0.3), "展開 β0.3": (3, "展開した前後", "足す", 0.3),
+               "縮め β0.3": (3, "縮めた前後", "足す", 0.3), "展開 β1": (3, "展開した前後", "足す", 1.0),
+               "縮め β1": (3, "縮めた前後", "足す", 1.0), "展開 無いときだけ": (3, "展開した前後", "無いときだけ", 0.3),
+               "縮め 無いときだけ": (3, "縮めた前後", "無いときだけ", 0.3)}
+        lists = {}
+        for k, (w_, mode, fill, b_) in pol.items():
+            lists[k] = []
+            run(w_, mode, fill, b_, scored=lists[k])
+        subj = [Counter(nm for b in lb for nm, x in b.items() if x["subj"]) for lb in lbs]
+        out["_policies"] = dict(targets=[list(t) + [subj[t[0]][t[2]] >= 2] for t in targets], lists=lists)
     return out
 
 
@@ -356,6 +369,8 @@ def main():
     ap.add_argument("--tag", default="tales")
     ap.add_argument("--examples", default=None, help="補いの例を前後 5 行つきで書く md（非公開、本文を含む）")
     ap.add_argument("--n_examples", type=int, default=20)
+    ap.add_argument("--all_lines", action="store_true", help="補いの問いを中ほどの行だけでなく全部の行から作る")
+    ap.add_argument("--dump_policies", default=None, help="補い方ごとの候補と点を JSON で書く（非公開、I27h の Web 小説版の入力）")
     ap.add_argument("--cache", default=None, help="解析した行を JSON で置く / 読む（非公開の置き場）")
     a = ap.parse_args()
     import spacy                                                     # CPU で動かす
@@ -367,8 +382,12 @@ def main():
         if a.cache:
             json.dump(works, open(a.cache, "w", encoding="utf-8"), ensure_ascii=False)
     rec = dict(exp="I27g", tag=a.tag, works=len(works), lines=sum(len(w["lines"]) for w in works),
-               expand=expand_part(works, nlp), unity=unity_part(works), completion=completion_part(works))
+               expand=expand_part(works, nlp), unity=unity_part(works),
+               completion=completion_part(works, all_lines=a.all_lines, policies=bool(a.dump_policies)))
     examples = rec["completion"].pop("_examples")
+    pols = rec["completion"].pop("_policies", None)
+    if a.dump_policies and pols:
+        json.dump(pols, open(a.dump_policies, "w", encoding="utf-8"), ensure_ascii=False)
     if a.examples:
         write_examples(works, examples, a.examples, a.n_examples)
     print(json.dumps(dict(rec, unity=[{k: v for k, v in u.items() if k not in ("top_attrs", "per_char")} for u in rec["unity"]]),

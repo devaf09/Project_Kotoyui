@@ -16,7 +16,10 @@
 物差し: 読みながらの正解率（その時点の状態で答えた割合）、読み終えたあとの全部の正解率、
         話を分けた試し（8 話で学び、残り 4 話に学んだ手順を使う。3 通りの分け方 × 6 seed）。
 結果: ../Project_Kotoyui_private/intervention/results/i27h.jsonl
+Web 小説版: I27g の補い（答え = 元の行で N に係っていた語・N の述語、問い数千）で、手順 = 場面の形（種類・係り方・束ねた板に候補があるか・人物か）
+ごとの補い方（属性だけ / 展開した前後 / 縮めた前後、重み・無いときだけ）、記憶 = 束ねた板の組（作品・N・種類 → 答えの語に加点）。作品ごとに行の順に読む。
 実行: python intervention/i27h_judge_text.py --tales <tales_v1_parsed.json> --labels <i27c_labels.json>
+      python intervention/i27h_judge_text.py --wn_policies <I27g の --dump_policies> --out <..._wn.jsonl>
 """
 from __future__ import annotations
 
@@ -153,13 +156,112 @@ def run(items, mem, proc, seed, V=2.0, check=20):
     return J, online, final
 
 
+class JudgeWN:
+    """Web 小説の補い（I27g）の判断の板。手順 = 場面の形ごとの補い方、記憶 = 束ねた板の組（作品・名詞・種類 → 答えの語に加点）。"""
+
+    def __init__(self, lists, mem=True, proc=True, V=2.0, check=20, boost=2.0, net=False, net_win=50):
+        self.lists, self.mem, self.proc, self.V, self.check, self.boost = lists, mem, proc, V, check, boost
+        self.rule, self.delta, self.votes, self.recent, self.changes = {}, Counter(), Counter(), [], Counter()
+        self.net, self.net_win, self.by_shape = net, net_win, defaultdict(list)
+
+    def read(self, i, t, rule=None, delta=None):
+        pol = (self.rule if rule is None else rule).get(t["shape"], "属性だけ")
+        sc = Counter({c: v for c, v in self.lists[pol][i]})
+        d = self.delta if delta is None else delta
+        for (wi, nm, kind, ans), v in d.items():
+            if (wi, nm, kind) == t["key"]:
+                sc[ans] += v
+        return max(sc, key=lambda c: (sc[c], c)) if sc else None
+
+    def step(self, i, t):
+        r = self.read(i, t)
+        self.by_shape[t["shape"]] = (self.by_shape[t["shape"]] + [(i, t)])[-self.net_win:]
+        if r == t["ans"]:
+            self.recent = (self.recent + [(i, t)])[-self.check:]
+            return True
+        cands = []
+        if self.mem:
+            cands.append(("記憶", t["key"] + (t["ans"],), self.boost))
+        if self.proc:
+            for pol in self.lists:
+                if pol != self.rule.get(t["shape"], "属性だけ"):
+                    cands.append(("手順", t["shape"], pol))
+        good = [c for c in cands if self.try_read(i, t, c) == t["ans"]]
+        for c in good:
+            self.votes[c] += 1.0 / len(good)
+        best = max(good, key=lambda c: self.votes[c], default=None)
+        if best is not None and self.votes[best] >= self.V and self.ok_to_apply(best):
+            if best[0] == "記憶":
+                self.delta[best[1]] += best[2]
+            else:
+                self.rule[best[1]] = best[2]
+            self.changes[best[0]] += 1
+            for c in [c for c in self.votes if c[:2] == best[:2]]:
+                del self.votes[c]
+        return False
+
+    def ok_to_apply(self, c):
+        if self.net and c[0] == "手順":
+            # 差し引きの確かめ: 同じ形の最近の問い（合った・外れたの両方）で、替えたあとに合う数が増えるときだけ替える
+            win = self.by_shape[c[1]]
+            before = sum(self.read(j, u) == u["ans"] for j, u in win)
+            after = sum(self.try_read(j, u, c) == u["ans"] for j, u in win)
+            return after > before
+        return all(self.try_read(j, u, c) == u["ans"] for j, u in self.recent)
+
+    def try_read(self, i, t, c):
+        if c[0] == "記憶":
+            d = Counter(self.delta)
+            d[c[1]] += c[2]
+            return self.read(i, t, delta=d)
+        rule = dict(self.rule)
+        rule[c[1]] = c[2]
+        return self.read(i, t, rule=rule)
+
+
+def run_wn(path, V, out, net=False):
+    P = json.load(open(path, encoding="utf-8"))
+    lists = P["lists"]
+    T = []
+    for i, (wi, li, nm, kind, ans, dep, is_char) in enumerate(P["targets"]):
+        has = bool(lists["属性だけ"][i])
+        T.append(dict(i=i, wi=wi, li=li, ans=ans, key=(wi, nm, kind), shape=f"{kind}/{dep}/{'束ねに候補あり' if has else '束ねに候補なし'}/{'人物' if is_char else '人物以外'}"))
+    works = sorted({t["wi"] for t in T})
+    conds = {"直さない": (False, False), "記憶だけ": (True, False), "手順だけ": (False, True), "両方": (True, True)}
+    rec = dict(exp="I27h_wn", n=len(T), V=V, net=net, policies={k: sum(1 for i, t in enumerate(T) if lists[k][i] and lists[k][i][0][0] == t["ans"]) / len(T) for k in lists})
+    for name, (m, p) in conds.items():
+        J = JudgeWN(lists, m, p, V, net=net)
+        seq = sorted(T, key=lambda t: (t["wi"], t["li"]))                  # 作品ごとに、行の順に読む
+        online = sum(J.step(t["i"], t) for t in seq) / len(seq)
+        final = sum(J.read(t["i"], t) == t["ans"] for t in T) / len(T)
+        # 作品を 1 つ抜いて学び、抜いた作品に手順だけを使う
+        cv_hit = 0
+        for w in works:
+            Jt = JudgeWN(lists, m, p, V, net=net)
+            for t in seq:
+                if t["wi"] != w:
+                    Jt.step(t["i"], t)
+            Jt.delta = Counter()
+            cv_hit += sum(Jt.read(t["i"], t) == t["ans"] for t in T if t["wi"] == w)
+        rec[name] = dict(online=online, final=final, cv=cv_hit / len(T), changes=dict(J.changes),
+                         rules={k: v for k, v in sorted(J.rule.items())})
+    print(json.dumps(rec, ensure_ascii=False, indent=1))
+    with open(out, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tales", required=True)
-    ap.add_argument("--labels", required=True)
+    ap.add_argument("--tales", default=None)
+    ap.add_argument("--labels", default=None)
     ap.add_argument("--V", type=float, default=2.0)
+    ap.add_argument("--net", action="store_true", help="手順を替える前に、同じ形の最近 50 問で差し引きが増えるかを確かめる")
+    ap.add_argument("--wn_policies", default=None, help="I27g の --dump_policies の JSON（Web 小説、非公開）。あれば Web 小説の補いで回す")
     ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i27h.jsonl")
     a = ap.parse_args()
+    if a.wn_policies:
+        os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+        return run_wn(a.wn_policies, a.V, a.out, a.net)
     tales = json.load(open(a.tales, encoding="utf-8"))
     labels = json.load(open(a.labels, encoding="utf-8"))
     items = build_items(tales, labels)
