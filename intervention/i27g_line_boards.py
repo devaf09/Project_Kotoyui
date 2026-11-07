@@ -19,7 +19,8 @@
        前後の行からの補い: 前後 w 行の語を候補と加点に足す。2 通り:
          展開した前後: 前後の行の語すべて（値の帯をすべて開いた形）。
          縮めた前後: 前後の行のまとめた板だけ（述語の中心と、そこに係る名詞の中心だけ）。
-       前後の語の重み = N との関連（ほかの行で N と同じ行に出た数、0 なら 0.1）。属性の数えに足して選ぶ。
+       前後の語の重み = N との関連（ほかの行で N と同じ行に出た数、0 なら 0.1）。属性の数えに足して選ぶ（足す、β = 0.3 / 1 / 3）か、
+       束ねた板に候補が無い問いだけ前後で補う（無いときだけ）。正解率は 1 位で当てた割合と、上位 5 に入った割合。
 物差し: 展開の一致と F1、名前当ての正解率（偶然・いちばん多い人物と比べる）、近さの差、属性の当て方の正解率と、答えが候補に入っていた割合。
 結果: --out（童話は ../Project_Kotoyui_private/intervention/results/i27g.jsonl、Web 小説は i27g_wn.jsonl）。
 実行: python intervention/i27g_line_boards.py --tales <tales_v1_parsed.json> | --texts <作品1.txt> <作品2.txt> ... --out <jsonl>
@@ -255,27 +256,40 @@ def completion_part(works, fracs=(0.1, 0.25, 0.5, 0.75, 1.0), win=(1, 2, 3), bet
             if cands:
                 hit += max(cands, key=lambda c: (cands[c], c)) == ans
         out["plateau"][str(frac)] = dict(acc=hit / max(1, len(targets)), coverage=cov / max(1, len(targets)))
+    def ctx_counts(wi, li, w_, mode):
+        ctx = Counter()
+        for lj in range(li - w_, li + w_ + 1):
+            if lj != li and 0 <= lj < len(lbs[wi]):
+                ctx.update(allw[wi][lj] if mode == "展開した前後" else sks[wi][lj])
+        return ctx
+
+    def run(w_, mode, fill, beta_):
+        hit = top5 = cov = 0
+        for wi, li, nm, kind, ans, dep in targets:
+            b = merged_board(wi, li, nm, 1.0, orders)
+            cands = Counter({k.split(":", 1)[1]: v for k, v in b.items() if k.startswith(kind + ":")})
+            if mode != "属性だけ" and (fill == "足す" or not cands):          # 無いときだけ: 束ねた板に候補が無い問いだけ前後で補う
+                for lem, c in ctx_counts(wi, li, w_, mode).items():
+                    if lem != nm and slot_ok(wi, lem, kind, dep):
+                        # 前後の行に出た語を、N との関連（ほかの行で N と同じ行に出た数）で重みを付けて足す
+                        co = sum(1 for lj in names_in[wi].get(nm, ()) if lj != li and lem in allw[wi][lj])
+                        cands[lem] += beta_ * min(c, 1) * (co if co else 0.1)
+            cov += ans in cands
+            if cands:
+                rk = sorted(cands, key=lambda c: (-cands[c], c))
+                hit += rk[0] == ans
+                top5 += ans in rk[:5]
+        n = max(1, len(targets))
+        return dict(acc=hit / n, top5=top5 / n, coverage=cov / n)
+    out["sweep"] = {}
     for w_ in win:
         for mode in ("属性だけ", "展開した前後", "縮めた前後"):
-            hit = cov = 0
-            for wi, li, nm, kind, ans, dep in targets:
-                b = merged_board(wi, li, nm, 1.0, orders)
-                cands = Counter({k.split(":", 1)[1]: v for k, v in b.items() if k.startswith(kind + ":")})
-                if mode != "属性だけ":
-                    ctx = Counter()
-                    for lj in range(li - w_, li + w_ + 1):
-                        if lj == li or not (0 <= lj < len(lbs[wi])):
-                            continue
-                        ctx.update(allw[wi][lj] if mode == "展開した前後" else sks[wi][lj])
-                    for lem, c in ctx.items():
-                        if lem != nm and slot_ok(wi, lem, kind, dep):
-                            # 前後の行に出た語を、N との関連（ほかの行で N と同じ行に出た数）で重みを付けて足す
-                            co = sum(1 for lj in names_in[wi].get(nm, ()) if lj != li and lem in allw[wi][lj])
-                            cands[lem] += beta * min(c, 1) * (co if co else 0.1)
-                cov += ans in cands
-                if cands:
-                    hit += max(cands, key=lambda c: (cands[c], c)) == ans
-            out["completion"][f"{mode}|{w_}"] = dict(acc=hit / max(1, len(targets)), coverage=cov / max(1, len(targets)))
+            out["completion"][f"{mode}|{w_}"] = run(w_, mode, "足す", beta)
+            if mode == "属性だけ":
+                continue
+            out["sweep"][f"{mode}|{w_}|無いときだけ"] = run(w_, mode, "無いときだけ", beta)
+            for b_ in (0.3, 3.0):
+                out["sweep"][f"{mode}|{w_}|足す β{b_}"] = run(w_, mode, "足す", b_)
     return out
 
 
@@ -286,10 +300,16 @@ def main():
     ap.add_argument("--max_lines", type=int, default=0)
     ap.add_argument("--out", default="../Project_Kotoyui_private/intervention/results/i27g.jsonl")
     ap.add_argument("--tag", default="tales")
+    ap.add_argument("--cache", default=None, help="解析した行を JSON で置く / 読む（非公開の置き場）")
     a = ap.parse_args()
     import spacy                                                     # CPU で動かす
     nlp = spacy.load("ja_ginza")
-    works = load_works(a, nlp)
+    if a.cache and os.path.exists(a.cache):
+        works = json.load(open(a.cache, encoding="utf-8"))
+    else:
+        works = load_works(a, nlp)
+        if a.cache:
+            json.dump(works, open(a.cache, "w", encoding="utf-8"), ensure_ascii=False)
     rec = dict(exp="I27g", tag=a.tag, works=len(works), lines=sum(len(w["lines"]) for w in works),
                expand=expand_part(works, nlp), unity=unity_part(works), completion=completion_part(works))
     print(json.dumps(dict(rec, unity=[{k: v for k, v in u.items() if k not in ("top_attrs", "per_char")} for u in rec["unity"]]),
