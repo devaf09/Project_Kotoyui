@@ -153,7 +153,8 @@ def sim_vec(a, b):
 
 
 NLP = None
-QUICK = ("似た語へ広げる 作品の属性 λ1", "広げる 同じ修飾 λ3", "広げる 同じ修飾 + 語ベクトル λ1")
+QUICK = ("似た語へ広げる 作品の属性 λ1", "広げる 同じ修飾 λ3", "広げる 同じ修飾 + 語ベクトル λ1",
+         "同じ修飾 λ3 + ほかの作品 μ0.3", "同じ修飾 λ3 + ほかの作品 μ0.3 似た語も", "同じ組だけ + ほかの作品 μ1")
 
 
 def sim_mod(w, x, a, b, m):
@@ -171,7 +172,57 @@ def sim_mod(w, x, a, b, m):
     return dot / (na * nb) if na and nb else 0.0
 
 
-def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0, skip_formal=False, freq_discount=False, split=False):
+def shared(works):
+    """作品をまたいで共有する板: 全作品の「名詞 → 受けた連体の修飾」と、修飾 → 名詞の引き。"""
+    G, byM = defaultdict(Counter), defaultdict(Counter)
+    for w in works:
+        for h, c in w["_vmod"].items():
+            G[h].update(c)
+            for m, v in c.items():
+                byM[m][h] += v
+    return G, byM
+
+
+def cos_c(a, b, skip):
+    dot = sum(v * b.get(k, 0) for k, v in a.items() if k != skip)
+    if dot <= 0:
+        return 0.0
+    na = sum(v * v for k, v in a.items() if k != skip) ** 0.5
+    nb = sum(v * v for k, v in b.items() if k != skip) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def cross_row(works, x, mu, lam, top=50):
+    """ほかの作品の板からの根拠（1 行ぶんとして最後に足す）。同じ組の数 + 似た語（同じ修飾の似方）に M が係った数 × λ。"""
+    G, byM = SHARED
+    w = works[x["work"]]
+    own = w["_vmod"]
+    m = x["m"]
+
+    def other(h):                                   # ほかの作品だけの数え
+        o = Counter(G.get(h, {}))
+        o.subtract(own.get(h, {}))
+        return +o
+    row = []
+    for c in x["cand"]:
+        oc = other(c)
+        v = oc.get(m, 0)
+        if lam:
+            for n, _ in byM.get(m, Counter()).most_common(top):
+                if n in x["cand"]:
+                    continue
+                on = other(n)
+                if on.get(m, 0) > 0:
+                    v += lam * cos_c(oc, on, m) * on[m]
+        row.append(mu * v)
+    return row
+
+
+SHARED = None
+
+
+def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0, skip_formal=False, freq_discount=False, split=False,
+             cross=0.0, cross_lam=0.0):
     """行ごとの候補の根拠。spread > 0 なら、同じ組だけでなく、候補に似た名詞に M が係った数も（似ている度合い × spread）足す（B1）。"""
     w = works[x["work"]]
     bs = w["_boards"]
@@ -201,6 +252,8 @@ def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0, skip_form
                         v += spread * sm * attrs[key]
             row.append(v)
         out.append(row)
+    if cross:
+        out.append(cross_row(works, x, cross, cross_lam))
     return out
 
 
@@ -281,6 +334,8 @@ def main():
     global NLP
     import spacy
     NLP = spacy.load("ja_ginza")
+    global SHARED
+    SHARED = shared(works)
     rec["spread"] = {}
     for name, kw in (("似た語へ広げる 作品の属性 λ1", dict(spread=1.0)), ("似た語へ広げる 作品の属性 λ1 似0.3以上", dict(spread=1.0, th=0.3)),
                      ("似た語へ広げる 語ベクトル λ1 似0.5以上", dict(spread=1.0, how="語ベクトル", th=0.5)),
@@ -291,6 +346,9 @@ def main():
                      ("広げる 同じ修飾 λ1", dict(spread=1.0, how="同じ修飾")),
                      ("広げる 同じ修飾 λ3", dict(spread=3.0, how="同じ修飾")),
                      ("広げる 同じ修飾 + 語ベクトル λ1", dict(spread=1.0, how="同じ修飾 + 語ベクトル")),
+                     ("同じ組だけ + ほかの作品 μ1", dict(cross=1.0)),
+                     ("同じ修飾 λ3 + ほかの作品 μ0.3", dict(spread=3.0, how="同じ修飾", cross=0.3)),
+                     ("同じ修飾 λ3 + ほかの作品 μ0.3 似た語も", dict(spread=3.0, how="同じ修飾", cross=0.3, cross_lam=1.0)),
                      ("広げる 作品の属性 λ3 分ける + 頻度で割り引く", dict(spread=3.0, split=True, freq_discount=True))):
         if a.quick and name not in QUICK:
             continue
