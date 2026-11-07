@@ -90,22 +90,42 @@ def make_items(works, seed, per_work=1500):
             for k, c in b.items():
                 vec[k].update(c)
         w["_vec"] = vec
+        # 関連の多い語板を、前後の品詞で別の板に分ける（持ち主 2026-11-07「同じ読みでも別の機能をもつ語板として、関連が多い語板は分解OK」）
+        breadth = sorted((len(c) for c in vec.values()), reverse=True)
+        cut = max(20, breadth[max(0, len(breadth) // 50 - 1)] if breadth else 20)       # 属性の種類が上位 2%（20 種以上）
+        split = {k for k, c in vec.items() if len(c) >= cut} | FORMAL2
+        bss, vecs = [], defaultdict(Counter)
+        for ln, b in zip(lines, boards):
+            nb = {k: c for k, c in b.items()}
+            for t in ln["toks"]:
+                k = t["lemma"]
+                if k in split and k in nb and "|" not in k:
+                    i = t["i"]
+                    pv = ln["toks"][i - 1]["pos"] if i > 0 else "頭"
+                    nx = ln["toks"][i + 1] if i + 1 < len(ln["toks"]) else None
+                    nv = "尾" if nx is None else (nx["text"] if nx["pos"] in ("ADP", "AUX", "SCONJ", "PART") else nx["pos"])
+                    nb[f"{k}|{pv}>{nv}"] = nb.pop(k)
+            bss.append(nb)
+            for k, c in nb.items():
+                vecs[k].update(c)
+        w["_boards_s"], w["_vecs"], w["_split"] = bss, vecs, split
     return items
 
 
-def sim_in_work(w, x, a, b, key):
-    """作品の中の属性の余弦。問いの属性（修飾:M）と、試しの行の分は除く。"""
-    own = w["_boards"][x["line"]]
-    va, vb = w["_vec"].get(a, {}), w["_vec"].get(b, {})
+def sim_in_work(w, x, a, b, key, split=False):
+    """作品の中の属性の余弦。問いの属性（修飾:M）と、試しの行の分は除く。split なら b は分けた板。"""
+    own_a = w["_boards"][x["line"]]
+    own_b = w["_boards_s" if split else "_boards"][x["line"]]
+    va, vb = w["_vec"].get(a, {}), w["_vecs" if split else "_vec"].get(b, {})
 
-    def get(v, word, k):
+    def get(v, own, word, k):
         return v.get(k, 0) - own.get(word, {}).get(k, 0)
     ks = [k for k in va if k != key and k in vb]
-    dot = sum(get(va, a, k) * get(vb, b, k) for k in ks)
+    dot = sum(get(va, own_a, a, k) * get(vb, own_b, b, k) for k in ks)
     if dot <= 0:
         return 0.0
-    na = sum(get(va, a, k) ** 2 for k in va if k != key) ** 0.5
-    nb = sum(get(vb, b, k) ** 2 for k in vb if k != key) ** 0.5
+    na = sum(get(va, own_a, a, k) ** 2 for k in va if k != key) ** 0.5
+    nb = sum(get(vb, own_b, b, k) ** 2 for k in vb if k != key) ** 0.5
     return dot / (na * nb) if na and nb else 0.0
 
 
@@ -127,7 +147,7 @@ def sim_vec(a, b):
 NLP = None
 
 
-def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0, skip_formal=False, freq_discount=False):
+def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0, skip_formal=False, freq_discount=False, split=False):
     """行ごとの候補の根拠。spread > 0 なら、同じ組だけでなく、候補に似た名詞に M が係った数も（似ている度合い × spread）足す（B1）。"""
     w = works[x["work"]]
     bs = w["_boards"]
@@ -139,12 +159,13 @@ def evidence(works, x, win, spread=0.0, how="作品の属性", th=0.0, skip_form
         for c in x["cand"]:
             v = b.get(c, {}).get(key, 0)
             if spread:
-                for n, attrs in b.items():
-                    if n in x["cand"] or not attrs.get(key) or (skip_formal and n in FORMAL2):
+                for n, attrs in (w["_boards_s"][lj] if split else b).items():
+                    base = n.split("|")[0]
+                    if base in x["cand"] or not attrs.get(key) or (skip_formal and base in FORMAL2):
                         continue
-                    sm = sim_in_work(w, x, c, n, key) if how == "作品の属性" else sim_vec(c, n)
+                    sm = sim_in_work(w, x, c, n, key, split) if how == "作品の属性" else sim_vec(c, base)
                     if freq_discount:                   # よく出る語ほど何にでも似るので、出た数の対数で割り引く
-                        sm /= math.log(2 + sum(w["_vec"].get(n, {}).values()))
+                        sm /= math.log(2 + sum(w["_vecs" if split else "_vec"].get(n, {}).values()))
                     if sm > th:
                         v += spread * sm * attrs[key]
             row.append(v)
@@ -233,7 +254,9 @@ def main():
                      ("似た語へ広げる 語ベクトル λ1 似0.5以上", dict(spread=1.0, how="語ベクトル", th=0.5)),
                      ("広げる 作品の属性 λ1 形式名詞を除く", dict(spread=1.0, skip_formal=True)),
                      ("広げる 作品の属性 λ3 形式名詞を除く + 頻度で割り引く", dict(spread=3.0, skip_formal=True, freq_discount=True)),
-                     ("広げる 語ベクトル λ1 似0.5以上 形式名詞を除く", dict(spread=1.0, how="語ベクトル", th=0.5, skip_formal=True))):
+                     ("広げる 語ベクトル λ1 似0.5以上 形式名詞を除く", dict(spread=1.0, how="語ベクトル", th=0.5, skip_formal=True)),
+                     ("広げる 作品の属性 λ1 関連の多い語板を前後の品詞で分ける", dict(spread=1.0, split=True)),
+                     ("広げる 作品の属性 λ3 分ける + 頻度で割り引く", dict(spread=3.0, split=True, freq_discount=True))):
         rec["spread"][name] = run(works, items, (0,), **kw)
     print(json.dumps(rec, ensure_ascii=False, indent=1))
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
