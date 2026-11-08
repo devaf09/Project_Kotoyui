@@ -39,6 +39,7 @@ K = 8
 BREATH = 6                                 # 息づかいの像の番号。main で表から見つけ直す（像の番号は k 平均の種で入れ替わるため）
 STYLE = [k for k in range(1, K + 1) if k != BREATH]
 BREATH_MARKS = ("っ", "いっ", "すっ", "んっ", "ょ")                # 息づかいの像を見つける目印（I27w のらしい語尾）
+H_POS_SPECIAL = {"助動詞", "助詞", "感動詞", "副詞"}               # 品詞板で帯 H を付ける品詞（語尾の属性に寄せる）
 FUNC_UPOS = ("AUX", "PART", "ADP", "SCONJ", "INTJ")
 
 
@@ -163,6 +164,17 @@ def breath_by_seeds(tables, priors, marks, bmin):
     return {key: float(np.mean(v)) for key, v in acc.items()}, seeds
 
 
+def is_frag(lemma):
+    """帯 H から外す切れ端: 原形が っ/ッ で終わる 2 文字以上の語（I27w の像を通さない属性と同じ決まり。手の一覧は使わない）。"""
+    return len(lemma) >= 2 and lemma[-1] in "っッ"
+
+
+def h_only(items):
+    """帯 H だけを、切れ端を除いた (割合, 回数, 語) から作る。帯 S は全部の語から作る。"""
+    it = [(x, w) for x, w, lem in items if not is_frag(lem)]
+    return bands_of(fuse(it))[1] if it else None
+
+
 def put(attrs, ks, kh, S, H):
     attrs[ks] = S
     if H is not None:
@@ -241,6 +253,7 @@ def main():
     ap.add_argument("--breath_marks", default=",".join(BREATH_MARKS))
     ap.add_argument("--breath_tables", nargs="*", default=None, help="帯 H を種の平均で作るための表（例 K=16 の種 0〜7）")
     ap.add_argument("--breath_priors", nargs="*", default=None, help="その表ごとの像の割合（, 区切りか JSON のファイル）")
+    ap.add_argument("--h_pos", default="副詞,動詞,形容詞", help="語板で帯 H を付ける品詞（名詞には付けない）。上位に話題の語が残るなら 副詞 だけにする")
     ap.add_argument("--half_a", default=None)
     ap.add_argument("--half_b", default=None)
     a = ap.parse_args()
@@ -287,6 +300,8 @@ def main():
     boards = json.load(open(os.path.join(a.boards, "content_boards.json"), encoding="utf-8"))
     POS_UP = {"名詞": ("名詞", "NOUN", "PROPN"), "動詞": ("動詞", "VERB"), "形容詞": ("形容詞", "ADJ", "形状詞"), "副詞": ("副詞", "ADV")}
     n_add = Counter()
+    h_pos = set(a.h_pos.split(","))
+    n_h = 0
     for b in boards:
         cand = by_lemma.get(b["name"], [])
         fit = [r for r in cand if any(r["pos"].startswith(p) for p in POS_UP.get(b["pos"], (b["pos"],)))] or \
@@ -296,6 +311,9 @@ def main():
             continue
         s = fuse([(r["s"], r["count"]) for r in fit])
         S, H = bands_of(s)
+        if H is not None and (b["pos"] not in h_pos or is_frag(b["name"])):
+            H = None                                                 # 帯 H は名詞に付けない（話題を拾うため）。切れ端も外す
+        n_h += H is not None
         put(b["attrs"], "S", "H", S, H)
         b.setdefault("n_obs", {})["S"] = round(sum(r["count"] for r in fit), 1)
         n_add[b["pos"]] += 1
@@ -324,14 +342,17 @@ def main():
                 continue
             s = fuse([(r["s"], r["count"]) for r in fit])
             S, H = bands_of(s)
+            if is_frag(word):
+                H = None
             put(fb["attrs"], "像", "息づかい", S, H)
             fb["n_image"] = round(sum(r["count"] for r in fit), 1)
-            groups[fb["func"]].append((s, fb["n_image"]))
+            groups[fb["func"]].append((s, fb["n_image"], word))
             n_f += 1
         G = []
         for g, it in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-            S, H = bands_of(fuse(it))
-            G.append(dict(name=g, kind="働きの束", n_boards=len(it), n_image=round(sum(w for _, w in it), 1), attrs={"像": S, **({"息づかい": H} if H else {})}))
+            S = bands_of(fuse([(x, w) for x, w, _ in it]))[0]
+            H = h_only(it)
+            G.append(dict(name=g, kind="働きの束", n_boards=len(it), n_image=round(sum(w for _, w, _ in it), 1), attrs={"像": S, **({"息づかい": H} if H else {})}))
         json.dump(F, open(os.path.join(a.out, "func_boards.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         json.dump(G, open(os.path.join(a.out, "image_groups.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
@@ -339,15 +360,16 @@ def main():
         acc2, acc1 = defaultdict(list), defaultdict(list)
         for r in ok:
             k, fine = pos_key(r["pos"])
-            (acc2 if fine else acc1)[k].append((r["s"], r["count"]))
+            (acc2 if fine else acc1)[k].append((r["s"], r["count"], r["lemma"]))
             if fine:
-                acc1[k.split("-")[0]].append((r["s"], r["count"]))
+                acc1[k.split("-")[0]].append((r["s"], r["count"], r["lemma"]))
         n_p = 0
         for pb in P:
             it = acc2.get(pb["name"]) or acc1.get(pb["name"].split("-")[0])
             if not it:
                 continue
-            S, H = bands_of(fuse(it))
+            S = bands_of(fuse([(x, w) for x, w, _ in it]))[0]
+            H = h_only(it) if pb["name"].split("-")[0] in H_POS_SPECIAL | h_pos else None
             put(pb["attrs"], "像", "息づかい", S, H)
             pb["n_image_words"] = len(it)
             pb["image_unit"] = "品詞の 2 段目" if pb["name"] in acc2 else "品詞の 1 段目"
@@ -370,7 +392,7 @@ def main():
             per = {f"像{k}": corr(np.log(SA[:, k - 1] + 1e-9), np.log(SB[:, k - 1] + 1e-9)) for k in range(1, K + 1)} if ks else {}
             half[name] = dict(語=len(ks), 像ごと=per, 汎用板の候補=[k for k, v in per.items() if v is not None and v >= 0.5])
 
-    rep = dict(息づかいの像=(f"像{BREATH}" if BREATH else ("種の平均（帯 H）" if hmap is not None else "なし")), 息づかいの種=seeds, 息づかいの目印の偏り=breath_score, 像の目印=marks, 表の行=len(rows), 足切り=dict(why), 語板に足した語=dict(n_add), 名札=n_slots, 出口の上限=2040, **rep_special,
+    rep = dict(息づかいの像=(f"像{BREATH}" if BREATH else ("種の平均（帯 H）" if hmap is not None else "なし")), 息づかいの種=seeds, 息づかいの目印の偏り=breath_score, 像の目印=marks, 表の行=len(rows), 足切り=dict(why), 語板に足した語=dict(n_add), 帯Hを付けた語板=n_h, 名札=n_slots, 出口の上限=2040, **rep_special,
                像の割合の前提=("--prior" if a.prior else "同じ割合（全部の語での割合が無いため）"), 半分どうし=half,
                足切りの値=dict(回数=a.min_count, 向き=a.min_stable, 名詞の作品の数=a.min_works))
     json.dump(rep, open(os.path.join(a.out, "image_attrs_report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
