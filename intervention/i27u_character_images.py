@@ -175,7 +175,8 @@ def main():
         lines.append(f"## 像 {j + 1}（{len(mem)} 人、うち語り手 {narr_share:.0%}）")
         lines.append(f"- らしい語尾: {'、'.join(ends)}")
         lines.append(f"- 一人称: {'、'.join(f'{w} {v:.2f}' for v, w in fps if v > 0) or '—'}")
-        lines.append(f"- 人（作品の番号の後ろ 4 けた）: {'、'.join(f'{r[1]}（{works[r[0]]["name"][-8:-4]}）' for r in sorted(mem, key=lambda r: -r[2])[:8])}")
+        who = [f"{r[1]}（{works[r[0]]['name'][-8:-4]}）" for r in sorted(mem, key=lambda r: -r[2])[:8]]
+        lines.append(f"- 人（作品の番号の後ろ 4 けた）: {'、'.join(who)}")
         lines.append("")
         rec.setdefault("像", []).append(dict(人数=len(mem), 語尾=ends, 一人称=[w for v, w in fps if v > 0], 語り手の割合=round(narr_share, 3)))
     print(json.dumps(rec, ensure_ascii=False, indent=1))
