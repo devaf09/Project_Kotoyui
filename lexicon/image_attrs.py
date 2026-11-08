@@ -34,8 +34,29 @@ from collections import Counter, defaultdict
 import numpy as np
 
 K = 8
-BREATH = 6                                 # 像 6 = 息づかい（別の帯）
+BREATH = 6                                 # 息づかいの像の番号。main で表から見つけ直す（像の番号は k 平均の種で入れ替わるため）
 STYLE = [k for k in range(1, K + 1) if k != BREATH]
+BREATH_MARKS = ("っ", "いっ", "すっ", "んっ", "ょ")                # 息づかいの像を見つける目印（I27w のらしい語尾）
+FUNC_UPOS = ("AUX", "PART", "ADP", "SCONJ", "INTJ")
+
+
+def find_breath(rows, marks, min_count=100):
+    """目印の語での偏りの平均がいちばん大きい像を、息づかいの像とする。"""
+    acc = defaultdict(list)
+    for r in rows:
+        if r["lemma"] in marks and r["count"] >= min_count:
+            for k in range(1, K + 1):
+                acc[k].append(r["b"][k])
+    if not acc:
+        return None, {}
+    mean = {k: float(np.mean(v)) for k, v in acc.items()}
+    return max(mean, key=mean.get), {f"像{k}": round(v, 3) for k, v in mean.items()}
+
+
+def image_marks(rows, n=6, min_count=200):
+    """像ごとの目印（機能語のうち偏りの大きい語）。像の番号が変わっても、これで照合する。"""
+    fr = [r for r in rows if r["count"] >= min_count and (r["pos"] in FUNC_UPOS or r["pos"].startswith(("助詞", "助動詞")))]
+    return {f"像{k}": [r["lemma"] for r in sorted(fr, key=lambda r: -r["b"][k])[:n]] for k in range(1, K + 1)}
 IMG_COL = re.compile(r"^(?:像|img|image|b)_?(\d)")
 
 
@@ -167,6 +188,9 @@ def main():
     ap.add_argument("--min_count", type=float, default=20)
     ap.add_argument("--min_stable", type=float, default=0.5)
     ap.add_argument("--min_works", type=int, default=20)
+    ap.add_argument("--breath", type=int, default=None, help="息づかいの像の番号（無ければ目印の語で見つける）")
+    ap.add_argument("--breath_min", type=float, default=1.0, help="目印の語の偏りの平均がこれ未満なら、息づかいの像は無いとみなす")
+    ap.add_argument("--breath_marks", default=",".join(BREATH_MARKS))
     ap.add_argument("--half_a", default=None)
     ap.add_argument("--half_b", default=None)
     a = ap.parse_args()
@@ -176,6 +200,13 @@ def main():
     prior = [float(x) for x in a.prior.split(",")] if a.prior else [1.0 / K] * K
     assert len(prior) == K
     rows = read_table(a.table)
+    global BREATH, STYLE
+    found, breath_score = find_breath(rows, set(a.breath_marks.split(",")))
+    if a.breath is None and (found is None or breath_score[f"像{found}"] < a.breath_min):
+        raise SystemExit(f"息づかいの像が見つからない（目印の偏り {breath_score}）。息づかいが出る k 平均の種の表を使うか、--breath で番号を渡すこと")
+    BREATH = a.breath or found
+    STYLE = [k for k in range(1, K + 1) if k != BREATH]
+    marks = image_marks(rows)
     works = read_works(a.works)
     why = Counter()
     ok = []
@@ -209,6 +240,7 @@ def main():
     slots = json.load(open(os.path.join(a.boards, "slots.json"), encoding="utf-8"))
     slots["slots"]["S"] = [f"像{k}" for k in STYLE]
     slots["slots"]["H"] = ["息づかい", "ふつう"]
+    slots["image_marks"] = marks                                    # 像の番号は種で入れ替わるので、目印の語で照合する
     json.dump(slots, open(os.path.join(a.out, "slots.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     n_slots = sum(len(v) for v in slots["slots"].values())
 
@@ -274,7 +306,7 @@ def main():
             per = {f"像{k}": corr(np.log(SA[:, k - 1] + 1e-9), np.log(SB[:, k - 1] + 1e-9)) for k in range(1, K + 1)} if ks else {}
             half[name] = dict(語=len(ks), 像ごと=per, 汎用板の候補=[k for k, v in per.items() if v is not None and v >= 0.5])
 
-    rep = dict(表の行=len(rows), 足切り=dict(why), 語板に足した語=dict(n_add), 名札=n_slots, 出口の上限=2040, **rep_special,
+    rep = dict(息づかいの像=f"像{BREATH}", 息づかいの目印の偏り=breath_score, 像の目印=marks, 表の行=len(rows), 足切り=dict(why), 語板に足した語=dict(n_add), 名札=n_slots, 出口の上限=2040, **rep_special,
                像の割合の前提=("--prior" if a.prior else "同じ割合（全部の語での割合が無いため）"), 半分どうし=half,
                足切りの値=dict(回数=a.min_count, 向き=a.min_stable, 名詞の作品の数=a.min_works))
     json.dump(rep, open(os.path.join(a.out, "image_attrs_report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
