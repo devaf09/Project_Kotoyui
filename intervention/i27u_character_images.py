@@ -34,7 +34,7 @@ def person_vecs(P, min_n=3.0):
     """人ごとの板 → {人: (重み, {特徴: 割合})}。"""
     out = {}
     people = {k[0] for k in P.B if k[0] != "全" and k[1] == "数"}
-    for c in people:
+    for c in sorted(people):
         n = light(P.B, (c, "数"))
         if n < min_n:
             continue
@@ -66,14 +66,14 @@ def kmeans(X, W, K, seed=0, iters=30):
 class Images:
     """ほかの作品の人の板から作った像。"""
 
-    def __init__(self, vecs_by_work, K, beta):
-        self.K, self.beta = K, beta
+    def __init__(self, vecs_by_work, K, beta, seed=0):
+        self.K, self.beta, self.seed = K, beta, seed
         feats = Counter()
         for vs in vecs_by_work:
             for c, (n, sh) in vs.items():
                 for f in sh:
                     feats[f] += 1
-        self.vocab = [f for f, m in feats.most_common() if m >= 2][:600]
+        self.vocab = [f for f, m in sorted(feats.items(), key=lambda kv: (-kv[1], repr(kv[0]))) if m >= 2][:600]  # 同じ数は名前の順（PYTHONHASHSEED によらない）
         self.ix = {f: i for i, f in enumerate(self.vocab)}
         self.rows = []
         for wi, vs in enumerate(vecs_by_work):
@@ -96,7 +96,7 @@ class Images:
         S = np.array([self.vec(r[3]) for r in rs])
         X = S / (np.linalg.norm(S, axis=1, keepdims=True) + 1e-9)
         W = np.array([math.log1p(r[2]) for r in rs])
-        C, a = kmeans(X, W, self.K, seed=wi + 1)
+        C, a = kmeans(X, W, self.K, seed=wi + 1 + self.seed)
         M = np.array([(S[a == j] * W[a == j, None]).sum(0) / max(1e-9, W[a == j].sum()) for j in range(len(C))])
         self.cache[wi] = (C, M, a, rs)
         return self.cache[wi]

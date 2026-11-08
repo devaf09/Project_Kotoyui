@@ -52,6 +52,7 @@ def main():
     ap.add_argument("--beta", type=float, default=20.0)
     ap.add_argument("--alpha", type=float, default=5.0)
     ap.add_argument("--min_count", type=int, default=20)
+    ap.add_argument("--kseed", type=int, default=0, help="k 平均の種（像の顔ぶれを選び直すとき）")
     ap.add_argument("--stats", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--table", required=True)
@@ -73,7 +74,7 @@ def main():
     print("広げた", f"{time.time() - t0:.0f}s", flush=True)
     # 像（板の厚い人だけで作る）
     vecs3 = [{c: v for c, v in out[i][1].items() if v[0] >= 3.0} for i in idx]
-    im = U.Images(vecs3, a.K, a.beta)
+    im = U.Images(vecs3, a.K, a.beta, seed=a.kseed)
     C, M, asg, rs = im.for_work(-1)
     K = len(C)
     allm = M.mean(0)
@@ -139,7 +140,7 @@ def main():
                                np.concatenate([[BB[x][1][j] for x in common] for j in range(K)]))[0, 1])
     # 語ごとの安定さ（両方の半分で偏りの向きが同じか）
     agree = {x: float(np.corrcoef(BA[x][1], BB[x][1])[0, 1]) for x in common}
-    rec = dict(exp="I27w", 作品=len(works), 束ねた台詞=n_q, 像=names, 語=len(Wall),
+    rec = dict(exp="I27w", kseed=a.kseed, 作品=len(works), 束ねた台詞=n_q, 像=names, 語=len(Wall),
                両方の半分で数の足りた語=len(common), 像ごとの半分どうしの相関=stab, まとめた相関=round(pooled, 3),
                語ごとの向きが合う割合=round(sum(1 for v in agree.values() if v > 0.5) / max(1, len(agree)), 3),
                秒=round(time.time() - t0))
