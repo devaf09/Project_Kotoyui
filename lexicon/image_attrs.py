@@ -47,7 +47,7 @@ def read_table(path):
     """表を読む。列の名前の揺れ（像1 / 像1_偏り / img1 …）を吸収する。行 = dict(pos, lemma, count, stable, b={k: 偏り})。"""
     rows = []
     with open(path, encoding="utf-8-sig") as f:
-        r = csv.reader(f, delimiter="\t")
+        r = csv.reader(f, delimiter="\t", quoting=csv.QUOTE_NONE)   # 語が " のときに行がつながらないように
         head = next(r)
         col = {h.strip(): i for i, h in enumerate(head)}
         img = {}
@@ -76,7 +76,7 @@ def read_works(path):
         return None
     out = {}
     with open(path, encoding="utf-8-sig") as f:
-        for r in csv.DictReader(f, delimiter="\t"):
+        for r in csv.DictReader(f, delimiter="\t", quoting=csv.QUOTE_NONE):
             n = int(float(r["n_works"]))
             out[(r.get("pos", ""), r["lemma"])] = n
             out[("", r["lemma"])] = max(out.get(("", r["lemma"]), 0), n)
