@@ -249,8 +249,8 @@ def narr_class(w):
     return c
 
 
-def run_fold(works_q, fold, use, rounds, narr=None, cprior=None, image=None):
-    """fold の正解を隠して当てる。use: 使う手の集まり。返り値: 当たり・数・作品ごとの人の板。"""
+def known_of(works_q, fold):
+    """作品ごとに、隠さない正解（交互の半分）。"""
     known = []
     for qs in works_q:
         kd = {}
@@ -261,7 +261,15 @@ def run_fold(works_q, fold, use, rounds, narr=None, cprior=None, image=None):
                     kd[k] = q["gold"]
                 g += 1
         known.append(kd)
-    rates = flow_rates(works_q, known)
+    return known
+
+
+def run_fold(works_q, fold, use, rounds, narr=None, cprior=None, image=None, rates=None):
+    """fold の正解を隠して当てる。use: 使う手の集まり。返り値: 当たり・数・作品ごとの人の板。
+    rates を渡すと流れの割合をそれにする（作品を分けて並べて回すとき）。"""
+    known = known_of(works_q, fold)
+    if rates is None:
+        rates = flow_rates(works_q, known)
     hit, n = Counter(), 0
     boards = []
     for wi, qs in enumerate(works_q):
