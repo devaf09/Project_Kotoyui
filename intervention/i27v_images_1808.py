@@ -30,7 +30,8 @@ def load(path):
         for x in f:
             r = json.loads(x)
             qs = [dict(li=q["li"], f=Board({(a, b): v for a, b, v in q["f"]}), fp=Board({(a, b): v for a, b, v in q["fp"]}),
-                       gold=q["gold"], kind=q["kind"]) for q in r["quotes"]]
+                       gold=q["gold"], kind=q["kind"], **({"w": Counter({(a, b): v for a, b, v in q["w"]})} if "w" in q else {}))
+                  for q in r["quotes"]]
             works.append((r["work_id"], qs, Counter(r["narr"])))
     works.sort()
     return works

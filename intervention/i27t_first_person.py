@@ -98,8 +98,11 @@ def feats(toks, idx):
     return f, fp
 
 
-def quotes_of(w):
-    """作品の台詞: [(行, 語尾の板, 一人称の板, 正解の話し手か None)]。"""
+SKIP_POS = {"PUNCT", "SYM", "SPACE", "X"}
+
+
+def quotes_of(w, words=False):
+    """作品の台詞: [(行, 語尾の板, 一人称の板, 正解の話し手か None)]。words=True なら、台詞の中の語（品詞, 原形）の数も（I27w）。"""
     out = []
     L = w["lines"]
     for li, ln in enumerate(L):
@@ -125,7 +128,10 @@ def quotes_of(w):
                 kind = "動き"
         else:
             kind = "話す動詞"
-        out.append(dict(li=li, f=f, fp=fp, gold=who, kind=kind if who else None))
+        q = dict(li=li, f=f, fp=fp, gold=who, kind=kind if who else None)
+        if words:
+            q["w"] = Counter((ln["toks"][k]["pos"], ln["toks"][k]["lemma"]) for k in inside if ln["toks"][k]["pos"] not in SKIP_POS)
+        out.append(q)
     return out
 
 
@@ -264,7 +270,7 @@ def known_of(works_q, fold):
     return known
 
 
-def run_fold(works_q, fold, use, rounds, narr=None, cprior=None, image=None, rates=None):
+def run_fold(works_q, fold, use, rounds, narr=None, cprior=None, image=None, rates=None, posts=None):
     """fold の正解を隠して当てる。use: 使う手の集まり。返り値: 当たり・数・作品ごとの人の板。
     rates を渡すと流れの割合をそれにする（作品を分けて並べて回すとき）。"""
     known = known_of(works_q, fold)
@@ -290,6 +296,8 @@ def run_fold(works_q, fold, use, rounds, narr=None, cprior=None, image=None, rat
         hidden = [k for k, q in enumerate(qs) if k not in known[wi]]
         if len(cands) < 2:
             boards.append(P)
+            if posts is not None:
+                posts.append(post)
             continue
         K = len(cands)
 
@@ -347,6 +355,8 @@ def run_fold(works_q, fold, use, rounds, narr=None, cprior=None, image=None, rat
             hit[("当", q["kind"])] += ok
             hit[("数", q["kind"])] += 1
         boards.append(P)
+        if posts is not None:
+            posts.append(post)              # 台詞ごとの話し手の確からしさ（正解は 1、広げた台詞は当てた割合）
     return hit, n, boards, rates
 
 
