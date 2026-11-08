@@ -117,8 +117,16 @@ def bands_of(s):
     st = np.array([s[k - 1] for k in STYLE])
     st = st / st.sum()
     S = {f"像{k}": round(float(v), 4) for k, v in sorted(zip(STYLE, st), key=lambda kv: -kv[1])}
+    if BREATH is None:                                               # 息づかいの像が無い種では、帯 H を作らない
+        return S, None
     H = {"息づかい": round(float(s[BREATH - 1]), 4), "ふつう": round(float(1 - s[BREATH - 1]), 4)}
     return S, H
+
+
+def put(attrs, ks, kh, S, H):
+    attrs[ks] = S
+    if H is not None:
+        attrs[kh] = H
 
 
 def passes(r, works, a):
@@ -188,7 +196,7 @@ def main():
     ap.add_argument("--min_count", type=float, default=20)
     ap.add_argument("--min_stable", type=float, default=0.5)
     ap.add_argument("--min_works", type=int, default=20)
-    ap.add_argument("--breath", type=int, default=None, help="息づかいの像の番号（無ければ目印の語で見つける）")
+    ap.add_argument("--breath", type=int, default=None, help="息づかいの像の番号（無ければ目印の語で見つける。0 = 息づかいの像なし）")
     ap.add_argument("--breath_min", type=float, default=1.0, help="目印の語の偏りの平均がこれ未満なら、息づかいの像は無いとみなす")
     ap.add_argument("--breath_marks", default=",".join(BREATH_MARKS))
     ap.add_argument("--half_a", default=None)
@@ -202,9 +210,11 @@ def main():
     rows = read_table(a.table)
     global BREATH, STYLE
     found, breath_score = find_breath(rows, set(a.breath_marks.split(",")))
-    if a.breath is None and (found is None or breath_score[f"像{found}"] < a.breath_min):
-        raise SystemExit(f"息づかいの像が見つからない（目印の偏り {breath_score}）。息づかいが出る k 平均の種の表を使うか、--breath で番号を渡すこと")
-    BREATH = a.breath or found
+    if a.breath == 0 or (a.breath is None and (found is None or breath_score[f"像{found}"] < a.breath_min)):
+        BREATH = None                                                # 息づかいの像が無い: 8 つの像をすべて帯 S に入れ、帯 H は作らない
+        print(f"息づかいの像なし（目印の偏り {breath_score}）。帯 H は作らない")
+    else:
+        BREATH = a.breath or found
     STYLE = [k for k in range(1, K + 1) if k != BREATH]
     marks = image_marks(rows)
     works = read_works(a.works)
@@ -233,13 +243,14 @@ def main():
             continue
         s = fuse([(r["s"], r["count"]) for r in fit])
         S, H = bands_of(s)
-        b["attrs"]["S"], b["attrs"]["H"] = S, H
+        put(b["attrs"], "S", "H", S, H)
         b.setdefault("n_obs", {})["S"] = round(sum(r["count"] for r in fit), 1)
         n_add[b["pos"]] += 1
     json.dump(boards, open(os.path.join(a.out, "content_boards.json"), "w", encoding="utf-8"), ensure_ascii=False)
     slots = json.load(open(os.path.join(a.boards, "slots.json"), encoding="utf-8"))
     slots["slots"]["S"] = [f"像{k}" for k in STYLE]
-    slots["slots"]["H"] = ["息づかい", "ふつう"]
+    if BREATH is not None:
+        slots["slots"]["H"] = ["息づかい", "ふつう"]
     slots["image_marks"] = marks                                    # 像の番号は種で入れ替わるので、目印の語で照合する
     json.dump(slots, open(os.path.join(a.out, "slots.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     n_slots = sum(len(v) for v in slots["slots"].values())
@@ -260,14 +271,14 @@ def main():
                 continue
             s = fuse([(r["s"], r["count"]) for r in fit])
             S, H = bands_of(s)
-            fb["attrs"]["像"], fb["attrs"]["息づかい"] = S, H
+            put(fb["attrs"], "像", "息づかい", S, H)
             fb["n_image"] = round(sum(r["count"] for r in fit), 1)
             groups[fb["func"]].append((s, fb["n_image"]))
             n_f += 1
         G = []
         for g, it in sorted(groups.items(), key=lambda kv: -len(kv[1])):
             S, H = bands_of(fuse(it))
-            G.append(dict(name=g, kind="働きの束", n_boards=len(it), n_image=round(sum(w for _, w in it), 1), attrs={"像": S, "息づかい": H}))
+            G.append(dict(name=g, kind="働きの束", n_boards=len(it), n_image=round(sum(w for _, w in it), 1), attrs={"像": S, **({"息づかい": H} if H else {})}))
         json.dump(F, open(os.path.join(a.out, "func_boards.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         json.dump(G, open(os.path.join(a.out, "image_groups.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
@@ -284,7 +295,7 @@ def main():
             if not it:
                 continue
             S, H = bands_of(fuse(it))
-            pb["attrs"]["像"], pb["attrs"]["息づかい"] = S, H
+            put(pb["attrs"], "像", "息づかい", S, H)
             pb["n_image_words"] = len(it)
             pb["image_unit"] = "品詞の 2 段目" if pb["name"] in acc2 else "品詞の 1 段目"
             n_p += 1
@@ -306,7 +317,7 @@ def main():
             per = {f"像{k}": corr(np.log(SA[:, k - 1] + 1e-9), np.log(SB[:, k - 1] + 1e-9)) for k in range(1, K + 1)} if ks else {}
             half[name] = dict(語=len(ks), 像ごと=per, 汎用板の候補=[k for k, v in per.items() if v is not None and v >= 0.5])
 
-    rep = dict(息づかいの像=f"像{BREATH}", 息づかいの目印の偏り=breath_score, 像の目印=marks, 表の行=len(rows), 足切り=dict(why), 語板に足した語=dict(n_add), 名札=n_slots, 出口の上限=2040, **rep_special,
+    rep = dict(息づかいの像=(f"像{BREATH}" if BREATH else "なし"), 息づかいの目印の偏り=breath_score, 像の目印=marks, 表の行=len(rows), 足切り=dict(why), 語板に足した語=dict(n_add), 名札=n_slots, 出口の上限=2040, **rep_special,
                像の割合の前提=("--prior" if a.prior else "同じ割合（全部の語での割合が無いため）"), 半分どうし=half,
                足切りの値=dict(回数=a.min_count, 向き=a.min_stable, 名詞の作品の数=a.min_works))
     json.dump(rep, open(os.path.join(a.out, "image_attrs_report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
