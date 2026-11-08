@@ -188,15 +188,17 @@ class People:
         self.B[(who, "数")] += wt
         self.B[("全", "数")] += wt
 
-    def ending_score(self, c, f, alpha=20.0):
-        """語尾の差分: その人での割合 ÷ 作品全体での割合（期待）の対数の和。期待より明るい = 発見（+）、暗い = 違和感（−）。"""
+    def ending_score(self, c, f, alpha=20.0, back=None):
+        """語尾の差分: その人での割合 ÷ 作品全体での割合（期待）の対数の和。期待より明るい = 発見（+）、暗い = 違和感（−）。
+        back（I27u の共通の像: 特徴 → 割合）があれば、その人の台詞が少ないときは、作品全体ではなく像の割合に寄せる。"""
         nc, nall = light(self.B, (c, "数")), light(self.B, ("全", "数"))
         if nall <= 0:
             return 0.0
         s = 0.0
         for k, v in f.items():
             e = (light(self.B, ("全", k)) + 0.5) / (nall + 1.0)
-            o = (light(self.B, (c, k)) + alpha * e) / (nc + alpha)
+            b = e if back is None else 0.5 * e + 0.5 * back.get(k, 0.0)
+            o = (light(self.B, (c, k)) + alpha * b) / (nc + alpha)
             s += v * math.log(o / e)
         return s
 
@@ -247,7 +249,7 @@ def narr_class(w):
     return c
 
 
-def run_fold(works_q, fold, use, rounds, narr=None, cprior=None):
+def run_fold(works_q, fold, use, rounds, narr=None, cprior=None, image=None):
     """fold の正解を隠して当てる。use: 使う手の集まり。返り値: 当たり・数・作品ごとの人の板。"""
     known = []
     for qs in works_q:
@@ -283,6 +285,8 @@ def run_fold(works_q, fold, use, rounds, narr=None, cprior=None):
             continue
         K = len(cands)
 
+        IMG = {}
+
         def scores(k, P=P, post=post):
             f = qs[k]["f"] + (qs[k]["fp"] if "一人称" in use else Board())
             sc = {}
@@ -291,7 +295,7 @@ def run_fold(works_q, fold, use, rounds, narr=None, cprior=None):
                 if "多い人" in use:
                     v += math.log((prior[c] + 1) / (sum(prior.values()) + K))
                 if "語尾" in use:
-                    v += P.ending_score(c, f)
+                    v += P.ending_score(c, f, back=IMG.get(c))
                 if "流れ" in use:
                     v += flow_score(c, k, qs, post, rates, K)
                 if "類" in use:
@@ -302,6 +306,8 @@ def run_fold(works_q, fold, use, rounds, narr=None, cprior=None):
                 sc[c] = v
             return sc
         CB0 = {c: Counter(v) for c, v in CB.items()}
+        if image is not None:
+            IMG.update(image(wi, P, cands))
         for _ in range(rounds if "広げる" in use else 0):
             newP = People()
             for k, a in known[wi].items():
@@ -319,6 +325,9 @@ def run_fold(works_q, fold, use, rounds, narr=None, cprior=None):
             P, post = newP, newpost
             CB.clear()
             CB.update(newCB)
+            if image is not None:
+                IMG.clear()
+                IMG.update(image(wi, P, cands))
         for k in hidden:
             q = qs[k]
             if q["gold"] is None or q["gold"] not in cands:
