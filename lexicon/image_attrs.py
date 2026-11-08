@@ -9,6 +9,8 @@
   語での像の割合 s_k = q_k · exp(b_k) を、出口の明るさにそのまま使える割合に戻す（q_k は --prior、無ければ同じ割合）。
   帯 S（文体の像）: 像 6 を除いた 7 つの s_k を割合にしたもの。
   帯 H（息づかい）: {息づかい: s_6, ふつう: 1 − s_6}。像 6 は人の型ではないので帯を分ける（依頼の 4）。
+  帯 H を種の平均で作る版（--breath_tables / --breath_priors、例 K=16 の種 0〜7）: 種ごとに息づかいの像を目印の語尾で見つけ、
+         語ごとの息づかいの割合を種で平均する。出なかった種は 0 として数える（種を選ぶ手を入れない）。帯 S は主の表の像をすべて使う。
   足切り: stable ≥ 0.5 かつ count ≥ 20。名詞はさらに「出る作品の数」≥ --min_works（作品の話題を文体と取り違えないため）。
          作品の数の表（--works）が無ければ、名詞には足さない。
   名前（尊敬語・謙譲語・現代語・古風…）は手で付けない。像の番号だけで持つ（依頼の 5）。
@@ -45,7 +47,7 @@ def find_breath(rows, marks, min_count=100):
     acc = defaultdict(list)
     for r in rows:
         if r["lemma"] in marks and r["count"] >= min_count:
-            for k in range(1, K + 1):
+            for k in r["b"]:
                 acc[k].append(r["b"][k])
     if not acc:
         return None, {}
@@ -57,14 +59,14 @@ def image_marks(rows, n=6, min_count=200):
     """像ごとの目印（機能語のうち偏りの大きい語）。像の番号が変わっても、これで照合する。"""
     fr = [r for r in rows if r["count"] >= min_count and (r["pos"] in FUNC_UPOS or r["pos"].startswith(("助詞", "助動詞")))]
     return {f"像{k}": [r["lemma"] for r in sorted(fr, key=lambda r: -r["b"][k])[:n]] for k in range(1, K + 1)}
-IMG_COL = re.compile(r"^(?:像|img|image|b)_?(\d)")
+IMG_COL = re.compile(r"^(?:像|img|image|b)_?(\d+)")
 
 
 def hira(s):
     return "".join(chr(ord(c) - 0x60) if "ァ" <= c <= "ヶ" else c for c in s)
 
 
-def read_table(path):
+def read_table(path, k_expect=K):
     """表を読む。列の名前の揺れ（像1 / 像1_偏り / img1 …）を吸収する。行 = dict(pos, lemma, count, stable, b={k: 偏り})。"""
     rows = []
     with open(path, encoding="utf-8-sig") as f:
@@ -74,10 +76,10 @@ def read_table(path):
         img = {}
         for h, i in col.items():
             m = IMG_COL.match(h)
-            if m and 1 <= int(m.group(1)) <= K and int(m.group(1)) not in img:
+            if m and int(m.group(1)) >= 1 and int(m.group(1)) not in img:
                 img[int(m.group(1))] = i
         need = ("pos", "lemma", "count")
-        if any(n not in col for n in need) or len(img) != K:
+        if any(n not in col for n in need) or sorted(img) != list(range(1, len(img) + 1)) or (k_expect and len(img) != k_expect):
             raise SystemExit(f"表の列が読めない: {head}")
         for x in r:
             if len(x) < len(head):
@@ -113,14 +115,52 @@ def shares(b, prior):
     return s / s.sum()                    # 表の偏りが丸めてあっても和が 1 になるように
 
 
-def bands_of(s):
+def bands_of(s, h=None):
+    if len(s) == K + 1:                                              # 末尾 = 種の平均の息づかいの割合（--breath_tables のとき）
+        s, h = s[:K], s[K]
     st = np.array([s[k - 1] for k in STYLE])
     st = st / st.sum()
     S = {f"像{k}": round(float(v), 4) for k, v in sorted(zip(STYLE, st), key=lambda kv: -kv[1])}
+    if h is not None:                                                # 帯 H を種の平均から作る版
+        return S, {"息づかい": round(float(h), 4), "ふつう": round(float(1 - h), 4)}
     if BREATH is None:                                               # 息づかいの像が無い種では、帯 H を作らない
         return S, None
     H = {"息づかい": round(float(s[BREATH - 1]), 4), "ふつう": round(float(1 - s[BREATH - 1]), 4)}
     return S, H
+
+
+def load_prior(x, k):
+    """像の割合 q: , 区切りの文字列か、JSON（数の並び、または {"q": [...]} / {"prior": [...]}）のファイル。"""
+    if os.path.exists(x):
+        v = json.load(open(x, encoding="utf-8"))
+        if isinstance(v, dict):
+            v = v.get("q") or v.get("prior") or list(v.values())
+    else:
+        v = [float(t) for t in x.split(",")]
+    v = [float(t) for t in v]
+    assert len(v) == k, f"像の割合の数が {len(v)}（{k} のはず）: {x}"
+    return v
+
+
+def breath_by_seeds(tables, priors, marks, bmin):
+    """K の大きい表（種ごと）で息づかいの像を目印の語尾で見つけ、語ごとの息づかいの割合を種で平均する。
+    息づかいの像が出なかった種は 0 として数える（種を選ぶ手を入れないため）。表に無い語は、その種を数えない。"""
+    acc = defaultdict(list)
+    seeds = []
+    for path, pr in zip(tables, priors):
+        rows = read_table(path, k_expect=None)
+        k = len(rows[0]["b"])
+        q = load_prior(pr, k)
+        found, score = find_breath(rows, marks)
+        ok = found is not None and score[f"像{found}"] >= bmin
+        seeds.append(dict(表=os.path.basename(path), K=k, 息づかいの像=(f"像{found}" if ok else "なし"), 目印の偏り=score))
+        for r in rows:
+            if ok:
+                e = np.array([q[j - 1] * math.exp(r["b"][j]) for j in range(1, k + 1)])
+                acc[(r["pos"], r["lemma"])].append(float(e[found - 1] / e.sum()))
+            else:
+                acc[(r["pos"], r["lemma"])].append(0.0)
+    return {key: float(np.mean(v)) for key, v in acc.items()}, seeds
 
 
 def put(attrs, ks, kh, S, H):
@@ -199,6 +239,8 @@ def main():
     ap.add_argument("--breath", type=int, default=None, help="息づかいの像の番号（無ければ目印の語で見つける。0 = 息づかいの像なし）")
     ap.add_argument("--breath_min", type=float, default=1.0, help="目印の語の偏りの平均がこれ未満なら、息づかいの像は無いとみなす")
     ap.add_argument("--breath_marks", default=",".join(BREATH_MARKS))
+    ap.add_argument("--breath_tables", nargs="*", default=None, help="帯 H を種の平均で作るための表（例 K=16 の種 0〜7）")
+    ap.add_argument("--breath_priors", nargs="*", default=None, help="その表ごとの像の割合（, 区切りか JSON のファイル）")
     ap.add_argument("--half_a", default=None)
     ap.add_argument("--half_b", default=None)
     a = ap.parse_args()
@@ -217,6 +259,13 @@ def main():
         BREATH = a.breath or found
     STYLE = [k for k in range(1, K + 1) if k != BREATH]
     marks = image_marks(rows)
+    hmap, seeds = None, None
+    if a.breath_tables:
+        if not a.breath_priors or len(a.breath_priors) != len(a.breath_tables):
+            raise SystemExit("--breath_tables と同じ数の --breath_priors が要る")
+        hmap, seeds = breath_by_seeds(a.breath_tables, a.breath_priors, set(a.breath_marks.split(",")), a.breath_min)
+        BREATH = None                                                # 帯 S は主の表の像をすべて使い、帯 H は種の平均から作る
+        STYLE = list(range(1, K + 1))
     works = read_works(a.works)
     why = Counter()
     ok = []
@@ -225,6 +274,10 @@ def main():
         why[w] += 1
         if p:
             r["s"] = shares(r["b"], prior)
+            if hmap is not None:
+                hv = hmap.get((r["pos"], r["lemma"]))
+                why["帯 H の表に無い語（息づかい 0）"] += hv is None
+                r["s"] = np.append(r["s"], hv if hv is not None else 0.0)
             ok.append(r)
     by_lemma = defaultdict(list)
     for r in ok:
@@ -249,7 +302,7 @@ def main():
     json.dump(boards, open(os.path.join(a.out, "content_boards.json"), "w", encoding="utf-8"), ensure_ascii=False)
     slots = json.load(open(os.path.join(a.boards, "slots.json"), encoding="utf-8"))
     slots["slots"]["S"] = [f"像{k}" for k in STYLE]
-    if BREATH is not None:
+    if BREATH is not None or hmap is not None:
         slots["slots"]["H"] = ["息づかい", "ふつう"]
     slots["image_marks"] = marks                                    # 像の番号は種で入れ替わるので、目印の語で照合する
     json.dump(slots, open(os.path.join(a.out, "slots.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
@@ -317,7 +370,7 @@ def main():
             per = {f"像{k}": corr(np.log(SA[:, k - 1] + 1e-9), np.log(SB[:, k - 1] + 1e-9)) for k in range(1, K + 1)} if ks else {}
             half[name] = dict(語=len(ks), 像ごと=per, 汎用板の候補=[k for k, v in per.items() if v is not None and v >= 0.5])
 
-    rep = dict(息づかいの像=(f"像{BREATH}" if BREATH else "なし"), 息づかいの目印の偏り=breath_score, 像の目印=marks, 表の行=len(rows), 足切り=dict(why), 語板に足した語=dict(n_add), 名札=n_slots, 出口の上限=2040, **rep_special,
+    rep = dict(息づかいの像=(f"像{BREATH}" if BREATH else ("種の平均（帯 H）" if hmap is not None else "なし")), 息づかいの種=seeds, 息づかいの目印の偏り=breath_score, 像の目印=marks, 表の行=len(rows), 足切り=dict(why), 語板に足した語=dict(n_add), 名札=n_slots, 出口の上限=2040, **rep_special,
                像の割合の前提=("--prior" if a.prior else "同じ割合（全部の語での割合が無いため）"), 半分どうし=half,
                足切りの値=dict(回数=a.min_count, 向き=a.min_stable, 名詞の作品の数=a.min_works))
     json.dump(rep, open(os.path.join(a.out, "image_attrs_report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
