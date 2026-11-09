@@ -30,6 +30,7 @@ import chat_bot as CB  # noqa: E402
 import chat_bot2 as C2  # noqa: E402
 import i33_predicate_grain as G  # noqa: E402
 import i34_dialogue_board as D  # noqa: E402
+import i32_function_layers as L  # noqa: E402
 import i35_route_grain as R  # noqa: E402
 
 
@@ -51,16 +52,29 @@ class Bot3(C2.Bot2):
 
     # ---- 自分の行の側 ----
     def p_point(self, pc, question=False):
-        s = self.grain.scores(self.pb.symbols(pc, question))
+        s = self.grain.scores(self.sym(pc, question))
         if "指摘" not in s:
             return 0.0
         m = max(s.values())
         z = sum(math.exp(v - m) for v in s.values())
         return math.exp(s["指摘"] - m) / z
 
+    def sym(self, pc, question=False):
+        """所の記号。I35n: その所の名詞と述語の両方を、相手が直前の行（3 行まで）で言っていれば「相手の語」の記号を足す
+        （相手の言葉を取り込んだ所。経験に無い記号なので、試しの介入では言ってみて確かめる所になる）。"""
+        sy = self.pb.symbols(pc, question)
+        if self.use_you and hasattr(self, "conv"):
+            hum = [ln for ln in self.conv["lines"] if ln["who"] == "人"][-3:]
+            words = {t["lemma"] for ln in hum for t in ln["toks"] if t["pos"] in ("NOUN", "PROPN", "VERB", "ADJ")}
+            if pc["n"] in words and pc["p"] in words:         # 名詞も述語も相手の語（代名詞は相手と自分で指す人が違うので数えない）
+                sy = sy + ["you"]
+        return sy
+
+    use_you = False                                         # --you: 相手の語の記号
+
     def unseen(self, pc, question=False):
         """その所の記号のうち、経験の器がまだ一度も見ていない記号（あれば、見込みは当てにならない）。"""
-        return [t for t in self.pb.symbols(pc, question) if t not in self.grain.f]
+        return [t for t in self.sym(pc, question) if t not in self.grain.f]
 
     def _p_of(self, sy):
         s = self.grain.scores(sy)
@@ -72,7 +86,7 @@ class Bot3(C2.Bot2):
     def thin(self, pc, question=False):
         """経験の薄い所: 知らない記号がある（I35g）か、記号を 1 つ外すと見込みが替わり（そのまま になり）、
         その記号の経験の数が、経験の器の記号の経験の数の真ん中より少ない（その 1 つの薄い記号に決めを頼っている）。"""
-        sy = self.pb.symbols(pc, question)
+        sy = self.sym(pc, question)
         if any(t not in self.grain.f for t in sy):
             return True
         cnt = sorted(sum(v.values()) for t, v in self.grain.f.items() if "&" not in t)
@@ -139,7 +153,52 @@ class Bot3(C2.Bot2):
                     best = (lift, r, k)
         return best
 
+    asked = None                                            # I35o: 聞き返した語（相手の次の行が、その説明かもしれない）
+
+    def explained(self, text):
+        """I35o: 聞き返した語を相手が説明した: 自分の板に「知っている」と、説明の述語の部分を入れ（自覚）、その部分で受ける。"""
+        toks = CB.to_toks(self.nlp(text))
+        w = self.asked
+        self.asked = None
+        if not any(t["lemma"] == w for t in toks):
+            return None
+        root = next((t for t in toks if t["dep"] == "ROOT"), None)
+        if root is None or root["lemma"] == w:
+            return None
+        self.me[("組", w, "される:知る")] += 1                # 聞いて知った
+        self.me[("組", w, "である:" + root["lemma"])] += 1
+        kids = L.kids_of(toks)
+        keep = []                                           # 説明の述語の部分: 根と、根に係る修飾（主題の名詞とその助詞・根の助動詞は外す。修飾の中の助詞は残す）
+        for t in toks:
+            x, ok = t, False
+            while True:
+                if x["i"] == root["i"]:
+                    ok = True
+                    break
+                if x["head"] == x["i"] or x["lemma"] == w or x["dep"] in ("nsubj", "dislocated", "aux", "cop", "mark", "punct"):
+                    break
+                x = toks[x["head"]]
+            if ok and t["dep"] not in ("aux", "cop", "mark", "punct") and t["lemma"] != w and not (t["dep"] == "case" and t["head"] == root["i"]):
+                keep.append(t["text"])
+        part = "".join(keep)
+        if not part:
+            return None
+        head = self.intj("問いでない", "相槌")
+        out = dict(line=(head + "、" if head else "") + part + "。", tries=0, breaks=[], sim=0,
+                   why=f"聞き返した「{w}」の説明を自分の板に入れ（{w} を知った・{w} は {root['lemma']}）、説明の述語で受ける")
+        return self._log(text, toks, out)
+
     def reply(self, text):
+        if self.asked:
+            out = self.explained(text)
+            if out is not None:
+                return self._end_turn(out)
+        out = self._reply(text)
+        if out["why"].startswith("知らない語「"):
+            self.asked = out["why"][len("知らない語「"):].split("」", 1)[0]
+        return out
+
+    def _reply(self, text):
         bots = [ln for ln in self.conv["lines"] if ln["who"] == "ボット"]
         hums = [ln for ln in self.conv["lines"] if ln["who"] == "人"]
         if bots and self.negx is not None:
@@ -147,10 +206,18 @@ class Bot3(C2.Bot2):
             a = dict(text="「" + bots[-1]["text"] + "」", toks=bots[-1]["toks"])
             b = dict(text="「" + text + "」", toks=toks)
             cs = R.cues(a, b, self.negx)
-            # 自分の行の所（名詞+助詞+述語）や代名詞をそのまま「って」「？」で返されたら、その所への聞き返し
+            # 自分の行の所（名詞+助詞+述語）や代名詞をそのまま「って」「？」で返されたら、その所への聞き返し。
+            # 自分の行の一続き（「何を見の」）を返された時も、その中の所への聞き返し（I35o）
+            chunk = ""
+            for mk in ("って", "？", "?"):
+                if mk in text:
+                    c0 = text.split(mk, 1)[0].lstrip("「『 　")
+                    if len(c0) >= 2 and c0 in bots[-1]["text"]:
+                        chunk = c0
+                        break
             for pc in self.pb.pieces(a["toks"]):
                 for w in (pc["ns"] + pc["c"] + pc["ps"], pc["ns"]):
-                    if w + "って" in text or w + "？" in text:
+                    if w + "って" in text or w + "？" in text or (chunk and w in chunk and len(w) >= 2):
                         cs = [("聞き返し", pc["n"])] + [c for c in cs if c[0] != "短い問い返し"]
                         break
                 else:
@@ -164,13 +231,13 @@ class Bot3(C2.Bot2):
                 self.unresolved += [pc["ns"] + pc["c"] + pc["ps"] for pc, _ in trial]
                 trial = []                                  # 相手の行が前の返事を受けていない: 通じたかは分からない（経験にしない）
             for pc, q in trial:                             # 言ってみた所が指摘されなかった: そのままの経験に足す
-                self.grain.add(self.pb.symbols(pc, q), "そのまま")
+                self.grain.add(self.sym(pc, q), "そのまま")
                 self.confirmed.append(pc["ns"] + pc["c"] + pc["ps"])
                 self.aware[("確かめた", pc["ns"] + pc["c"] + pc["ps"])] += 1.0   # 自覚の板: 言ってみて通じた所
             if self.quiet_ok:                               # 相手が指摘しなかった: 前の返事の所を「そのまま」の経験に足す
                 q = bots[-1]["text"].rstrip("。…").endswith(("？", "?"))
                 for pc in self.pb.pieces(a["toks"]):
-                    self.grain.add(self.pb.symbols(pc, q), "そのまま")
+                    self.grain.add(self.sym(pc, q), "そのまま")
         return self._end_turn(self._name(self.checked_reply(text)))
 
     def _end_turn(self, out):
@@ -240,7 +307,7 @@ class Bot3(C2.Bot2):
             tgt = [max(pcs, key=self.p_point)]
         qa = self._is_q(a["toks"])
         for pc in tgt:                                      # 1. 経験を足す
-            self.grain.add(self.pb.symbols(pc, qa), "指摘")
+            self.grain.add(self.sym(pc, qa), "指摘")
             self.learned.append(pc["ns"] + pc["c"] + pc["ps"])
             self.aware[("指摘された", pc["ns"] + pc["c"] + pc["ps"])] += 1.0
             for k in (("補語", pc["n"]), ("目的語", pc["n"])):
@@ -282,6 +349,7 @@ def main():
     ap.add_argument("--trial", nargs="?", const="unseen", default=None, choices=("unseen", "thin"),
                     help="試しの介入: unseen=知らない記号のある所、thin=それに加えて薄い記号 1 つに頼る見込みの所は、作り直さずに言ってみて相手の次の行で確かめる")
     ap.add_argument("--uptake", help="受けの板（i35_route_grain --uptake）。試しの所は、相手の次の行が前の返事を受けている時だけ通じたとする")
+    ap.add_argument("--you", action="store_true", help="相手の語の記号（相手が直前に言った語を使った所）を足す")
     ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
@@ -293,6 +361,7 @@ def main():
                dialogue=a.dialogue, self_lines=a.self_lines)
     bot.quiet_ok = a.quiet_ok
     bot.trial_mode = a.trial
+    bot.use_you = a.you
     if a.uptake:
         bot.uptake = json.load(open(a.uptake, encoding="utf-8"))
     print(f"（読み込み {bot.load_s:.0f} 秒）", flush=True)
