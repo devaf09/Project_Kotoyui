@@ -193,9 +193,20 @@ class PieceBoards:
     def __init__(self, works):
         self.pp, self.pn, self.tri, self.nc, self.nn, self.mod = Counter(), Counter(), Counter(), Counter(), Counter(), Counter()
         pv = defaultdict(set)
+        self.co, self.argn = Counter(), Counter()       # I35k: 同じ述語に係る名詞どうしの組
         for w in works:
             for ln in w["lines"]:
                 T = ln["toks"]
+                args = defaultdict(set)
+                for t in T:
+                    if t["pos"] in NOUN + ("PRON",) and 0 <= t["head"] < len(T) and T[t["head"]]["pos"] in ("VERB", "ADJ"):
+                        args[t["head"]].add(t["lemma"])
+                for v in args.values():
+                    self.argn.update(v)
+                    for x in v:
+                        for y in v:
+                            if x < y:
+                                self.co[(x, y)] += 1
                 kids = defaultdict(list)
                 for t in T:
                     if 0 <= t["head"] < len(T) and t["head"] != t["i"]:
@@ -220,6 +231,8 @@ class PieceBoards:
         for (q, _), v in self.pp.items():
             self.top[q] = max(self.top[q], v)
         self.pvar = {q: len(v) / self.pn[q] for q, v in pv.items()}
+        self.argN = sum(self.argn.values()) or 1
+        self.use_co = False
 
     def pieces(self, toks, text=""):
         """行の所: (名詞, 助詞, 述語, 名詞の表記, 述語の表記, 裸か)。"""
@@ -236,8 +249,22 @@ class PieceBoards:
             if h is None or h["pos"] not in ("VERB", "ADJ") or not cs:
                 continue
             bare = not any(k["dep"] in ("acl", "amod", "nmod", "det") and k["i"] < t["i"] for k in kids[t["i"]])
-            out.append(dict(n=t["lemma"], c=cs[0], p=h["lemma"], ns=t["text"], ps=h["text"], bare=bare))
+            others = sorted({k["lemma"] for k in kids[h["i"]] if k["pos"] in NOUN + ("PRON",) and k["i"] != t["i"]})
+            out.append(dict(n=t["lemma"], c=cs[0], p=h["lemma"], ns=t["text"], ps=h["text"], bare=bare, others=others))
         return out
+
+    def co_bin(self, n, others):
+        """同じ述語に係るほかの名詞との結びつき: 本で一緒に出た数 / 別々に出る数からの見込み。いちばん強い組で。"""
+        if not others:
+            return "co:-"
+        best = -1.0
+        for o in others:
+            k = (min(n, o), max(n, o))
+            c = self.co.get(k, 0)
+            e = self.argn.get(n, 0) * self.argn.get(o, 0) / self.argN
+            r = c / e if e else 0.0
+            best = max(best, r)
+        return f"co:{_bin(best, (1e-9, 1.0, 4.0))}"
 
     def symbols(self, pc, question=False):
         n, c, p = pc["n"], pc["c"], pc["p"]
@@ -256,6 +283,8 @@ class PieceBoards:
             sy.append(f"b:{_bin(m, (0.3, 0.6, 0.85))}")         # 気づきの器 5(b): 修飾を取るはずの名詞が裸
         if n in ASK and not question:
             sy.append("wh")                                     # 問いでない行の問いの語
+        if self.use_co and "others" in pc:
+            sy.append(self.co_bin(n, pc["others"]))           # I35k: 同じ述語のほかの名詞と一緒に出るか（意味の合い方）
         if question:
             sy.append("q")                                      # 問いの行（経験に無ければ「まだ知らない」記号になる）
         return sy
