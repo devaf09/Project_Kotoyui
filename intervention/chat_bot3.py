@@ -58,8 +58,9 @@ class Bot3(C2.Bot2):
         if not hasattr(self, "grain") or not self.grain.N:
             return super().oddness(toks)
         best = (0.0, ("無", ""), [])
+        q = "".join(t["text"] for t in toks).rstrip("。…").endswith(("？", "?"))
         for pc in self.pb.pieces(toks):
-            p = self.p_point(pc)
+            p = self.p_point(pc, q)
             if p > best[0]:
                 best = (p, ("指摘の見込み", pc["ns"] + pc["c"] + pc["ps"]), [("補語", pc["n"]), ("目的語", pc["n"])])
         return best
@@ -109,7 +110,42 @@ class Bot3(C2.Bot2):
                 break
             if cs:
                 return self.pointed(text, toks, a, cs, hums[-1]["text"] if hums else None)
-        return self._name(super().reply(text))
+        return self._name(self.checked_reply(text))
+
+    # ---- 介入を、行づくり以外の返し方（聞き返し・自分のこと・相手のことを聞く）にも効かせる ----
+    _plain = False
+
+    def about_person(self, toks):
+        return False if self._plain else super().about_person(toks)
+
+    def about_me(self, toks):
+        return False if self._plain else super().about_me(toks)
+
+    def unknown_noun(self, toks):
+        return None if self._plain else super().unknown_noun(toks)
+
+    def checked_reply(self, text):
+        """返事を作り、行づくりでない返し方の行にも振り分けのグレインを当てる。指摘を見込む所か、自覚の板で暗い所があれば、
+        その返し方をやめて行づくりで返し直す（介入）。"""
+        out = C2.Bot2.reply(self, text)
+        if not self.grain.N or out["why"].startswith("行づくり"):
+            return out
+        toks = self.conv["lines"][-1]["toks"]
+        q = out["line"].rstrip("。…").endswith(("？", "?"))
+        worst = max(((self.p_point(pc, q), pc) for pc in self.pb.pieces(toks)), key=lambda x: x[0], default=(0.0, None))
+        dark = [pc for pc in self.pb.pieces(toks) if self.aware.get(("指摘された", pc["ns"] + pc["c"] + pc["ps"]))]
+        if worst[0] <= 0.5 and not dark:
+            return out
+        pc = dark[0] if dark else worst[1]
+        del self.conv["lines"][-2:]
+        self._plain = True
+        try:
+            out2 = C2.Bot2.reply(self, text)
+        finally:
+            self._plain = False
+        why = "前に指摘された所" if dark else f"P(指摘) {worst[0]:.2f}"
+        out2["why"] = f"「{out['line']}」→ 違和感「{pc['ns'] + pc['c'] + pc['ps']}」（{why}）、行づくりで返し直す。" + out2["why"]
+        return out2
 
     def _name(self, out):
         if self.grain.N:
@@ -134,7 +170,7 @@ class Bot3(C2.Bot2):
         route = r[1] if r else "そのまま"
         head = f"相手の指摘（{kinds}）→ 所「{where}」を経験に足し、自覚の板に残す。回し先 {route}"
         if route == "介入" and prev_human:
-            out = self._name(C2.Bot2.reply(self, prev_human))
+            out = self._name(self.checked_reply(prev_human))
             out["why"] = head + "（前の人の行に、その所を暗くして返し直す）。" + out["why"]
             return out
         if route == "聞き返す" and tgt:
@@ -146,7 +182,7 @@ class Bot3(C2.Bot2):
             h = self.intj("問いでない", "相槌")
             out = dict(line=(h or "") + "。", tries=0, breaks=[], sim=0, why=head + "（相槌で受ける）")
             return self._log(text, toks, out)
-        out = self._name(C2.Bot2.reply(self, text))
+        out = self._name(self.checked_reply(text))
         out["why"] = head + "。" + out["why"]
         return out
 
