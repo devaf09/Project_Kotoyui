@@ -237,6 +237,8 @@ class Bot2(CB.Bot):
             return None
         args = [t for t in toks if t["head"] == root["i"] and t["pos"] in NOUN + ("PRON",)]
         filled = {k["text"] for t in args for k in toks if k["head"] == t["i"] and k["dep"] == "case"} if root["pos"] in L.PRED else set()
+        if any(t["head"] == root["i"] and t["dep"] == "advcl" and t["pos"] in L.PRED for t in toks):
+            filled.add("で")                                # 「歩いて行く」: 述語に係る節（どう・どうやって）が、で・に の枠を埋めている（I35j）
         best = None
         for ro, part in (("される", "を"), ("で・に", "で"), ("で・に", "に")):
             if part in filled or (ro == "で・に" and filled & {"で", "に", "へ"}):
