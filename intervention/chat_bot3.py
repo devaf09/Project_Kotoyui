@@ -59,6 +59,27 @@ class Bot3(C2.Bot2):
         """その所の記号のうち、経験の器がまだ一度も見ていない記号（あれば、見込みは当てにならない）。"""
         return [t for t in self.pb.symbols(pc, question) if t not in self.grain.f]
 
+    def _p_of(self, sy):
+        s = self.grain.scores(sy)
+        if "指摘" not in s:
+            return 0.0
+        m = max(s.values())
+        return math.exp(s["指摘"] - m) / sum(math.exp(v - m) for v in s.values())
+
+    def thin(self, pc, question=False):
+        """経験の薄い所: 知らない記号がある（I35g）か、記号を 1 つ外すと見込みが替わり（そのまま になり）、
+        その記号の経験の数が、経験の器の記号の経験の数の真ん中より少ない（その 1 つの薄い記号に決めを頼っている）。"""
+        sy = self.pb.symbols(pc, question)
+        if any(t not in self.grain.f for t in sy):
+            return True
+        cnt = sorted(sum(v.values()) for t, v in self.grain.f.items() if "&" not in t)
+        med = cnt[len(cnt) // 2] if cnt else 0
+        for t in sy:
+            rest = [x for x in sy if x != t]
+            if self._p_of(rest) <= 0.5 and sum(self.grain.f[t].values()) < med:
+                return True
+        return False
+
     def _ok(self, pc):
         w = pc["ns"] + pc["c"] + pc["ps"]
         if not hasattr(self, "aware"):
@@ -79,7 +100,7 @@ class Bot3(C2.Bot2):
             p = self.p_point(pc, q)
             if self._ok(pc):                               # 前に言ってみて通じた所
                 continue
-            if self.trial_mode and p > 0.5 and self.unseen(pc, q):   # 試しの介入: 知らない記号のある所は、言ってみて相手で確かめる
+            if self.trial_mode and p > 0.5 and (self.thin(pc, q) if self.trial_mode == "thin" else self.unseen(pc, q)):   # 試しの介入: 知らない記号のある所は、言ってみて相手で確かめる
                 self._trials.setdefault(line, []).append((pc, q))
                 continue
             if p > best[0]:
@@ -147,12 +168,12 @@ class Bot3(C2.Bot2):
         self.trial = self._trials.get(out["line"], [])
         self._trials = {}
         if self.trial:
-            out["why"] += "（試し: 「" + "・".join(pc["ns"] + pc["c"] + pc["ps"] for pc, _ in self.trial) + "」は経験に無い形なので、言ってみて確かめる）"
+            out["why"] += "（試し: 「" + "・".join(pc["ns"] + pc["c"] + pc["ps"] for pc, _ in self.trial) + "」は経験の薄い形なので、言ってみて確かめる）"
         return out
 
     # ---- 介入を、行づくり以外の返し方（聞き返し・自分のこと・相手のことを聞く）にも効かせる ----
     _plain = False
-    trial_mode = False                                      # --trial: 試しの介入
+    trial_mode = None                                       # --trial: 試しの介入
     trial = []                                              # 言ってみた（確かめ中の）所
     quiet_ok = False                                        # --quiet_ok: 指摘されなかった返事も経験にする
 
@@ -178,7 +199,7 @@ class Bot3(C2.Bot2):
             if self._ok(pc):
                 continue
             p = self.p_point(pc, q)
-            if self.trial_mode and p > 0.5 and self.unseen(pc, q) and not self.aware.get(("指摘された", pc["ns"] + pc["c"] + pc["ps"])):
+            if self.trial_mode and p > 0.5 and (self.thin(pc, q) if self.trial_mode == "thin" else self.unseen(pc, q)) and not self.aware.get(("指摘された", pc["ns"] + pc["c"] + pc["ps"])):
                 self._trials.setdefault(out["line"], []).append((pc, q))
                 continue
             cands.append((p, pc))
@@ -249,7 +270,8 @@ def main():
     ap.add_argument("--dialogue")
     ap.add_argument("--partner", help="相手役の指摘（所 → 指摘あり/なし の JSON）。返事に指摘ありの所があれば「〈名詞〉って？」と聞き返す")
     ap.add_argument("--judge", help="数えるための指摘（--partner と同じ形）。無ければ --partner")
-    ap.add_argument("--trial", action="store_true", help="試しの介入: 経験に無い記号のある所は、作り直さずに言ってみて相手の次の行で確かめる")
+    ap.add_argument("--trial", nargs="?", const="unseen", default=None, choices=("unseen", "thin"),
+                    help="試しの介入: unseen=知らない記号のある所、thin=それに加えて薄い記号 1 つに頼る見込みの所は、作り直さずに言ってみて相手の次の行で確かめる")
     ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
@@ -294,8 +316,11 @@ def main():
                 v = judge.get((pc["ns"], pc["c"], pc["ps"]))
                 c["相手役が知らない所" if v is None else ("指摘ありの所" if v else "指摘なしの所")] += 1
             bad = [pc for pc in pcs if partner.get((pc["ns"], pc["c"], pc["ps"]))]
-            if bad:
+            for _ in range(2):                              # 指摘のあとの返事も、相手役は読む（2 回まで）
+                if not bad:
+                    break
                 turn(bad[0]["ns"] + bad[0]["c"] + bad[0]["ps"] + "って？")
+                bad = [pc for pc in bot.pb.pieces(bot.conv["lines"][-1]["toks"]) if partner.get((pc["ns"], pc["c"], pc["ps"]))]
         tally.append(c)
         log.extend([f"- 数: {json.dumps(c, ensure_ascii=False)}", ""])
         print(c, flush=True)
