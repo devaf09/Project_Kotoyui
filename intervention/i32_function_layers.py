@@ -219,6 +219,8 @@ def choose_layers(ch, clauses, RB):
         if j < len(clauses) - 1:
             q = clauses[j + 1]["述語"]
             dist = L.conn_dist(p, q)
+            if getattr(ch, "use_grain", False):
+                dist = ch.grain_dist(ch, clauses, j)          # I33: 述部グレイン（回帰＋中身の語）
             surfs = L.conn_surfs(p)
             best = None
             for cn, s in surfs.items():
@@ -369,7 +371,7 @@ _orig_keys = X.keys_of
 
 
 def set_mode(mode):
-    if mode in ("I32", "I32c"):
+    if mode in ("I32", "I32c", "I33"):
         X.propose, X.render_chain, X.keys_of = propose_layers, render_layers, keys_layers
     elif mode == "I27x2":
         X.propose, X.render_chain, X.keys_of = X2.propose2, _orig["render"], _orig["keys"]
@@ -465,6 +467,10 @@ def main():
                     if conn == "連用":
                         idx["end_marks"][surf] = m
     gl = {k: light(LG, ("終印", k)) / max(1, light(LG, ("終印計",))) for k in MARKS}
+    grains = None
+    if not a.only or "I33" in a.only:
+        import i33_predicate_grain as G33
+        grains = G33.train_folds(works)
     propn = {t["lemma"] for w in works for ln in w["lines"] for t in ln["toks"] if t["pos"] in ("PROPN", "PRON")}
     propn_only = {t["lemma"] for w in works for ln in w["lines"] for t in ln["toks"] if t["pos"] == "PROPN"}
     rng = random.Random(a.seed)
@@ -474,7 +480,8 @@ def main():
     sites = sites[:a.n_stats]
     names = [("I27x2・回数 2", "I27x2", 2), ("I32 つなぎと述部の形・回数 2", "I32", 2),
              ("I27x2・回数 6", "I27x2", 6), ("I32 つなぎと述部の形・回数 6", "I32", 6),
-             ("I32c つなぎ・形・助詞・回数 2", "I32c", 2), ("I32c つなぎ・形・助詞・回数 6", "I32c", 6)]
+             ("I32c つなぎ・形・助詞・回数 2", "I32c", 2), ("I32c つなぎ・形・助詞・回数 6", "I32c", 6),
+             ("I33 述部グレイン・回数 2", "I33", 2), ("I33 述部グレイン・回数 6", "I33", 6)]
     if a.only:
         names = [x for x in names if a.only in x[0]]
     res = {nm: Counter() for nm, _, _ in names}
@@ -502,6 +509,9 @@ def main():
         ch.nexts = nexts
         ch.JG, ch.jown = JG, jown[wi]
         cm = ctx_marks(lmarks[wi], li, gl)
+        if grains is not None:
+            import i33_predicate_grain as G33
+            ch.grain_dist = G33.make_grain_dist(grains[wi % G33.FOLDS], lines, li, lmarks[wi])
         ch.L = Layers(LG, lown[wi], idx, cm)
         ch.PG, ch.pown, ch.plabels = PG, pown[wi], plabels
         pairs = S.pair_scores(board, avoid, prev_p, tr)
@@ -516,7 +526,8 @@ def main():
             if not pairs:
                 continue
             set_mode(mode)
-            ch.use_particle = mode == "I32c"
+            ch.use_particle = mode in ("I32c", "I33")
+            ch.use_grain = mode == "I33"
             (line, cl, chk, doc), tries = X.ring(nlp, ch, pairs, budget, True)
             mn = X2.meaning_all(st, cl, propn)
             mn2 = X2.meaning_all(st, cl, propn_only)

@@ -280,6 +280,42 @@ def run(A, B, works):
     return res
 
 
+def train_folds(works):
+    """展開で使う: 作品の組ごとに、ほかの組の作品で学んだ回帰＋中身の語のグレイン。"""
+    global CONTENT
+    CONTENT = True
+    A, _ = collect(works)
+    out = {}
+    for k in range(FOLDS):
+        g = LRGrain()
+        tr = [(sc, c) for wi, sc, c, p, q in A if wi % FOLDS != k]
+        g.fit([x for x, _ in tr], [y for _, y in tr])
+        out[k] = g
+        print("グレイン", k, flush=True)
+    return out
+
+
+def make_grain_dist(g, lines, li, marks):
+    """作る行の場面（作る時に分かる記号だけ）から、つなぎの確からしさ。"""
+    prev_m = next((marks[lj][1] for lj in range(li - 1, -1, -1) if marks[lj][1] is not None), None)
+    q_line = L.isq(lines[li]["text"])
+    ctx = (["台詞"] if q_line else ["地"]) + marks_str(prev_m, "前行:")
+
+    def dist(ch, clauses, j):
+        c, d = clauses[j], clauses[j + 1]
+        sc = ["p:" + c["述語"], "q:" + d["述語"]] + ctx
+        for k in ("目的語", "補語", "修飾", "目的語の修飾"):
+            if c.get(k):
+                sc.append("pc:" + c[k])
+            if d.get(k):
+                sc.append("qc:" + d[k])
+        s = g.scores(sc)
+        m = max(s.values())
+        z = sum(math.exp(v - m) for v in s.values())
+        return {x: math.exp(v - m) / z for x, v in s.items()}
+    return dist
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", required=True)
