@@ -171,6 +171,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n_stats", type=int, default=2000)
     ap.add_argument("--n", type=int, default=12)
+    ap.add_argument("--only", default="", help="この名前を含む組み方だけ回す（例: 回数 6）")
     ap.add_argument("--stats", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -207,6 +208,8 @@ def main():
     sites = sites[:a.n_stats]
     names = [("I27x・回数 2", False, 2), ("I27x2 後ろの節に意味の反応・回数 2", True, 2),
              ("I27x・回数 6", False, 6), ("I27x2 後ろの節に意味の反応・回数 6", True, 6)]
+    if a.only:
+        names = [x for x in names if a.only in x[0]]
     res = {nm: Counter() for nm, _, _ in names}
     slot_ok = {nm: Counter() for nm, _, _ in names}
     slot_n = {nm: Counter() for nm, _, _ in names}
@@ -260,7 +263,7 @@ def main():
                 kk = f"{'1 つ目' if j == 0 else '2 つ目から'}の{k}"
                 slot_n[nm][kk] += 1
                 slot_ok[nm][kk] += v
-            ex[nm] = (line, [f"{j + 1}:{k}" for (j, k), v in chk.items() if not v] + [f"{j + 1}:{k}（意味）" for (j, k), v in mn2.items() if not v])
+            ex[nm] = (line, cl, [f"{j + 1}:{k}" for (j, k), v in chk.items() if not v] + [f"{j + 1}:{k}（意味）" for (j, k), v in mn2.items() if not v])
         X.propose = _orig_propose
         for x, y in sub:
             tr[x][y] += 1
@@ -281,8 +284,12 @@ def main():
         lines = works[wi]["lines"]
         out += [f"## {j}. 作品 {works[wi]['name']} {li} 行目", "",
                 f"- 　 {lines[li - 1]['text']}", f"- （元）{lines[li]['text']}", f"- 　 {lines[li + 1]['text']}", ""]
-        for nm, (line, bad) in ex.items():
+        orig = "・".join(f"{n}|{at}" for n, at, f_, p_ in works[wi]["_attrs"][li]) or "—"
+        out.append(f"- （元を縮めた形）{orig}")
+        for nm, (line, cl, bad) in ex.items():
+            comp = " ／ ".join("・".join(f"{k}={v}" for k, v in c.items() if v and not (k == "主語" and c is not cl[0])) for c in cl)
             out.append(f"- ▶ {nm}: **{line}**　[崩れ: {'、'.join(bad) or 'なし'}]")
+            out.append(f"  - 縮めた形（選んだ枠）: {comp}")
         out.append("")
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
