@@ -171,6 +171,151 @@ def count(works, negx=None):
     return summarize(tab, tgt, n, negx), route_board(tab)
 
 
+# ---- I35b: 振り分けのグレイン（自分の行の側）----
+# 自分の行の 名詞+助詞+述語 の所（「所」）ごとに、気づきの器の差を記号にし、相手の指摘（あり/なし）の経験から
+# P(指摘 | 記号) を経験の器（I33 の CountGrain・回帰）で持つ。指摘ありと見込む所が回し先「介入」（その所を暗くして作り直す）、
+# 同じ所が繰り返し指摘されれば「自覚」（自覚の板に残し、会話をまたいで暗くする）。
+
+ASK = D.ASK
+
+
+def _bin(x, edges):
+    for i, e in enumerate(edges):
+        if x < e:
+            return i
+    return len(edges)
+
+
+class PieceBoards:
+    """本の行から数える板: (述語, 助詞)・(名詞, 助詞, 述語)・(名詞, 助詞)・名詞の修飾の割合・述語が取る名詞のばらつき。"""
+
+    def __init__(self, works):
+        self.pp, self.pn, self.tri, self.nc, self.nn, self.mod = Counter(), Counter(), Counter(), Counter(), Counter(), Counter()
+        pv = defaultdict(set)
+        for w in works:
+            for ln in w["lines"]:
+                T = ln["toks"]
+                kids = defaultdict(list)
+                for t in T:
+                    if 0 <= t["head"] < len(T) and t["head"] != t["i"]:
+                        kids[t["head"]].append(t)
+                for t in T:
+                    if t["pos"] not in NOUN + ("PRON",):
+                        continue
+                    self.nn[t["lemma"]] += 1
+                    if any(k["dep"] in ("acl", "amod", "nmod", "det") and k["i"] < t["i"] for k in kids[t["i"]]):
+                        self.mod[t["lemma"]] += 1
+                    cs = [k["text"] for k in kids[t["i"]] if k["dep"] == "case"]
+                    if not cs:
+                        continue
+                    self.nc[(t["lemma"], cs[0])] += 1
+                    h = T[t["head"]] if 0 <= t["head"] < len(T) else None
+                    if h is not None and h["pos"] in ("VERB", "ADJ"):
+                        self.pp[(h["lemma"], cs[0])] += 1
+                        self.pn[h["lemma"]] += 1
+                        self.tri[(t["lemma"], cs[0], h["lemma"])] += 1
+                        pv[h["lemma"]].add(t["lemma"])
+        self.top = Counter()
+        for (q, _), v in self.pp.items():
+            self.top[q] = max(self.top[q], v)
+        self.pvar = {q: len(v) / self.pn[q] for q, v in pv.items()}
+
+    def pieces(self, toks, text=""):
+        """行の所: (名詞, 助詞, 述語, 名詞の表記, 述語の表記, 裸か)。"""
+        kids = defaultdict(list)
+        for t in toks:
+            if 0 <= t["head"] < len(toks) and t["head"] != t["i"]:
+                kids[t["head"]].append(t)
+        out = []
+        for t in toks:
+            if t["pos"] not in NOUN + ("PRON",):
+                continue
+            h = toks[t["head"]] if 0 <= t["head"] < len(toks) else None
+            cs = [k["text"] for k in kids[t["i"]] if k["dep"] == "case"]
+            if h is None or h["pos"] not in ("VERB", "ADJ") or not cs:
+                continue
+            bare = not any(k["dep"] in ("acl", "amod", "nmod", "det") and k["i"] < t["i"] for k in kids[t["i"]])
+            out.append(dict(n=t["lemma"], c=cs[0], p=h["lemma"], ns=t["text"], ps=h["text"], bare=bare))
+        return out
+
+    def symbols(self, pc, question=False):
+        n, c, p = pc["n"], pc["c"], pc["p"]
+        top = self.top.get(p, 0)
+        a = 1.0 - self.pp.get((p, c), 0) / top if top else 1.0
+        tri = self.tri.get((n, c, p), 0)
+        nn = self.nn.get(n, 0)
+        pnc = self.nc.get((n, c), 0) / nn if nn else 0.0
+        m = self.mod[n] / nn if nn else 0.0
+        sy = [f"a:{_bin(a, (0.5, 0.8, 0.95))}",                 # 気づきの器 5(a): 述語に合わない助詞
+              f"t:{_bin(tri, (1, 2, 4, 10))}",                  # 名詞+助詞+述語 の組が本にあるか
+              f"nc:{_bin(pnc, (0.02, 0.1, 0.3))}",              # その名詞がその助詞を取る割合
+              f"nf:{_bin(nn, (1, 10, 100, 1000))}",             # 名詞の多さ
+              f"pv:{_bin(self.pvar.get(p, 1.0), (0.05, 0.2, 0.5))}"]   # 述語が取る名詞のばらつき（中身の薄さ）
+        if pc["bare"]:
+            sy.append(f"b:{_bin(m, (0.3, 0.6, 0.85))}")         # 気づきの器 5(b): 修飾を取るはずの名詞が裸
+        if n in ASK and not question:
+            sy.append("wh")                                     # 問いでない行の問いの語
+        return sy
+
+
+def i34d_flag(pb, pc, h_gen, h_book, bins=10):
+    """I34d の決め方を所ごとに: 不自然さ（a と b の大きい方）の区切りで、自分の行に出る割合 > 本の行に出る割合 なら違和感。"""
+    p, c, n = pc["p"], pc["c"], pc["n"]
+    top = pb.top.get(p, 0)
+    a = 1.0 - pb.pp.get((p, c), 0) / top if top else 0.0
+    nn = pb.nn.get(n, 0)
+    m = pb.mod[n] / nn if (nn and pc["bare"]) else 0.0
+    d = max(a, m)
+    b = min(bins - 1, int(d * bins))
+    ng, nb = sum(h_gen.values()), sum(h_book.values())
+    return (h_gen[b] + 0.5) / (ng + 0.5 * bins) > (h_book[b] + 0.5) / (nb + 0.5 * bins), d
+
+
+def eval_self(works, labels, own_toks, folds=5, seed=0):
+    """相手の指摘（labels）を 5 つに分け、ほかの 4 つの経験で残りを当てる。I34d の決め方と比べる。"""
+    import random
+    import i33_predicate_grain as G
+    pb = PieceBoards(works)
+    items = labels["items"]
+    sc = [pb.symbols(dict(x, bare=x.get("bare", True))) for x in items]
+    y = ["指摘" if x["odd"] else "そのまま" for x in items]
+    # I34d の分かれ方: 自分の行（own_toks）と本の行の、所の不自然さ
+    rng = random.Random(seed)
+    lines = [ln for w in works for ln in w["lines"] if ln["toks"]]
+    rng.shuffle(lines)
+    h_book, h_gen = Counter(), Counter()
+    for ln in lines[:2000]:
+        for pc in pb.pieces(ln["toks"]):
+            h_book[min(9, int(i34d_flag(pb, pc, Counter(), Counter())[1] * 10))] += 1
+    for T in own_toks:
+        for pc in pb.pieces(T):
+            h_gen[min(9, int(i34d_flag(pb, pc, Counter(), Counter())[1] * 10))] += 1
+    order = list(range(len(items)))
+    rng.shuffle(order)
+    res = defaultdict(Counter)
+    for f in range(folds):
+        te = set(order[f::folds])
+        tr = [i for i in order if i not in te]
+        cg = G.CountGrain()
+        for i in tr:
+            cg.add(sc[i], y[i])
+        lr = G.LRGrain()
+        lr.fit([sc[i] for i in tr], [y[i] for i in tr])
+        for i in te:
+            for name, g in (("経験の器", cg), ("回帰", lr)):
+                s = g.scores(sc[i])
+                res[name][(max(s, key=s.get), y[i])] += 1
+            fl = i34d_flag(pb, dict(items[i], bare=items[i].get("bare", True)), h_gen, h_book)[0]
+            res["I34d の決め方"][("指摘" if fl else "そのまま", y[i])] += 1
+            res["いつも そのまま"][("そのまま", y[i])] += 1
+    out = {}
+    for name, c in res.items():
+        tp, fp, fn = c[("指摘", "指摘")], c[("指摘", "そのまま")], c[("そのまま", "指摘")]
+        tn = c[("そのまま", "そのまま")]
+        out[name] = dict(当たり=round((tp + tn) / sum(c.values()), 3), 拾えた指摘=f"{tp}/{tp + fn}", 拾いすぎ=f"{fp}/{fp + tn}")
+    return out, pb
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", required=True)
