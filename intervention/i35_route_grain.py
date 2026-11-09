@@ -255,6 +255,8 @@ class PieceBoards:
             sy.append(f"b:{_bin(m, (0.3, 0.6, 0.85))}")         # 気づきの器 5(b): 修飾を取るはずの名詞が裸
         if n in ASK and not question:
             sy.append("wh")                                     # 問いでない行の問いの語
+        if question:
+            sy.append("q")                                      # 問いの行（経験に無ければ「まだ知らない」記号になる）
         return sy
 
 

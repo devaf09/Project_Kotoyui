@@ -43,6 +43,8 @@ class Bot3(C2.Bot2):
         super().__init__(nlp, works, **kw)
         self.negx = set(self.route.get("_否定の始めの語") or R.neg_intj(works))   # 1,808 作品の板にあればそれを使う
         self.learned = []                                   # 会話で足した経験（記録用）
+        self.confirmed = []                                 # 言ってみて、指摘されなかった所（記録用）
+        self._trials = {}
 
     # ---- 自分の行の側 ----
     def p_point(self, pc, question=False):
@@ -53,14 +55,33 @@ class Bot3(C2.Bot2):
         z = sum(math.exp(v - m) for v in s.values())
         return math.exp(s["指摘"] - m) / z
 
+    def unseen(self, pc, question=False):
+        """その所の記号のうち、経験の器がまだ一度も見ていない記号（あれば、見込みは当てにならない）。"""
+        return [t for t in self.pb.symbols(pc, question) if t not in self.grain.f]
+
+    def _ok(self, pc):
+        w = pc["ns"] + pc["c"] + pc["ps"]
+        if not hasattr(self, "aware"):
+            return False
+        return self.aware.get(("確かめた", w), 0) > self.aware.get(("指摘された", w), 0)
+
+    def _is_q(self, toks):
+        return "".join(t["text"] for t in toks).rstrip("。…").endswith(("？", "?"))
+
     def oddness(self, toks):
         """I34d の物差しの代わり: 行の所のうち、指摘を見込む確からしさがいちばん大きい所。"""
         if not hasattr(self, "grain") or not self.grain.N:
             return super().oddness(toks)
         best = (0.0, ("無", ""), [])
-        q = "".join(t["text"] for t in toks).rstrip("。…").endswith(("？", "?"))
+        q = self._is_q(toks)
+        line = "".join(t["text"] for t in toks)
         for pc in self.pb.pieces(toks):
             p = self.p_point(pc, q)
+            if self._ok(pc):                               # 前に言ってみて通じた所
+                continue
+            if self.trial_mode and p > 0.5 and self.unseen(pc, q):   # 試しの介入: 知らない記号のある所は、言ってみて相手で確かめる
+                self._trials.setdefault(line, []).append((pc, q))
+                continue
             if p > best[0]:
                 best = (p, ("指摘の見込み", pc["ns"] + pc["c"] + pc["ps"]), [("補語", pc["n"]), ("目的語", pc["n"])])
         return best
@@ -108,16 +129,31 @@ class Bot3(C2.Bot2):
                 else:
                     continue
                 break
+            trial, self.trial = self.trial, []
             if cs:
-                return self.pointed(text, toks, a, cs, hums[-1]["text"] if hums else None)
+                out = self.pointed(text, toks, a, cs, hums[-1]["text"] if hums else None)
+                return self._end_turn(out)
+            for pc, q in trial:                             # 言ってみた所が指摘されなかった: そのままの経験に足す
+                self.grain.add(self.pb.symbols(pc, q), "そのまま")
+                self.confirmed.append(pc["ns"] + pc["c"] + pc["ps"])
+                self.aware[("確かめた", pc["ns"] + pc["c"] + pc["ps"])] += 1.0   # 自覚の板: 言ってみて通じた所
             if self.quiet_ok:                               # 相手が指摘しなかった: 前の返事の所を「そのまま」の経験に足す
                 q = bots[-1]["text"].rstrip("。…").endswith(("？", "?"))
                 for pc in self.pb.pieces(a["toks"]):
                     self.grain.add(self.pb.symbols(pc, q), "そのまま")
-        return self._name(self.checked_reply(text))
+        return self._end_turn(self._name(self.checked_reply(text)))
+
+    def _end_turn(self, out):
+        self.trial = self._trials.get(out["line"], [])
+        self._trials = {}
+        if self.trial:
+            out["why"] += "（試し: 「" + "・".join(pc["ns"] + pc["c"] + pc["ps"] for pc, _ in self.trial) + "」は経験に無い形なので、言ってみて確かめる）"
+        return out
 
     # ---- 介入を、行づくり以外の返し方（聞き返し・自分のこと・相手のことを聞く）にも効かせる ----
     _plain = False
+    trial_mode = False                                      # --trial: 試しの介入
+    trial = []                                              # 言ってみた（確かめ中の）所
     quiet_ok = False                                        # --quiet_ok: 指摘されなかった返事も経験にする
 
     def about_person(self, toks):
@@ -137,7 +173,16 @@ class Bot3(C2.Bot2):
             return out
         toks = self.conv["lines"][-1]["toks"]
         q = out["line"].rstrip("。…").endswith(("？", "?"))
-        worst = max(((self.p_point(pc, q), pc) for pc in self.pb.pieces(toks)), key=lambda x: x[0], default=(0.0, None))
+        cands = []
+        for pc in self.pb.pieces(toks):
+            if self._ok(pc):
+                continue
+            p = self.p_point(pc, q)
+            if self.trial_mode and p > 0.5 and self.unseen(pc, q) and not self.aware.get(("指摘された", pc["ns"] + pc["c"] + pc["ps"])):
+                self._trials.setdefault(out["line"], []).append((pc, q))
+                continue
+            cands.append((p, pc))
+        worst = max(cands, key=lambda x: x[0], default=(0.0, None))
         dark = [pc for pc in self.pb.pieces(toks) if self.aware.get(("指摘された", pc["ns"] + pc["c"] + pc["ps"]))]
         if worst[0] <= 0.5 and not dark:
             return out
@@ -163,8 +208,9 @@ class Bot3(C2.Bot2):
         tgt = [pc for pc in pcs if pc["n"] in hit or pc["p"] in hit]
         if not tgt and pcs:                                 # 指摘された語が分からない（「え？」）: 自分でいちばん怪しいと見る所
             tgt = [max(pcs, key=self.p_point)]
+        qa = self._is_q(a["toks"])
         for pc in tgt:                                      # 1. 経験を足す
-            self.grain.add(self.pb.symbols(pc), "指摘")
+            self.grain.add(self.pb.symbols(pc, qa), "指摘")
             self.learned.append(pc["ns"] + pc["c"] + pc["ps"])
             self.aware[("指摘された", pc["ns"] + pc["c"] + pc["ps"])] += 1.0
             for k in (("補語", pc["n"]), ("目的語", pc["n"])):
@@ -203,6 +249,7 @@ def main():
     ap.add_argument("--dialogue")
     ap.add_argument("--partner", help="相手役の指摘（所 → 指摘あり/なし の JSON）。返事に指摘ありの所があれば「〈名詞〉って？」と聞き返す")
     ap.add_argument("--judge", help="数えるための指摘（--partner と同じ形）。無ければ --partner")
+    ap.add_argument("--trial", action="store_true", help="試しの介入: 経験に無い記号のある所は、作り直さずに言ってみて相手の次の行で確かめる")
     ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
@@ -213,6 +260,7 @@ def main():
     bot = Bot3(nlp, works, pointing=None if a.self_lines else a.pointing, route=a.route, budget=a.budget,
                dialogue=a.dialogue, self_lines=a.self_lines)
     bot.quiet_ok = a.quiet_ok
+    bot.trial_mode = a.trial
     print(f"（読み込み {bot.load_s:.0f} 秒）", flush=True)
     log = ["# チャットボット 3 の記録（非公開）", "", f"- 本: {len(works)} 作品、振り返りの回数 {a.budget}、"
            + ("I34d の決め方" if a.self_lines else "振り分けのグレイン"), ""]
@@ -251,6 +299,8 @@ def main():
         tally.append(c)
         log.extend([f"- 数: {json.dumps(c, ensure_ascii=False)}", ""])
         print(c, flush=True)
+    if bot.confirmed:
+        log.extend(["", f"- 言ってみて指摘されなかった所（そのままの経験に足した）: {'・'.join(bot.confirmed)}"])
     if bot.learned:
         log.extend(["", f"- 会話で足した経験（指摘された所）: {'・'.join(bot.learned)}"])
     if a.log:
