@@ -134,7 +134,7 @@ def pred_surfaces(works):
 
 
 class Bot2(CB.Bot):
-    def __init__(self, nlp, works, dialogue=None, **kw):
+    def __init__(self, nlp, works, dialogue=None, self_lines=None, **kw):
         kw_dialogue = dialogue
         super().__init__(nlp, works, **kw)
         t0 = time.time()
@@ -165,6 +165,14 @@ class Bot2(CB.Bot):
         self.layers = L.Layers(LG, Board(), idx, dict(ctx))
         self.base_ctx = ctx
         self.pol = Counter()                               # 相手の丁寧の板（人物の属性）: 人の行の言い切りに丁寧が出た回数
+        self.odd_boards(works)
+        self._pp_top = {}
+        for (p_, _), v in self.pp.items():
+            self._pp_top[p_] = max(self._pp_top.get(p_, 0), v)
+        self.e_odd = self.expect_oddness(works)
+        self.aware = Counter()                             # 自覚の板（気づいた不自然さ）
+        self.aware_keys = Board()                          # 自覚の板を反応の板の鍵にしたもの
+        self.learn_self(works, self_lines)
         self.me = Board()                                  # 自分の板（最初は空）
         self.you = Board()                                 # 相手の板の名詞の明るさ（人の行から）
         self.load_s += time.time() - t0
@@ -192,6 +200,10 @@ class Bot2(CB.Bot):
         for (q2, k2), c in self.start.items():
             if q2 == qt and k2 != kind:
                 other.update(c)
+        if not other:                                       # 同じ問いの型にほかの返し方が無い（相槌）: ほかの全部と比べる
+            for key, c in self.start.items():
+                if key != (qt, kind):
+                    other.update(c)
         n1, n2 = sum(mine.values()), sum(other.values())
         V = len(set(mine) | set(other))
         sc = {x: math.log((mine[x] + 0.5) / (n1 + 0.5 * V)) - math.log((other[x] + 0.5) / (n2 + 0.5 * V)) + math.log(mine[x] / n1)
@@ -238,11 +250,15 @@ class Bot2(CB.Bot):
                 continue
             if best is None or d > best[0]:
                 best = (d, max(wh, key=lambda x: (wh[x], x)) + part, p)
-        st = self.start.get(("問いでない", "相槌"), Counter())
-        head = max(st, key=lambda x: (st[x], x)) if st else ""
-        if best is None:                                    # 聞く所が無い: 相槌と、相手の述語をそのまま繰り返す
-            kids = L.kids_of(toks)
-            return (head + "、" if head else "") + L.layers(kids, root)[2] + "。", (0.0, "（繰り返し）", root["lemma"])
+        head = self.intj("問いでない", "相槌")
+        if best is None:                                    # 聞く所が無い: 相槌と、相手の述語を繰り返す（丁寧は自分の期待で）
+            want = dict(self._marks(toks))
+            pol = self.layers.ctx["丁寧"]
+            want["丁寧"] = react(pol, 1.0)[0] < react(pol, 0.0)[0]
+            surf = self.pred_form(root["lemma"], want) if root["pos"] in L.PRED else None
+            if surf is None:
+                surf = L.layers(L.kids_of(toks), root)[2]
+            return (head + "、" if head else "") + surf + "。", (0.0, "（繰り返し）", root["lemma"])
         want = self._marks(toks)
         want = dict(want, 否定=False)
         surf = self.pred_form(best[2], want) or best[2]
@@ -330,19 +346,122 @@ class Bot2(CB.Bot):
         if qt == "問いでない" and self.about_person(toks):
             r = self.person_question(toks)
             if r is not None:
-                out = dict(line=r[0], tries=0, breaks=[], sim=0, why=f"相手の板に入れ、{r[1][2]} の枠の空き（差 {r[1][0]:.2f}）を聞く")
+                why = (f"相手の板に入れ、{r[1][2]} の枠の空き（差 {r[1][0]:.2f}）を聞く" if r[1][1] != "（繰り返し）"
+                       else "相手の板に入れ、聞く所が無いので相槌と繰り返し")
+                out = dict(line=r[0], tries=0, breaks=[], sim=0, why=why)
                 return self._log(text, toks, out)
         # 5. それ以外: 行づくり（I32c のつなぎ・形・助詞）
-        L.set_mode("I32")
-        X.Chain.L = self.layers                            # 作る行の層の読み手（chat_bot.py の Chain に持たせる）
-        CB.X2 = _Shim                                      # chat_bot.py は X2.propose2 を使うので、層つきの見立てに替える
-        try:
-            out = super().reply(text)
-        finally:
-            CB.X2 = _X2
-            L.set_mode("I27x2")
-        out["why"] = "行づくり（つなぎ・述部の形つき）"
+        # 気づき 5: 作った行の中の小さな不自然さ（違和感）。助詞が述語に合うか、修飾を取るはずの名詞が裸か。
+        # 違和感があれば、自覚の板に残し（会話をまたいで持ち越す）、その語を暗くして作り直す（介入）。直らなければ相槌で受ける。
+        notes = []
+        for attempt in range(self.budget + 1):
+            L.set_mode("I32")
+            X.Chain.L = self.layers
+            CB.X2 = _Shim
+            seed = Board(self.aware_keys)
+            X.Board = lambda *a_, **k_: Board(seed) if not a_ and not k_ else Board(*a_, **k_)   # ring の反応の板に自覚の板を入れる
+            try:
+                out = super().reply(text)
+            finally:
+                CB.X2 = _X2
+                X.Board = Board
+                L.set_mode("I27x2")
+            rd = CB.to_toks(self.nlp(out["line"]))
+            d, where, keys = self.oddness(rd)
+            pg, pb = self.odd_hist(d)
+            if pg <= pb:                                    # 本の行に近い: そのまま言う
+                break
+            self.aware[where] += d
+            for k in keys:
+                self.aware_keys[k] += d
+            notes.append(f"「{out['line']}」→ 違和感「{where[1]}」（{where[0]}、差 {d:.2f}、自分の行に出る割合 {pg:.2f} > 本 {pb:.2f}）")
+            del self.conv["lines"][-2:]                     # 言わなかった行と、もう一度足される人の行を外す
+        else:
+            self.conv["lines"].append(dict(text=text, toks=toks, who="人"))
+            head = self.intj("問いでない", "相槌")
+            out["line"] = head + "。"
+            self.conv["lines"].append(dict(text=out["line"], toks=CB.to_toks(self.nlp(out["line"])), who="ボット"))
+            notes.append("直らないので相槌で受ける")
+        out["why"] = "行づくり（つなぎ・述部の形つき）" + ("。" + " ／ ".join(notes) if notes else "") + \
+            (f"。作り直し {len(notes) - (1 if '直らない' in notes[-1] else 0)} 回" if notes else "")
         return out
+
+    # ---- 気づき 5 の物差し ----
+    def odd_boards(self, works):
+        """本の行から: (述語, 助詞) の数・述語の数、名詞が修飾を取った数・名詞の数。"""
+        self.pp, self.pn, self.mod, self.nn = Counter(), Counter(), Counter(), Counter()
+        for w in works:
+            for ln in w["lines"]:
+                T = ln["toks"]
+                kids = L.kids_of(T)
+                for t in T:
+                    if t["pos"] in NOUN:
+                        self.nn[t["lemma"]] += 1
+                        if any(k["dep"] in ("acl", "amod", "nmod", "det") and k["i"] < t["i"] for k in kids[t["i"]]):
+                            self.mod[t["lemma"]] += 1
+                        h = T[t["head"]] if 0 <= t["head"] < len(T) else None
+                        cs = [k["text"] for k in kids[t["i"]] if k["dep"] == "case"]
+                        if h is not None and h["pos"] in L.PRED and cs:
+                            self.pp[(h["lemma"], cs[0])] += 1
+                            self.pn[h["lemma"]] += 1
+
+    def oddness(self, toks):
+        """行のいちばん不自然な所: 差 = 1 − P(助詞|述語) / 最も多い助詞の割合、または 修飾を取る割合（裸のとき）。"""
+        kids = L.kids_of(toks)
+        worst = (0.0, ("無", ""), [])
+        for t in toks:
+            if t["pos"] not in NOUN:
+                continue
+            n = self.nn.get(t["lemma"], 0)
+            if n:
+                m = self.mod[t["lemma"]] / n
+                has = any(k["dep"] in ("acl", "amod", "nmod", "det") and k["i"] < t["i"] for k in kids[t["i"]])
+                if not has and m > worst[0]:
+                    worst = (m, ("裸の名詞", t["text"]), [("補語", t["lemma"]), ("目的語", t["lemma"])])
+            h = toks[t["head"]] if 0 <= t["head"] < len(toks) else None
+            cs = [k["text"] for k in kids[t["i"]] if k["dep"] == "case"]
+            if h is not None and h["pos"] in L.PRED and cs and self.pn.get(h["lemma"]):
+                top = self._pp_top.get(h["lemma"], 0)
+                dd = 1.0 - self.pp.get((h["lemma"], cs[0]), 0) / top if top else 0.0
+                if dd > worst[0]:
+                    worst = (dd, ("述語に合わない助詞", t["text"] + cs[0] + h["text"]), [("補語", t["lemma"]), ("目的語", t["lemma"])])
+        return worst
+
+    BINS = 10
+
+    def _bin(self, d):
+        return min(self.BINS - 1, int(d * self.BINS))
+
+    def odd_hist(self, d):
+        """不自然さ d が、自分の作った行（self_lines）と本の行で、どれだけ出るか（10 の区切り、0.5 を足して均す）。"""
+        if not self.h_gen:
+            return 0.0, 1.0
+        b = self._bin(d)
+        ng, nb = sum(self.h_gen.values()), sum(self.h_book.values())
+        return (self.h_gen[b] + 0.5) / (ng + 0.5 * self.BINS), (self.h_book[b] + 0.5) / (nb + 0.5 * self.BINS)
+
+    def learn_self(self, works, self_lines, n=500, seed=0):
+        """自分の作った行（前の実験の出力）と本の行の、不自然さの分かれ方を覚える。"""
+        import random
+        import re
+        rng = random.Random(seed)
+        lines = [ln for w in works for ln in w["lines"] if ln["toks"]]
+        rng.shuffle(lines)
+        self.h_book = Counter(self._bin(self.oddness(ln["toks"])[0]) for ln in lines[:n])
+        self.h_gen = Counter()
+        if self_lines:
+            gen = re.findall(r"\*\*(.+?)\*\*", open(self_lines, encoding="utf-8").read())
+            gen = list(dict.fromkeys(gen))
+            for doc in self.nlp.pipe(gen, batch_size=64):
+                self.h_gen[self._bin(self.oddness(CB.to_toks(doc))[0])] += 1
+
+    def expect_oddness(self, works, n=500, seed=0):
+        import random
+        rng = random.Random(seed)
+        lines = [ln for w in works for ln in w["lines"] if ln["toks"]]
+        rng.shuffle(lines)
+        vals = [self.oddness(ln["toks"])[0] for ln in lines[:n]]
+        return sum(vals) / len(vals) if vals else 0.0
 
     def _log(self, text, toks, out):
         self.conv["lines"].append(dict(text=text, toks=toks, who="人"))
@@ -364,6 +483,7 @@ def main():
     ap.add_argument("--budget", type=int, default=2)
     ap.add_argument("--say", nargs="*")
     ap.add_argument("--log")
+    ap.add_argument("--self_lines", help="自分が前に作った行（例の md の **行**）。崩れた行の不自然さの分かれ方を覚える")
     ap.add_argument("--dialogue", help="i34c の会話の板（JSON）。無ければ --cache の作品から数える")
     a = ap.parse_args()
     import spacy
@@ -373,7 +493,7 @@ def main():
         works = json.load(gzip.open(a.cache, "rt", encoding="utf-8"))
     else:
         works = json.load(open(a.cache, encoding="utf-8"))
-    bot = Bot2(nlp, works, budget=a.budget, dialogue=a.dialogue)
+    bot = Bot2(nlp, works, budget=a.budget, dialogue=a.dialogue, self_lines=a.self_lines)
     print(f"（読み込み {bot.load_s:.0f} 秒）", flush=True)
     log = ["# チャットボット 2 の記録（非公開）", "", f"- 本: {len(works)} 作品、振り返りの回数 {a.budget}", ""]
 
