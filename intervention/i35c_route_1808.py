@@ -1,6 +1,6 @@
 """介入の研究 実験I35c: 指摘の板（I35a）を 1,808 作品の台詞で数え直す（PC で回す）
 
-I34c と同じ取り出し（台詞の行と、そのすぐあとの行だけを GiNZA で解析）で、続く台詞 A → B → C の
+台詞の行（i34_dialogue_board.isq、「『 で始まる行。閉じない行も）を GiNZA で解析し、続く台詞 A → B → C の
 手がかりの型 → 回し先 を数える（i35_route_grain.count_raw）。否定の始めの語は I34c の会話の板（--dialogue）から。
 語の珍しさ（作品をまたぐ）は 1,808 作品では数えない。本文は出さない（数だけ）。
 CPU だけで回す（CUDA_VISIBLE_DEVICES=）。Web 小説は _wn。結果は非公開の置き場だけ。
@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 _nlp = None
 _negx = None
+MIN_N = 5          # 否定の始めの語は、肯定・否定の答えの始めに 5 回以上出た語だけ
 
 
 def neg_from_board(path):
@@ -30,7 +31,7 @@ def neg_from_board(path):
         qt, kind, x = k.split("|", 2)
         if qt != "問いでない" and kind in ("肯定", "否定"):
             c[x][kind] += v
-    return {x for x, v in c.items() if (v["否定"] + 0.5) / (v["否定"] + v["肯定"] + 1) > 0.5}
+    return {x for x, v in c.items() if v["否定"] + v["肯定"] >= MIN_N and (v["否定"] + 0.5) / (v["否定"] + v["肯定"] + 1) > 0.5}
 
 
 def _init(dialogue):
@@ -47,7 +48,8 @@ def do_work(args):
     import i35_route_grain as R
     corpus, wid, eps = args
     lines = V.work_lines(corpus, wid, eps)
-    need = {li for li, x in enumerate(lines) if T.quote_end(x) >= 0}
+    import i34_dialogue_board as D
+    need = {li for li, x in enumerate(lines) if D.isq(x)}             # 数え上げ（isq）と同じ行を解析する（『 で始まる行・閉じない行も）
     idx = sorted(need)
     docs = _nlp.pipe([lines[i] for i in idx], batch_size=64)
     parsed = {i: V.to_toks(d) for i, d in zip(idx, docs)}

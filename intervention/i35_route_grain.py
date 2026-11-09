@@ -54,7 +54,7 @@ def neg_intj(works):
             neg = any(t["lemma"] in ("ない", "ぬ") and t["pos"] == "AUX" for t in at)
             if first is not None and first["pos"] == "INTJ" and qp & ap_:
                 c[first["text"]]["否定" if neg else "肯定"] += 1
-    return {x: v for x, v in c.items() if (v["否定"] + 0.5) / (v["否定"] + v["肯定"] + 1) > 0.5}
+    return {x: v for x, v in c.items() if v["否定"] + v["肯定"] >= 5 and (v["否定"] + 0.5) / (v["否定"] + v["肯定"] + 1) > 0.5}
 
 
 def slots(toks):
