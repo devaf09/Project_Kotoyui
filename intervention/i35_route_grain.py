@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from collections import Counter, defaultdict
@@ -318,15 +319,69 @@ def eval_self(works, labels, own_toks, folds=5, seed=0):
     return out, pb
 
 
+# ---- I35i: 受けの板（相手の次の行が、前の行を受けているか）----
+# 黙っている（指摘しない）ことを「通じた」と取る前に、相手の次の行が前の行を受けているかを見る。
+# 隣り合う台詞 (A, B) と、同じ作品の離れた台詞 (A, B') で、受けの記号が出る割合を数え、その比で見る（手の閾値なし）。
+UPTAKE = ("語の重なり", "問いに答える形", "始めが感動詞", "始めが指す語", "述語の重なり")
+
+
+def uptake_syms(a, b):
+    at, bt = a["toks"], b["toks"]
+    ca = {t["lemma"] for t in at if t["pos"] in NOUN}
+    cb = {t["lemma"] for t in bt if t["pos"] in NOUN}
+    pa = {t["lemma"] for t in at if t["pos"] in ("VERB", "ADJ")}
+    pb_ = {t["lemma"] for t in bt if t["pos"] in ("VERB", "ADJ")}
+    qa = D.body(a["text"]).rstrip("…。 ").endswith(("？", "?"))
+    qb = D.body(b["text"]).rstrip("…。 ").endswith(("？", "?"))
+    first = next((t for t in bt if t["pos"] not in ("PUNCT", "SYM")), None)
+    return {"語の重なり": bool(ca & cb), "問いに答える形": qa and not qb,
+            "始めが感動詞": first is not None and first["pos"] == "INTJ",
+            "始めが指す語": first is not None and first["pos"] in ("PRON", "DET"),
+            "述語の重なり": bool(pa & pb_)}
+
+
+def uptake_board(works, gap=20, seed=0):
+    import random
+    rng = random.Random(seed)
+    c = {"隣": Counter(), "離れ": Counter()}
+    n = Counter()
+    for w in works:
+        Ls = [ln for ln in w["lines"] if D.isq(ln["text"]) and ln["toks"]]
+        for i in range(len(Ls) - 1):
+            j = rng.randrange(len(Ls))
+            if abs(j - i) < gap:
+                continue
+            for kind, b in (("隣", Ls[i + 1]), ("離れ", Ls[j])):
+                n[kind] += 1
+                for k, v in uptake_syms(Ls[i], b).items():
+                    c[kind][k] += v
+    return {k: dict(n=n[k], **c[k]) for k in c}
+
+
+def uptake_score(board, a, b):
+    """log P(記号 | 隣) − log P(記号 | 離れ) の和（出た記号も出なかった記号も）。正なら受けている。"""
+    s = 0.0
+    for k, v in uptake_syms(a, b).items():
+        p1 = (board["隣"].get(k, 0) + 0.5) / (board["隣"]["n"] + 1)
+        p0 = (board["離れ"].get(k, 0) + 0.5) / (board["離れ"]["n"] + 1)
+        s += math.log(p1 / p0) if v else math.log((1 - p1) / (1 - p0))
+    return s
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", required=True)
     ap.add_argument("--stats", required=True)
+    ap.add_argument("--uptake", help="受けの板（JSON）を書く")
     ap.add_argument("--board", help="手がかりの型 → 回し先 の数（JSON）。chat_bot3.py の --route に渡す")
     a = ap.parse_args()
     works = json.load(open(a.cache, encoding="utf-8"))
     summ, board = count(works)
     rec = dict(exp="I35a", 作品=len(works), **summ)
+    if a.uptake:
+        ub = uptake_board(works)
+        rec["受けの板"] = ub
+        json.dump(ub, open(a.uptake, "w", encoding="utf-8"), ensure_ascii=False)
     if a.board:
         json.dump(board, open(a.board, "w", encoding="utf-8"), ensure_ascii=False)
     print(json.dumps(rec, ensure_ascii=False, indent=1))

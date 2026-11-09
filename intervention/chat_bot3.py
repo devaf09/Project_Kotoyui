@@ -45,6 +45,8 @@ class Bot3(C2.Bot2):
         self.learned = []                                   # 会話で足した経験（記録用）
         self.confirmed = []                                 # 言ってみて、指摘されなかった所（記録用）
         self._trials = {}
+        self.uptake = None                                  # 受けの板（--uptake）
+        self.unresolved = []                                # 試したが、相手が受けていないので分からなかった所
 
     # ---- 自分の行の側 ----
     def p_point(self, pc, question=False):
@@ -86,6 +88,9 @@ class Bot3(C2.Bot2):
             return False
         return self.aware.get(("確かめた", w), 0) > self.aware.get(("指摘された", w), 0)
 
+    def _tried(self, pc):
+        return (pc["ns"] + pc["c"] + pc["ps"]) in self.unresolved if hasattr(self, "unresolved") else False
+
     def _is_q(self, toks):
         return "".join(t["text"] for t in toks).rstrip("。…").endswith(("？", "?"))
 
@@ -100,7 +105,7 @@ class Bot3(C2.Bot2):
             p = self.p_point(pc, q)
             if self._ok(pc):                               # 前に言ってみて通じた所
                 continue
-            if self.trial_mode and p > 0.5 and (self.thin(pc, q) if self.trial_mode == "thin" else self.unseen(pc, q)):   # 試しの介入: 知らない記号のある所は、言ってみて相手で確かめる
+            if self.trial_mode and p > 0.5 and not self._tried(pc) and (self.thin(pc, q) if self.trial_mode == "thin" else self.unseen(pc, q)):   # 試しの介入: 知らない記号のある所は、言ってみて相手で確かめる
                 self._trials.setdefault(line, []).append((pc, q))
                 continue
             if p > best[0]:
@@ -154,6 +159,9 @@ class Bot3(C2.Bot2):
             if cs:
                 out = self.pointed(text, toks, a, cs, hums[-1]["text"] if hums else None)
                 return self._end_turn(out)
+            if trial and self.uptake is not None and R.uptake_score(self.uptake, a, b) <= 0:
+                self.unresolved += [pc["ns"] + pc["c"] + pc["ps"] for pc, _ in trial]
+                trial = []                                  # 相手の行が前の返事を受けていない: 通じたかは分からない（経験にしない）
             for pc, q in trial:                             # 言ってみた所が指摘されなかった: そのままの経験に足す
                 self.grain.add(self.pb.symbols(pc, q), "そのまま")
                 self.confirmed.append(pc["ns"] + pc["c"] + pc["ps"])
@@ -199,7 +207,7 @@ class Bot3(C2.Bot2):
             if self._ok(pc):
                 continue
             p = self.p_point(pc, q)
-            if self.trial_mode and p > 0.5 and (self.thin(pc, q) if self.trial_mode == "thin" else self.unseen(pc, q)) and not self.aware.get(("指摘された", pc["ns"] + pc["c"] + pc["ps"])):
+            if self.trial_mode and p > 0.5 and not self._tried(pc) and (self.thin(pc, q) if self.trial_mode == "thin" else self.unseen(pc, q)) and not self.aware.get(("指摘された", pc["ns"] + pc["c"] + pc["ps"])):
                 self._trials.setdefault(out["line"], []).append((pc, q))
                 continue
             cands.append((p, pc))
@@ -272,6 +280,7 @@ def main():
     ap.add_argument("--judge", help="数えるための指摘（--partner と同じ形）。無ければ --partner")
     ap.add_argument("--trial", nargs="?", const="unseen", default=None, choices=("unseen", "thin"),
                     help="試しの介入: unseen=知らない記号のある所、thin=それに加えて薄い記号 1 つに頼る見込みの所は、作り直さずに言ってみて相手の次の行で確かめる")
+    ap.add_argument("--uptake", help="受けの板（i35_route_grain --uptake）。試しの所は、相手の次の行が前の返事を受けている時だけ通じたとする")
     ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
@@ -283,6 +292,8 @@ def main():
                dialogue=a.dialogue, self_lines=a.self_lines)
     bot.quiet_ok = a.quiet_ok
     bot.trial_mode = a.trial
+    if a.uptake:
+        bot.uptake = json.load(open(a.uptake, encoding="utf-8"))
     print(f"（読み込み {bot.load_s:.0f} 秒）", flush=True)
     log = ["# チャットボット 3 の記録（非公開）", "", f"- 本: {len(works)} 作品、振り返りの回数 {a.budget}、"
            + ("I34d の決め方" if a.self_lines else "振り分けのグレイン"), ""]
@@ -324,6 +335,8 @@ def main():
         tally.append(c)
         log.extend([f"- 数: {json.dumps(c, ensure_ascii=False)}", ""])
         print(c, flush=True)
+    if bot.unresolved:
+        log.extend(["", f"- 試したが相手の行が受けていないので分からなかった所: {'・'.join(bot.unresolved)}"])
     if bot.confirmed:
         log.extend(["", f"- 言ってみて指摘されなかった所（そのままの経験に足した）: {'・'.join(bot.confirmed)}"])
     if bot.learned:
