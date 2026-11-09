@@ -14,6 +14,7 @@ chat_bot2.py（I34d）に足したもの:
 経験の器の初めの経験: 相手役（Claude）が自分の行（I27x2・I32・I33b の 100 例）の所に付けた指摘（--pointing、非公開）。
 本の行は非公開（Web 小説なら _wn）。会話の記録は --log に書く（非公開の置き場へ）。
 実行: python intervention/chat_bot3.py --cache <解析済み JSON> --pointing <指摘の JSON> --route <指摘の板 JSON> [--log <md>] [--say "文" ...]
+  今の全部入り（I35l まで）: --trial --uptake <受けの板 JSON> を足す。--say が無ければ対話（空行で終わり）。
 """
 from __future__ import annotations
 
@@ -314,6 +315,17 @@ def main():
         for it in json.load(open(a.judge, encoding="utf-8"))["items"]:
             judge[(it["ns"], it["c"], it["ps"])] = it["odd"]
     tally = []
+    if not a.say:                                           # 対話: 1 行ずつ入れる（空行で終わり）。「って？」「え？」などで指摘すると経験に足す
+        print("（話しかけてください。空行で終わり）", flush=True)
+        while True:
+            try:
+                x = input("> ").strip()
+            except EOFError:
+                break
+            if not x:
+                break
+            turn(x)
+        a.rounds = 0
     for rd in range(a.rounds):
         if a.rounds > 1:
             log.extend([f"## {rd + 1} 回目", ""])
