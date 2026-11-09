@@ -54,13 +54,19 @@ def ctype(c):
 
 
 def chain(kids, p):
-    fun = sorted([k for k in kids[p["i"]] if k["i"] > p["i"] and k["dep"] in FUNDEP and k["pos"] != "PUNCT"],
-                 key=lambda k: k["i"])
+    """述語 p のすぐ後ろに続く機能語の列。p の子と、列の語に fixed で付く語（「て」+「いる」）も含める。"""
+    cand = {}
+    stack = [p["i"]]
+    while stack:
+        x = stack.pop()
+        for k in kids[x]:
+            if k["i"] > p["i"] and k["dep"] in FUNDEP and k["pos"] != "PUNCT" and k["i"] not in cand:
+                if x == p["i"] or k["dep"] == "fixed":
+                    cand[k["i"]] = k
+                    stack.append(k["i"])
     out, nxt = [], p["i"] + 1
-    for k in fun:
-        if k["i"] != nxt:
-            break
-        out.append(k)
+    while nxt in cand:
+        out.append(cand[nxt])
         nxt += 1
     return out
 
@@ -80,7 +86,7 @@ def layers(kids, p):
     if not conn and form and form[-1]["text"] in ("たら", "だら", "なら", "たり", "だり", "ずに", "ず", "に", "ば"):
         conn, form = form[-1]["text"], form[:-1]
     lem = [k["lemma"] for k in form]
-    marks = {"た": "た" in lem, "丁寧": "ます" in lem or "です" in lem, "否定": "ない" in lem or "ぬ" in lem, "相": "てる" in lem}
+    marks = {"た": "た" in lem, "丁寧": "ます" in lem or "です" in lem, "否定": "ない" in lem or "ぬ" in lem, "相": "てる" in lem or ("て" in lem and ("いる" in lem or "おる" in lem))}
     surf = p["text"] + "".join(k["text"] for k in ch)
     return conn or "連用", marks, surf
 
@@ -390,7 +396,7 @@ def read_marks(doc):
         if t.head.i != r.i or t.dep_ not in FUNDEP:
             break
         lem.append(t.lemma_)
-    return {"た": "た" in lem, "丁寧": "ます" in lem or "です" in lem, "否定": "ない" in lem or "ぬ" in lem, "相": "てる" in lem}
+    return {"た": "た" in lem, "丁寧": "ます" in lem or "です" in lem, "否定": "ない" in lem or "ぬ" in lem, "相": "てる" in lem or ("て" in lem and ("いる" in lem or "おる" in lem))}
 
 
 def gen_conns(doc):
