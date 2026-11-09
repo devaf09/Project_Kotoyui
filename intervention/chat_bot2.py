@@ -42,6 +42,15 @@ YOU = ("君", "あなた", "お前", "貴方", "あんた", "きみ", "ことゆ
 NOUN = ("NOUN", "PROPN")
 
 
+def _echo_form(rest):
+    """聞き返しの形: 名詞のあとの 4 文字まで、最初の ？ で切る。"""
+    r = rest[:4]
+    for q in ("？", "?"):
+        if q in r:
+            r = r[: r.index(q) + 1]
+    return r.rstrip("。…　 ")
+
+
 def dialogue_board(works):
     """会話の板: 問いの型ごとの、肯定・否定で返す時の始めの感動詞、聞き返しの形、知らないの返し方。"""
     start = defaultdict(Counter)
@@ -80,7 +89,7 @@ def dialogue_board(works):
                 if t["pos"] in NOUN and len(t["text"]) >= 2 and t["text"] in ab:
                     rest = ab.split(t["text"], 1)[1]
                     if rest.startswith(("って", "？", "?")):
-                        echo[rest[:4].rstrip("。…")] += 1
+                        echo[_echo_form(rest)] += 1
             if qt == "問いの語" and neg:
                 kids = L.kids_of(at)
                 for t in at:
@@ -88,6 +97,22 @@ def dialogue_board(works):
                         conn, m, surf = L.layers(kids, t)
                         if m["否定"]:
                             dunno[surf] += 1
+    return start, echo, dunno, askpat
+
+
+def load_board(path):
+    """i34c_dialogue_1808.py --merge の板（1,808 作品の台詞から）を、dialogue_board と同じ形にする。"""
+    b = json.load(open(path, encoding="utf-8"))
+    start, askpat, echo, dunno = defaultdict(Counter), defaultdict(Counter), Counter(b["echo"]), Counter()
+    for k, v in b["start"].items():
+        qt, kind, x = k.split("|", 2)
+        start[(qt, kind)][x] += v
+    for k, v in b["askpat"].items():
+        p, part, wh = k.split("|", 2)
+        askpat[(p, part)][wh] += v
+        askpat[("*", part)][wh] += v
+    for k, v in b["dunno"].items():
+        dunno[k.rsplit("|", 1)[0]] += v
     return start, echo, dunno, askpat
 
 
@@ -109,10 +134,14 @@ def pred_surfaces(works):
 
 
 class Bot2(CB.Bot):
-    def __init__(self, nlp, works, **kw):
+    def __init__(self, nlp, works, dialogue=None, **kw):
+        kw_dialogue = dialogue
         super().__init__(nlp, works, **kw)
         t0 = time.time()
-        self.start, self.echo, self.dunno, self.askpat = dialogue_board(works)
+        if kw_dialogue:
+            self.start, self.echo, self.dunno, self.askpat = load_board(kw_dialogue)
+        else:
+            self.start, self.echo, self.dunno, self.askpat = dialogue_board(works)
         self.dunno_marks = {}
         self.psurf, self.pmarks = pred_surfaces(works)
         lown = [L.layer_rows(w) for w in works]
@@ -335,11 +364,16 @@ def main():
     ap.add_argument("--budget", type=int, default=2)
     ap.add_argument("--say", nargs="*")
     ap.add_argument("--log")
+    ap.add_argument("--dialogue", help="i34c の会話の板（JSON）。無ければ --cache の作品から数える")
     a = ap.parse_args()
     import spacy
     nlp = spacy.load("ja_ginza")
-    works = json.load(open(a.cache, encoding="utf-8"))
-    bot = Bot2(nlp, works, budget=a.budget)
+    if a.cache.endswith(".gz"):
+        import gzip
+        works = json.load(gzip.open(a.cache, "rt", encoding="utf-8"))
+    else:
+        works = json.load(open(a.cache, encoding="utf-8"))
+    bot = Bot2(nlp, works, budget=a.budget, dialogue=a.dialogue)
     print(f"（読み込み {bot.load_s:.0f} 秒）", flush=True)
     log = ["# チャットボット 2 の記録（非公開）", "", f"- 本: {len(works)} 作品、振り返りの回数 {a.budget}", ""]
 
