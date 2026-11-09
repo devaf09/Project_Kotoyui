@@ -110,10 +110,15 @@ class Bot3(C2.Bot2):
                 break
             if cs:
                 return self.pointed(text, toks, a, cs, hums[-1]["text"] if hums else None)
+            if self.quiet_ok:                               # 相手が指摘しなかった: 前の返事の所を「そのまま」の経験に足す
+                q = bots[-1]["text"].rstrip("。…").endswith(("？", "?"))
+                for pc in self.pb.pieces(a["toks"]):
+                    self.grain.add(self.pb.symbols(pc, q), "そのまま")
         return self._name(self.checked_reply(text))
 
     # ---- 介入を、行づくり以外の返し方（聞き返し・自分のこと・相手のことを聞く）にも効かせる ----
     _plain = False
+    quiet_ok = False                                        # --quiet_ok: 指摘されなかった返事も経験にする
 
     def about_person(self, toks):
         return False if self._plain else super().about_person(toks)
@@ -198,6 +203,7 @@ def main():
     ap.add_argument("--dialogue")
     ap.add_argument("--partner", help="相手役の指摘（所 → 指摘あり/なし の JSON）。返事に指摘ありの所があれば「〈名詞〉って？」と聞き返す")
     ap.add_argument("--judge", help="数えるための指摘（--partner と同じ形）。無ければ --partner")
+    ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
     a = ap.parse_args()
@@ -206,6 +212,7 @@ def main():
     works = json.load(open(a.cache, encoding="utf-8"))
     bot = Bot3(nlp, works, pointing=None if a.self_lines else a.pointing, route=a.route, budget=a.budget,
                dialogue=a.dialogue, self_lines=a.self_lines)
+    bot.quiet_ok = a.quiet_ok
     print(f"（読み込み {bot.load_s:.0f} 秒）", flush=True)
     log = ["# チャットボット 3 の記録（非公開）", "", f"- 本: {len(works)} 作品、振り返りの回数 {a.budget}、"
            + ("I34d の決め方" if a.self_lines else "振り分けのグレイン"), ""]
