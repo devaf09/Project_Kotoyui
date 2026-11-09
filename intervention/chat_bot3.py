@@ -41,7 +41,7 @@ class Bot3(C2.Bot2):
         self.route = json.load(open(route, encoding="utf-8")) if route else {}
         self.negx = None
         super().__init__(nlp, works, **kw)
-        self.negx = R.neg_intj(works)
+        self.negx = set(self.route.get("_否定の始めの語") or R.neg_intj(works))   # 1,808 作品の板にあればそれを使う
         self.learned = []                                   # 会話で足した経験（記録用）
 
     # ---- 自分の行の側 ----
