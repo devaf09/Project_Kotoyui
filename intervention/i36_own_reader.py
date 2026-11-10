@@ -314,3 +314,43 @@ class OwnNLP:
     def pipe(self, texts, batch_size=None):
         for x in texts:
             yield self(x)
+
+
+def variant_pairs(entries):
+    """I36c: 表記ゆれの板。語板の動詞・形容詞で、ひらがなの名前 a と漢字まじりの名前 b が
+    （1）b の送りがなで a が終わり（送りがなが有る）、漢字 1 字あたりの読みが 1〜2 字で、
+    （2）語板の属性の並び（帯ごとの割合）の近さで、互いにいちばん近い組 を、同じ語の別の書き方とみる（a → b）。
+    確かさは高くない（「すごい・早い」のような外れが混ざる）ので、同じことを聞き直さないための目安にだけ使う。"""
+    V = {}
+    for e in entries:
+        if e["pos"] in ("形容詞", "動詞"):
+            v = {band + k: x for band, d in e["attrs"].items() for k, x in d.items() if isinstance(x, (int, float))}
+            n = math.sqrt(sum(x * x for x in v.values())) or 1.0
+            V[e["name"]] = (e["pos"], {k: x / n for k, x in v.items()})
+    hira = lambda w: all(ctype(c) == "ひ" for c in w)
+
+    def ok(a, b):
+        if not hira(a) or hira(b):
+            return False
+        suf = ""
+        for ch in reversed(b):
+            if ctype(ch) != "ひ":
+                break
+            suf = ch + suf
+        pre = b[:len(b) - len(suf)]
+        if not suf or not pre or not all(ctype(c) == "漢" for c in pre) or not a.endswith(suf):
+            return False
+        return len(pre) <= len(a) - len(suf) <= 2 * len(pre)
+
+    best = {}
+    for a, (pa, va) in V.items():
+        if not hira(a):
+            continue
+        cs = [(sum(x * vb.get(k, 0.0) for k, x in va.items()), b) for b, (pb, vb) in V.items() if pb == pa and ok(a, b)]
+        if cs:
+            best[a] = max(cs)
+    back = {}
+    for a, (c, b) in best.items():
+        if b not in back or c > back[b][0]:
+            back[b] = (c, a)
+    return {a: b for a, (c, b) in best.items() if back[b][1] == a}

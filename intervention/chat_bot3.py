@@ -279,6 +279,7 @@ class Bot3(C2.Bot2):
     attrs = None                                            # --attrs: 語板のスレッドの内容語の語板（content_boards.json）
     CASE = {"する": "が", "される": "を"}                     # 語板の C の役 → 助詞（ほかの役は助詞そのもの）
 
+    use_variants = False                                    # I36c: --reader own の時、表記ゆれの板で寄せる
     ROLE = {"が": "する", "は": "する", "も": "する", "を": "される", "に": "に", "へ": "に", "で": "で"}
 
     def at_sym(self, pc):
@@ -294,7 +295,11 @@ class Bot3(C2.Bot2):
         return [f"at:{R._bin(v, (1e-9, 0.01, 0.05))}"]
 
     def load_attrs(self, path):
-        self.attrs = {e["name"]: e for e in json.load(open(path, encoding="utf-8")) if e["pos"] == "名詞"}
+        ents = json.load(open(path, encoding="utf-8"))
+        self.attrs = {e["name"]: e for e in ents if e["pos"] == "名詞"}
+        if self.use_variants:
+            import i36_own_reader as OR
+            self.variants = OR.variant_pairs(ents)
 
     def _norm(self, p):
         """語板の述語の書き方（よい・いい・良い）を、読み手の原形にそろえる。"""
@@ -304,7 +309,11 @@ class Bot3(C2.Bot2):
         c = self.__dict__.setdefault("_normc", {})
         if p not in c:
             d = list(self.nlp(p))
-            c[p] = (d[0].norm_, d[0].pos_) if len(d) == 1 else (p, "")
+            n, pos = (d[0].norm_, d[0].pos_) if len(d) == 1 else (p, "")
+            var = self.__dict__.get("variants")             # I36c: 自分の読みには正規形が無いので、表記ゆれの板で寄せる
+            if var:
+                n = var.get(n, n)
+            c[p] = (n, pos)
         return c[p]
 
     def said_attrs(self, n, now):
@@ -592,6 +601,7 @@ def main():
     if a.reader == "own":                                   # I36: GiNZA に頼らない読み手（本の行の板と語板から）
         import i36_own_reader as OR
         nlp = OR.OwnNLP(works, json.load(open(a.attrs, encoding="utf-8")) if a.attrs else None)
+    Bot3.use_variants = a.reader == "own"
     bot = Bot3(nlp, works, pointing=None if a.self_lines else a.pointing, route=a.route, budget=a.budget,
                dialogue=a.dialogue, self_lines=a.self_lines, smooth=a.smooth, attrs=a.attrs, use_at=a.at)
     bot.quiet_ok = a.quiet_ok

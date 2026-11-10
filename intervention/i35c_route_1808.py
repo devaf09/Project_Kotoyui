@@ -4,6 +4,7 @@
 手がかりの型 → 回し先 を数える（i35_route_grain.count_raw）。否定の始めの語は I34c の会話の板（--dialogue）から。
 語の珍しさ（作品をまたぐ）は 1,808 作品では数えない。本文は出さない（数だけ）。
 CPU だけで回す（CUDA_VISIBLE_DEVICES=）。Web 小説は _wn。結果は非公開の置き場だけ。
+I36: --own <本の行の JSON> [--words <content_boards.json>] で GiNZA を使わずに数える（結果は _own を付けて分ける）。
 実行: python intervention/i35c_route_1808.py --corpus <webNW_txt_v1> --dialogue <dialogue_board_1808_wn.json> --out <i35c_counts_wn.jsonl> --jobs 10
       python intervention/i35c_route_1808.py --merge <i35c_counts_wn.jsonl> --dialogue <...> --board <route_board_1808_wn.json> --stats <i35c_wn.jsonl>
 """
@@ -34,11 +35,15 @@ def neg_from_board(path):
     return {x for x, v in c.items() if v["否定"] + v["肯定"] >= MIN_N and (v["否定"] + 0.5) / (v["否定"] + v["肯定"] + 1) > 0.5}
 
 
-def _init(dialogue):
+def _init(dialogue, own=None, words=None):
     global _nlp, _negx
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    import spacy
-    _nlp = spacy.load("ja_ginza")
+    if own:                                                 # I36: GiNZA を使わない読み手（--own <本の行の解析済み JSON>）
+        import i36_own_reader as OR
+        _nlp = OR.OwnNLP(json.load(open(own, encoding="utf-8")), json.load(open(words, encoding="utf-8")) if words else None)
+    else:
+        import spacy
+        _nlp = spacy.load("ja_ginza")
     _negx = neg_from_board(dialogue)
 
 
@@ -87,6 +92,8 @@ def main():
     ap.add_argument("--merge")
     ap.add_argument("--board")
     ap.add_argument("--stats")
+    ap.add_argument("--own", help="I36: GiNZA の代わりに自分の読み手で読む（読み手を数える本の行の JSON）")
+    ap.add_argument("--words", help="I36: 自分の読み手に足す語板（content_boards.json）")
     a = ap.parse_args()
     if a.merge:
         return merge(a)
@@ -108,7 +115,7 @@ def main():
     print("作品", len(eps), "済み", len(done), "これから", len(todo), flush=True)
     t0 = time.time()
     from multiprocessing import Pool
-    with Pool(a.jobs, initializer=_init, initargs=(a.dialogue,)) as pool, open(a.out, "a", encoding="utf-8") as out:
+    with Pool(a.jobs, initializer=_init, initargs=(a.dialogue, a.own, a.words)) as pool, open(a.out, "a", encoding="utf-8") as out:
         for k, (wid, rec) in enumerate(pool.imap_unordered(do_work, todo, chunksize=1), 1):
             out.write(json.dumps(rec, ensure_ascii=False) + "\n")
             out.flush()

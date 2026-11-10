@@ -118,6 +118,7 @@ def main():
     else:
         import spacy
         nlp = spacy.load("ja_ginza")
+    B3.Bot3.use_variants = a.reader == "own"
     bot = B3.Bot3(nlp, works, pointing=a.pointing, route=a.route, dialogue=a.dialogue, smooth="事後", attrs=a.attrs, use_at=bool(a.attrs))
     bot.trial_mode, bot.use_you = "unseen", True
     if a.uptake:
