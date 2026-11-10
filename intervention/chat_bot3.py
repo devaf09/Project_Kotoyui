@@ -51,6 +51,7 @@ class Bot3(C2.Bot2):
         super().__init__(nlp, works, **kw)
         self.negx = set(self.route.get("_否定の始めの語") or R.neg_intj(works))   # 1,808 作品の板にあればそれを使う
         self.learned = []                                   # 会話で足した経験（記録用）
+        self.answers = []                                   # I35x: 属性の問いへの相手の答え（記録用）
         self.confirmed = []                                 # 言ってみて、指摘されなかった所（記録用）
         self._trials = {}
         self.uptake = None                                  # 受けの板（--uptake）
@@ -212,6 +213,9 @@ class Bot3(C2.Bot2):
             a = dict(text="「" + bots[-1]["text"] + "」", toks=bots[-1]["toks"])
             b = dict(text="「" + text + "」", toks=toks)
             cs = R.cues(a, b, self.negx)
+            if self._is_q(a["toks"]):                       # I35x: はい/いいえの問いへの「ううん」「〜ない」は答え（指摘ではない）
+                cs = [c for c in cs if c[0] not in ("否定の始め", "否定の繰り返し")]
+                self.answer(a, b)
             # 自分の行の所（名詞+助詞+述語）や代名詞をそのまま「って」「？」で返されたら、その所への聞き返し。
             # 自分の行の一続き（「何を見の」）を返された時も、その中の所への聞き返し（I35o）
             chunk = ""
@@ -321,7 +325,24 @@ class Bot3(C2.Bot2):
                 for k in T:
                     if k["head"] == t["i"] and k["pos"] == "ADJ":
                         got.add("性質:" + self._norm(k["lemma"]))
+                got |= {self._norm("ある") + "/する", self._norm("いる") + "/する"}   # 話に出た物は「ある・いる」（聞くと前提を聞き直すことになる）
         return got
+
+    def answer(self, a, b):
+        """I35x: 自分の属性の問いへの相手の答えを相手の板に入れる（はい = 1、いいえ = 0）。"""
+        k = self.__dict__.get("_asked_attr")
+        self._asked_attr = None
+        if not k:
+            return
+        bt = b["toks"]
+        first = next((t for t in bt if t["pos"] not in ("PUNCT", "SYM")), None)
+        if first is not None and first["pos"] == "INTJ":   # 始めの感動詞があれば、それで決める（「うん、…なきゃ」は はい）
+            neg = first["text"] in self.negx
+        else:                                               # 無ければ、最初の言い切りの述語の否定
+            root = next((t for t in bt if t["dep"] == "ROOT"), None)
+            neg = root is not None and any(t["head"] == root["i"] and t["lemma"] in ("ない", "ぬ") and t["pos"] == "AUX" for t in bt)
+        self.you[("属性",) + k] = 0.0 if neg else 1.0
+        self.answers.append((k, not neg))
 
     def topic_line(self, toks, qt):
         """相手の行の名詞（本の板で珍しい語ほど話題とみる）について、語板の属性のうち、会話でまだ出ていないもので
@@ -372,6 +393,7 @@ class Bot3(C2.Bot2):
         tail = ("か？" if want["丁寧"] else "の？") if part != "は" else ("か？" if want["丁寧"] else "？")
         head = self.intj("問いでない", "相槌")
         line = (head + "、" if head else "") + t["text"] + part + surf + tail
+        self._asked_attr = (t["lemma"], k)
         return line, f"話題の語「{t['lemma']}」の属性で、会話にまだ出ていない「{k}」（期待 {d:.2f}、観測 0）を聞く"
 
     # ---- I35u: 行づくりの中身の元を、本の似た行から、語板の属性（と会話）に替える ----
@@ -403,7 +425,9 @@ class Bot3(C2.Bot2):
         if not (self.attr_field and self.attrs):
             return []
         out = []
-        for t in toks:                                      # 相手の今の行の名詞（前の行の名詞は、場の板の人の行で入っている）
+        hum = [toks] + [ln["toks"] for ln in reversed(self.conv["lines"]) if ln["who"] == "人"]
+        toks = next((T for T in hum if any(t["pos"] == "NOUN" and t["lemma"] in self.attrs and t["lemma"] not in FORMAL for t in T)), toks)
+        for t in toks:                                      # 相手の今の行の名詞。無ければ、名詞のあった最後の人の行（話題を続ける）
             if t["pos"] == "NOUN" and t["lemma"] in self.attrs and t["lemma"] not in FORMAL:
                 got = self.said_attrs(t["lemma"], [])       # 会話でもう出た属性は入れない（おうむ返しにしない）
                 for w, x, tk in self._attr_lines(t["lemma"]):
@@ -595,6 +619,8 @@ def main():
         log.extend(["", f"- 試したが相手の行が受けていないので分からなかった所: {'・'.join(bot.unresolved)}"])
     if bot.confirmed:
         log.extend(["", f"- 言ってみて指摘されなかった所（そのままの経験に足した）: {'・'.join(bot.confirmed)}"])
+    if bot.answers:
+        log.extend(["", "- 属性の問いへの相手の答え（相手の板に入れた）: " + "・".join(f"{n} {k} {'はい' if y else 'いいえ'}" for (n, k), y in bot.answers)])
     if bot.learned:
         log.extend(["", f"- 会話で足した経験（指摘された所）: {'・'.join(bot.learned)}"])
     if a.log:
