@@ -472,8 +472,8 @@ class Bot3(C2.Bot2):
             self.mark_line(bots[-1]["text"])
             out.append(("行", bots[-1]["text"]))
             tgt = [pc for pc in pcs if odd and ((pc["ns"] + pc["c"] + pc["ps"]) in odd or (len(pc["ns"]) >= 2 and pc["ns"] in odd))]
-            if not tgt and pcs:
-                tgt = [max(pcs, key=lambda pc: self.p_point(pc, q))]
+            # I37c: 先生の抜き出した所が、どの所にも当たらない（言い方・つながり・「はい」だけ）なら、行のまるごとの経験だけにする
+            # （前は自分でいちばん怪しい所に指摘を足していたが、先生はほぼ毎回何か言うので、普通の所まで P(指摘) 1.00 になった）
             for pc in tgt:
                 w = pc["ns"] + pc["c"] + pc["ps"]
                 self.grain.add(self.sym(pc, q), "指摘")
