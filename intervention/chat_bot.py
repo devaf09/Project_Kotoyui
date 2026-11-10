@@ -72,6 +72,11 @@ class Bot:
         self.conv = dict(name="会話", lines=[])
         self.load_s = time.time() - t0
 
+    use_book = True                                       # I35u: 場の板に入力に似た本の行を入れるか
+
+    def extra_lines(self, toks):
+        return []
+
     def similar(self, lemmas):
         sc = Counter()
         for x in lemmas:
@@ -93,6 +98,15 @@ class Bot:
         for r_, j in enumerate(reversed(mine)):           # 人の行（新しいほど重い）。自分の返事は入れない（おうむ返しの輪になる）
             rows.append((self.w_conv * self.decay ** r_, crow[j]))
         text_of.update(self.conv["_text"])
+        extra = self.extra_lines(last)                    # I35u: 本の行の代わりの、中身の元の行（chat_bot3 の語板の属性）
+        if extra:
+            ew = dict(name="属性", lines=[dict(text=x, toks=t) for _, x, t in extra])
+            Q.prep([ew])
+            er = S.line_rows(ew)
+            rows += [(wt, er[i]) for i, (wt, _, _) in enumerate(extra)]
+            text_of.update(ew["_text"])
+        if not self.use_book:
+            sim = []
         used = set()
         for (wi, li), s in sim:                           # 似た本の行とその前後
             for d in range(-self.ctx, self.ctx + 1):

@@ -38,11 +38,14 @@ from i27l_wave_scale import FORMAL2 as FORMAL  # noqa: E402
 
 
 class Bot3(C2.Bot2):
-    def __init__(self, nlp, works, pointing=None, route=None, smooth="全体", **kw):
+    def __init__(self, nlp, works, pointing=None, route=None, smooth="全体", attrs=None, use_at=False, **kw):
         self.pb = R.PieceBoards(works)
         self.grain = G.CountGrain(smooth)
+        if attrs:
+            self.load_attrs(attrs)
+        self.use_at = use_at
         for it in (json.load(open(pointing, encoding="utf-8"))["items"] if pointing else []):
-            self.grain.add(self.pb.symbols(it), "指摘" if it["odd"] else "そのまま")
+            self.grain.add(self.pb.symbols(it) + self.at_sym(it), "指摘" if it["odd"] else "そのまま")
         self.route = json.load(open(route, encoding="utf-8")) if route else {}
         self.negx = None
         super().__init__(nlp, works, **kw)
@@ -65,7 +68,7 @@ class Bot3(C2.Bot2):
     def sym(self, pc, question=False):
         """所の記号。I35n: その所の名詞と述語の両方を、相手が直前の行（3 行まで）で言っていれば「相手の語」の記号を足す
         （相手の言葉を取り込んだ所。経験に無い記号なので、試しの介入では言ってみて確かめる所になる）。"""
-        sy = self.pb.symbols(pc, question)
+        sy = self.pb.symbols(pc, question) + self.at_sym(pc)
         if self.use_you and hasattr(self, "conv"):
             hum = [ln for ln in self.conv["lines"] if ln["who"] == "人"][-3:]
             words = {t["lemma"] for ln in hum for t in ln["toks"] if t["pos"] in ("NOUN", "PROPN", "VERB", "ADJ")}
@@ -272,6 +275,20 @@ class Bot3(C2.Bot2):
     attrs = None                                            # --attrs: 語板のスレッドの内容語の語板（content_boards.json）
     CASE = {"する": "が", "される": "を"}                     # 語板の C の役 → 助詞（ほかの役は助詞そのもの）
 
+    ROLE = {"が": "する", "は": "する", "も": "する", "を": "される", "に": "に", "へ": "に", "で": "で"}
+
+    def at_sym(self, pc):
+        """I35v: 語板の属性の記号。その所（名詞・役・述語）が、本の外の文（語板）でその名詞の属性としてどれだけ出るか。"""
+        if not (self.use_at and self.attrs):
+            return []
+        e, r = self.attrs.get(pc["n"]), self.ROLE.get(pc["c"])
+        if e is None or r is None:
+            return ["at:" + ("名詞なし" if e is None else "役なし")]
+        v = e["attrs"].get("C", {}).get(pc["p"] + "/" + r, 0.0)
+        if r == "する":
+            v = max(v, e["attrs"].get("B", {}).get("性質:" + pc["p"], 0.0))
+        return [f"at:{R._bin(v, (1e-9, 0.01, 0.05))}"]
+
     def load_attrs(self, path):
         self.attrs = {e["name"]: e for e in json.load(open(path, encoding="utf-8")) if e["pos"] == "名詞"}
 
@@ -310,7 +327,7 @@ class Bot3(C2.Bot2):
         """相手の行の名詞（本の板で珍しい語ほど話題とみる）について、語板の属性のうち、会話でまだ出ていないもので
         いちばん期待の大きいもの（属性の割合 × 帯の観測の割合 = 期待、観測 0 との差）を聞く。
         聞くのは一般のこと（相手の行の時制・相に合わせない）なので、述語は言い切りの原形（丁寧だけ相手に合わせる）。"""
-        if self._plain or not self.attrs or qt != "問いでない":
+        if self._plain or not self.attrs or qt != "問いでない" or self.no_ask:
             return None
         ns = [t for t in toks if t["pos"] == "NOUN" and t["lemma"] in self.attrs and t["lemma"] not in C2.YOU
               and t["lemma"] not in FORMAL]
@@ -356,6 +373,55 @@ class Bot3(C2.Bot2):
         head = self.intj("問いでない", "相槌")
         line = (head + "、" if head else "") + t["text"] + part + surf + tail
         return line, f"話題の語「{t['lemma']}」の属性で、会話にまだ出ていない「{k}」（期待 {d:.2f}、観測 0）を聞く"
+
+    # ---- I35u: 行づくりの中身の元を、本の似た行から、語板の属性（と会話）に替える ----
+    attr_field = False                                      # --attr_field
+    no_ask = False                                          # --no_ask: 属性を聞かない（行づくりだけを比べる時）
+
+    def _attr_lines(self, n):
+        """名詞 n の属性を、短い行（「雪が降る」「雪は白い」）にして読み手で読んだもの。重み = 属性の割合 × 帯の観測の割合。"""
+        c = self.__dict__.setdefault("_alc", {})
+        if n in c:
+            return c[n]
+        e = self.attrs[n]
+        nb, nc = e["n_obs"].get("B", 0) or 0, e["n_obs"].get("C", 0) or 0
+        out = []
+        for k, v in e["attrs"].get("C", {}).items():
+            if "/" in k:
+                p, ro = k.split("/", 1)
+                if p in self.psurf:
+                    out.append((v * nc / (nb + nc), n + self.CASE.get(ro, ro) + p))
+        for k, v in e["attrs"].get("B", {}).items():
+            p = k.split(":", 1)[1]
+            if k.startswith("性質:") and p in self.psurf:
+                out.append((v * nb / (nb + nc), n + "は" + p))
+        texts = [x for _, x in out]
+        c[n] = [(w, x, CB.to_toks(d)) for (w, x), d in zip(out, self.nlp.pipe(texts))] if texts else []
+        return c[n]
+
+    def extra_lines(self, toks):
+        if not (self.attr_field and self.attrs):
+            return []
+        out = []
+        for t in toks:                                      # 相手の今の行の名詞（前の行の名詞は、場の板の人の行で入っている）
+            if t["pos"] == "NOUN" and t["lemma"] in self.attrs and t["lemma"] not in FORMAL:
+                got = self.said_attrs(t["lemma"], [])       # 会話でもう出た属性は入れない（おうむ返しにしない）
+                for w, x, tk in self._attr_lines(t["lemma"]):
+                    if not (self._attr_keys(t["lemma"], tk) & got):
+                        out.append((w, x, tk))
+        return out
+
+    def _attr_keys(self, n, tk):
+        k = set()
+        for t in tk:
+            if t["lemma"] == n and 0 <= t["head"] < len(tk) and tk[t["head"]]["i"] != t["i"]:
+                h = tk[t["head"]]
+                cs = [c["text"] for c in tk if c["head"] == t["i"] and c["dep"] == "case"]
+                hl = self._norm(h["lemma"])
+                role = ("される" if t["dep"] == "obj" or "を" in cs else
+                        next((c for c in cs if c not in ("が", "は", "も", "の")), None) or "する")
+                k |= {hl + "/" + role, "性質:" + hl}
+        return k
 
     def checked_reply(self, text):
         """返事を作り、行づくりでない返し方の行にも振り分けのグレインを当てる。指摘を見込む所か、自覚の板で暗い所があれば、
@@ -449,6 +515,9 @@ def main():
     ap.add_argument("--attrs", help="語板の属性（content_boards.json）。相手の話題の名詞の、まだ出ていない属性を聞く（I35q）")
     ap.add_argument("--smooth", default="全体", choices=("全体", "事後"), help="経験の器の寄せ方（事後 = I35r: 1 つの経験を何度も数えない）")
     ap.add_argument("--explore", action="store_true", help="I35t: 作り直しが直らない時、相槌で黙らず、いちばん指摘の見込みの小さい行を言ってみて確かめる")
+    ap.add_argument("--attr_field", action="store_true", help="I35u: 行づくりの場の板に、本の似た行の代わりに相手の名詞の語板の属性の行を入れる（--attrs が要る）")
+    ap.add_argument("--no_ask", action="store_true", help="属性の問い（I35q）を使わない")
+    ap.add_argument("--at", action="store_true", help="I35v: 所の記号に語板の属性の記号を足す（--attrs が要る）")
     ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
@@ -457,14 +526,15 @@ def main():
     nlp = spacy.load("ja_ginza")
     works = json.load(open(a.cache, encoding="utf-8"))
     bot = Bot3(nlp, works, pointing=None if a.self_lines else a.pointing, route=a.route, budget=a.budget,
-               dialogue=a.dialogue, self_lines=a.self_lines, smooth=a.smooth)
+               dialogue=a.dialogue, self_lines=a.self_lines, smooth=a.smooth, attrs=a.attrs, use_at=a.at)
     bot.quiet_ok = a.quiet_ok
     bot.explore = a.explore
+    bot.attr_field = a.attr_field
+    bot.no_ask = a.no_ask
+    bot.use_book = not a.attr_field
     bot.trial_mode = a.trial
     bot.use_you = a.you
     bot.conv_share = a.conv_share
-    if a.attrs:
-        bot.load_attrs(a.attrs)
     if a.uptake:
         bot.uptake = json.load(open(a.uptake, encoding="utf-8"))
     print(f"（読み込み {bot.load_s:.0f} 秒）", flush=True)
