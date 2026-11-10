@@ -106,13 +106,18 @@ def main():
     ap.add_argument("--stats")
     ap.add_argument("--no_one_clause", action="store_true")
     ap.add_argument("--teacher", help="I35z: 先生役のモデル（Ollama の名前）。毎回の返事を見て、指摘をボットの経験に足す")
+    ap.add_argument("--reader", default="ginza", choices=("ginza", "own"), help="I36: own = GiNZA を使わない読み手")
     ap.add_argument("--no_model_reply", action="store_true", help="先生のお手本の返事を経験に足さない")
     a = ap.parse_args()
-    import spacy
     import chat_bot3 as B3
     import i35_route_grain as R
-    nlp = spacy.load("ja_ginza")
     works = json.load(open(a.cache, encoding="utf-8"))
+    if a.reader == "own":                                   # I36: GiNZA を使わない読み手
+        import i36_own_reader as OR
+        nlp = OR.OwnNLP(works, json.load(open(a.attrs, encoding="utf-8")) if a.attrs else None)
+    else:
+        import spacy
+        nlp = spacy.load("ja_ginza")
     bot = B3.Bot3(nlp, works, pointing=a.pointing, route=a.route, dialogue=a.dialogue, smooth="事後", attrs=a.attrs, use_at=bool(a.attrs))
     bot.trial_mode, bot.use_you = "unseen", True
     if a.uptake:

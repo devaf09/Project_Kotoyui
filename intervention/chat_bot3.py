@@ -580,13 +580,18 @@ def main():
     ap.add_argument("--no_ask", action="store_true", help="属性の問い（I35q）を使わない")
     ap.add_argument("--at", action="store_true", help="I35v: 所の記号に語板の属性の記号を足す（--attrs が要る）")
     ap.add_argument("--one_clause", action="store_true", help="I35w: 行づくりで節をつながず、1 つの節で言い切る")
+    ap.add_argument("--reader", default="ginza", choices=("ginza", "own"), help="I36: 読み手。own = GiNZA を使わない読み手")
     ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
     a = ap.parse_args()
-    import spacy
-    nlp = spacy.load("ja_ginza")
+    if a.reader == "ginza":
+        import spacy
+        nlp = spacy.load("ja_ginza")
     works = json.load(open(a.cache, encoding="utf-8"))
+    if a.reader == "own":                                   # I36: GiNZA に頼らない読み手（本の行の板と語板から）
+        import i36_own_reader as OR
+        nlp = OR.OwnNLP(works, json.load(open(a.attrs, encoding="utf-8")) if a.attrs else None)
     bot = Bot3(nlp, works, pointing=None if a.self_lines else a.pointing, route=a.route, budget=a.budget,
                dialogue=a.dialogue, self_lines=a.self_lines, smooth=a.smooth, attrs=a.attrs, use_at=a.at)
     bot.quiet_ok = a.quiet_ok
