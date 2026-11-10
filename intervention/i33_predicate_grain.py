@@ -51,7 +51,8 @@ def scene_feats(scene):
 class CountGrain:
     """ComboExp（単独+組）の点の式を数え上げで持つ器。
     smooth="0.1": ComboExp と同じ (n + 0.1) / (n(結論) + 0.2)。
-    smooth="全体": 見えていない記号は全体の割合に寄せる (n + P(記号)) / (n(結論) + 1)（少ない結論に引っ張られない）。"""
+    smooth="全体": 見えていない記号は全体の割合に寄せる (n + P(記号)) / (n(結論) + 1)（少ない結論に引っ張られない）。
+    smooth="事後": I35r。P(結論 | 記号) を全体の割合に寄せ、単独の記号をなぞるだけの組は数えない（_post）。"""
 
     def __init__(self, smooth="全体"):
         self.smooth = smooth
@@ -70,6 +71,8 @@ class CountGrain:
 
     def scores(self, scene):
         fs = [t for t in self.feats(scene) if t in self.f]
+        if self.smooth == "事後":
+            return self._post(fs)
         out = {}
         for lab, n in self.n.items():
             s = math.log(n)
@@ -79,6 +82,26 @@ class CountGrain:
                 else:
                     pt = sum(self.f[t].values()) / self.N
                     s += math.log((self.f[t][lab] + pt) / (n + 1)) - math.log(pt)
+            out[lab] = s
+        return out
+
+
+    def _post(self, fs):
+        """I35r: 記号ごとに P(結論 | 記号) を全体の割合へ 1 回ぶん寄せ（(n + P(結論)) / (n(記号) + 1)）、その比を足す。
+        組の記号で、数が単独の記号と同じもの（単独の記号の経験をなぞっているだけ）は数えない（1 つの経験を何度も数えない）。"""
+        keep = []
+        for t in fs:
+            if "&" in t:
+                a, b = t.split("&", 1)
+                if self.f[t] == self.f.get(a) or self.f[t] == self.f.get(b):
+                    continue
+            keep.append(t)
+        out = {}
+        for lab, n in self.n.items():
+            pl = n / self.N
+            s = math.log(pl)
+            for t in keep:
+                s += math.log((self.f[t][lab] + pl) / (sum(self.f[t].values()) + 1)) - math.log(pl)
             out[lab] = s
         return out
 

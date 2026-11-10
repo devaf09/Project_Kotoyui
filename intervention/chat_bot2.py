@@ -144,6 +144,13 @@ class Bot2(CB.Bot):
             self.start, self.echo, self.dunno, self.askpat = dialogue_board(works)
         self.dunno_marks = {}
         self.psurf, self.pmarks = pred_surfaces(works)
+        lp = defaultdict(Counter)                          # 言い切りの根の品詞（いちばん多いもの）
+        for w in works:
+            for ln in w["lines"]:
+                for t in ln["toks"]:
+                    if t["dep"] == "ROOT":
+                        lp[t["lemma"]][t["pos"]] += 1
+        self.lpos = {k: c.most_common(1)[0][0] for k, c in lp.items()}
         lown = [L.layer_rows(w) for w in works]
         LG = Board()
         for r, _ in lown:
@@ -267,6 +274,9 @@ class Bot2(CB.Bot):
         tail = "か？" if self.pmarks.get(surf, want)["丁寧"] else "の？"
         return (head + "、" if head else "") + best[1] + surf + tail, best
 
+    def topic_line(self, toks, qt):
+        return None
+
     def ask_back(self, t):
         form = max(self.echo, key=lambda x: (self.echo[x], x)) if self.echo else "？"
         return t["text"] + form
@@ -281,6 +291,8 @@ class Bot2(CB.Bot):
     def pred_form(self, lemma, want):
         """述語の表記を、印（相・丁寧・否定）が want に合うものから選ぶ。"""
         c = self.psurf.get(lemma, Counter())
+        if not any(want.values()) and self.lpos.get(lemma) in ("VERB", "ADJ"):
+            return lemma                                    # 印が何も無い: 動詞・形容詞は原形がそのまま言い切りの形（「し」「見」の連用の形にしない）
         # 印が全部合う表記のうち、足された機能語の少ないもの（同じなら多く出たもの）
         ok = [(-len(s), v, s) for s, v in c.items() if all(self.pmarks[s][k] == want[k] for k in L.MARKS)]
         if ok:
@@ -352,6 +364,11 @@ class Bot2(CB.Bot):
                        else "相手の板に入れ、聞く所が無いので相槌と繰り返し")
                 out = dict(line=r[0], tries=0, breaks=[], sim=0, why=why)
                 return self._log(text, toks, out)
+        # 4b. 相手の話題の名詞の、まだ出ていない属性を聞く（I35q、chat_bot3 の --attrs。ここでは何もしない）
+        r = self.topic_line(toks, qt)
+        if r is not None:
+            out = dict(line=r[0], tries=0, breaks=[], sim=0, why=r[1])
+            return self._log(text, toks, out)
         # 5. それ以外: 行づくり（I32c のつなぎ・形・助詞）
         # 気づき 5: 作った行の中の小さな不自然さ（違和感）。助詞が述語に合うか、修飾を取るはずの名詞が裸か。
         # 違和感があれば、自覚の板に残し（会話をまたいで持ち越す）、その語を暗くして作り直す（介入）。直らなければ相槌で受ける。
