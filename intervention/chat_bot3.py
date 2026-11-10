@@ -127,7 +127,7 @@ class Bot3(C2.Bot2):
             p = self.p_point(pc, q)
             if self._ok(pc):                               # 前に言ってみて通じた所
                 continue
-            if self.trial_mode and p > 0.5 and not self._tried(pc) and (self.thin(pc, q) if self.trial_mode == "thin" else self.unseen(pc, q)):   # 試しの介入: 知らない記号のある所は、言ってみて相手で確かめる
+            if self.trial_mode and p > self.odd_cut() and not self._tried(pc) and (self.thin(pc, q) if self.trial_mode == "thin" else self.unseen(pc, q)):   # 試しの介入: 知らない記号のある所は、言ってみて相手で確かめる
                 self._trials.setdefault(line, []).append((pc, q))
                 continue
             if p > best[0]:
@@ -137,7 +137,17 @@ class Bot3(C2.Bot2):
     def odd_hist(self, d):
         if not hasattr(self, "grain") or not self.grain.N:
             return super().odd_hist(d)
-        return d, 1.0 - d                                   # 指摘 > そのまま なら違和感（P(指摘) > 0.5）
+        c = self.odd_cut()
+        return d, 1.0 - d if c <= 0.5 else c                # 指摘 > そのまま なら違和感（P(指摘) > 0.5）。I37f: ふだんの指摘の割合より大きい時だけ
+
+    use_base = False                                        # I37f: 違和感の線を、経験の中の指摘のふだんの割合にする
+
+    def odd_cut(self):
+        """I37f: 違和感とみる P(指摘) の線。ふつうは 0.5。use_base では、経験の器の指摘の割合（ふだんの割合）が 0.5 より大きければそれ。
+        先生がほぼ毎回何か言う場では、ほとんどの所が P(指摘) > 0.5 になり、全部が違和感になって相槌に落ちる。期待（ふだん）と比べて、それより指摘されやすい所だけを違和感とみる。"""
+        if not self.use_base or not self.grain.N:
+            return 0.5
+        return max(0.5, self.grain.n.get("指摘", 0) / self.grain.N)
 
     def learn_self(self, works, self_lines, n=500, seed=0):
         if self_lines:
@@ -715,13 +725,13 @@ class Bot3(C2.Bot2):
             if self._ok(pc):
                 continue
             p = self.p_point(pc, q)
-            if self.trial_mode and p > 0.5 and not self._tried(pc) and (self.thin(pc, q) if self.trial_mode == "thin" else self.unseen(pc, q)) and not self.aware.get(("指摘された", pc["ns"] + pc["c"] + pc["ps"])):
+            if self.trial_mode and p > self.odd_cut() and not self._tried(pc) and (self.thin(pc, q) if self.trial_mode == "thin" else self.unseen(pc, q)) and not self.aware.get(("指摘された", pc["ns"] + pc["c"] + pc["ps"])):
                 self._trials.setdefault(out["line"], []).append((pc, q))
                 continue
             cands.append((p, pc))
         worst = max(cands, key=lambda x: x[0], default=(0.0, None))
         dark = [pc for pc in self.pb.pieces(toks) if self.aware.get(("指摘された", pc["ns"] + pc["c"] + pc["ps"]))]
-        if worst[0] <= 0.5 and not dark:
+        if worst[0] <= self.odd_cut() and not dark:
             return out
         pc = dark[0] if dark else worst[1]
         del self.conv["lines"][-2:]
@@ -794,6 +804,7 @@ def main():
     ap.add_argument("--conv_share", type=float, help="場の板の中の、人の行（相手の話題）の割合（例 0.5）")
     ap.add_argument("--attrs", help="語板の属性（content_boards.json）。相手の話題の名詞の、まだ出ていない属性を聞く（I35q）")
     ap.add_argument("--smooth", default="全体", choices=("全体", "事後"), help="経験の器の寄せ方（事後 = I35r: 1 つの経験を何度も数えない）")
+    ap.add_argument("--base", action="store_true", help="I37f: 違和感の線を、経験の中の指摘のふだんの割合にする")
     ap.add_argument("--flow", action="store_true", help="I37d: 返事の点に、相手の行を受けている見込み（受けの板）を足す")
     ap.add_argument("--novelty", action="store_true", help="I38a: 返事の点に新規性の感覚（本の同じ話し手の繰り返しの割合との比べ）を足す（--good が要る）")
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板（相手が受けた・先生が褒めた）と好奇心の点で返事を選ぶ")
@@ -823,6 +834,7 @@ def main():
     bot.no_ask = a.no_ask
     bot.use_good = a.good
     bot.use_flow = a.flow
+    bot.use_base = a.base
     if a.novelty:
         import i38_novelty as NV
         bot.nov = NV.Novelty(NV.novelty_board(works))

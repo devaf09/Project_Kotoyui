@@ -150,6 +150,7 @@ def main():
     ap.add_argument("--teacher", help="I35z: 先生役のモデル（Ollama の名前）。毎回の返事を見て、指摘をボットの経験に足す")
     ap.add_argument("--reader", default="ginza", choices=("ginza", "own"), help="I36: own = GiNZA を使わない読み手")
     ap.add_argument("--think", default="on", choices=("on", "off", "unset"), help="考える型のモデルの考え: on = 考えて本文だけ使う")
+    ap.add_argument("--base", action="store_true", help="I37f: 違和感の線を、経験の中の指摘のふだんの割合にする")
     ap.add_argument("--flow", action="store_true", help="I37d: 返事の点に、相手の行を受けている見込みを足す")
     ap.add_argument("--novelty", action="store_true", help="I38a: 返事の点に新規性の感覚を足す（--good が要る）")
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
@@ -177,6 +178,7 @@ def main():
     bot.trial_mode, bot.use_you = "unseen", True
     bot.use_good = a.good
     bot.use_flow = a.flow
+    bot.use_base = a.base
     if a.novelty:
         import i38_novelty as NV
         bot.nov = NV.Novelty(NV.novelty_board(works))
