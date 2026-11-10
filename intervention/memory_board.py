@@ -3,7 +3,13 @@
 持ち主（2026-11-10〜11）:「会話を行にする → 行板作る → 記憶板へ反映」「融合で 秒 → 分 → 時 → 日 → 週」
   置き場は PC の非公開フォルダ（暗号化はクラウドに置く時だけ）。試しでは 1 会話 = 1 時、20 会話 = 1 日（将来は実時間）。
 設計: docs/記憶板の設計.md、図 figs/mech_14_memory_board.png（非公開の置き場）。
-ここでは進める順の 1: 行の板を作り、下の段が閉じたら和で上の段を 1 枚作るだけ（期待との差で忘れるのは I40b）。
+進める順の 1（I40a）: 行の板を作り、下の段が閉じたら和で上の段を 1 枚作る。
+進める順の 2（I40b、--forget）: 上の段に足すのは、期待より明るい鍵だけ（忘れる）。
+  観測 = その段での鍵の明るさ 1 − exp(−数 / 飽和)。飽和は段ごとに 2 倍（分 1・時 2・日 4。親の語板の住所で深さごとに 0.5 倍で
+  受け継ぐのと同じ形）なので、上の段ほど、何度も出た鍵でないと明るくならない。期待 = ふだんの会話でその段の行の数のうちに出る見込み 1 − exp(−割合 × 行の数)。
+  ふだんの割合 = (本の台詞での数 + これまでの行の板での数) / (本の行の数 + これまでの行の数)。
+  差が「発見」（期待より明るい）で、|1 − 差| < |0 − 差|（残す方が近い）の鍵だけを上の段に足す。上の段ほど行の数が多いので、
+  期待が大きくなり、よく出た所だけが残る。段の板そのもの（boards）は全部残し、上に足さなかった鍵の数を記録する。
   行の板: 所 ("組", 名詞, 助詞:述語)、話題の名詞 ("名", 名詞)、誰、時刻、会話、結果（相手の次の行で 良・指摘）
   段: 分 = 話題の名詞が替わるまで、時 = 1 会話、日 = DAY 会話、週 = 7 日
 """
@@ -12,7 +18,10 @@ from __future__ import annotations
 import json
 import os
 import time
+import math
 from collections import Counter
+
+from board_ops import react
 
 LEVELS = ("分", "時", "日", "週")
 NOUN = ("NOUN", "PROPN")
@@ -40,18 +49,23 @@ class Memory:
         self._span = {lv: [None, None, 0] for lv in LEVELS}
         self._topic = set()
         self.n_conv = 0
+        self.forget = False
+        self.base, self.base_n = Counter(), 0               # 本の台詞での鍵の数と行の数（--forget のふだん）
+        self.seen, self.seen_n = Counter(), 0               # これまでの行の板での鍵の数と行の数
         if path and os.path.exists(path):
             self.load(path)
 
     # ---- 書く ----
-    def add(self, toks, pieces, who, conv):
-        lb = line_board(toks, pieces, who, conv)
+    def add(self, toks, pieces, who, conv, lb=None):
+        lb = lb or line_board(toks, pieces, who, conv)
         nouns = set(lb["nouns"])
         if who == "人" and nouns and self._topic and not (nouns & self._topic):   # 話題の名詞が替わった: 分の段を閉じる
             self.close("分")
         if who == "人" and nouns:
             self._topic = nouns if not (nouns & self._topic) else (self._topic | nouns)
         self.lines.append(lb)
+        self.seen.update(lb["keys"].keys())
+        self.seen_n += 1
         self._push("分", lb["keys"], lb["t"])
         return lb
 
@@ -78,12 +92,34 @@ class Memory:
         self.boards[lv].append(b)
         i = LEVELS.index(lv)
         if i + 1 < len(LEVELS):
-            self._push(LEVELS[i + 1], b["keys"], b["end"])
+            up = self.kept(b["keys"], b["n"], 2.0 ** i) if self.forget else b["keys"]
+            b["dropped"] = len(b["keys"]) - len(up)
+            self._push(LEVELS[i + 1], up, b["end"], b["n"])
         self.open[lv] = Counter()
         self._span[lv] = [None, None, 0]
         if lv == "分":
             self._topic = set()
         return b
+
+    def set_base(self, works, pieces):
+        """ふだんの会話: 本の台詞の行の板の鍵（pieces = 所を取る関数）。"""
+        for wk in works:
+            for ln in wk["lines"]:
+                ks = line_board(ln["toks"], pieces(ln["toks"]), "", 0, 0)["keys"]
+                self.base.update(ks.keys())
+                self.base_n += 1
+
+    def expect(self, k, n):
+        r = (self.base.get(k, 0) + self.seen.get(k, 0) + 0.5) / (self.base_n + self.seen_n + 1.0)
+        return 1.0 - math.exp(-r * n)
+
+    def kept(self, keys, n, sat=1.0):
+        out = {}
+        for k, v in keys.items():
+            d, kind = react(self.expect(k, n), 1.0 - math.exp(-v / sat))
+            if kind == "発見" and abs(1.0 - d) < abs(0.0 - d):
+                out[k] = v
+        return out
 
     def end_conv(self):
         self.close("分")
@@ -108,8 +144,8 @@ class Memory:
         return out
 
     def summary(self):
-        return {lv: dict(枚=len(self.boards[lv]), 鍵=sum(len(b["keys"]) for b in self.boards[lv])) for lv in LEVELS} | \
-            dict(行=len(self.lines))
+        return {lv: dict(枚=len(self.boards[lv]), 鍵=sum(len(b["keys"]) for b in self.boards[lv]),
+                         上に足さなかった=sum(b.get("dropped", 0) for b in self.boards[lv])) for lv in LEVELS} | dict(行=len(self.lines))
 
     # ---- 置き場（非公開。PC のフォルダに JSON） ----
     def save(self, path):
@@ -124,3 +160,52 @@ class Memory:
         self.lines, self.boards, self.n_conv = d["lines"], d["boards"], d["n_conv"]
         self.open = {k: Counter(v) for k, v in d["open"].items()}
         self._span = d["span"]
+
+
+def replay(path, works, pieces, forget=True, day=None):
+    """I40b: 書いた記憶板（I40a の JSON）の行の板を、もう一度畳み直す（忘れの有無を、話し相手なしで比べる）。"""
+    d = json.load(open(path, encoding="utf-8"))
+    m = Memory()
+    m.forget = forget
+    if day:
+        m.DAY = day
+    if forget:
+        m.set_base(works, pieces)
+    conv = None
+    for lb in d["lines"]:
+        if conv is not None and lb["conv"] != conv:
+            m.end_conv()
+        conv = lb["conv"]
+        m.add(None, None, lb["who"], lb["conv"], lb=dict(lb))
+    if conv is not None:
+        m.end_conv()
+    return m
+
+
+def main():
+    import argparse
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import i35_route_grain as R
+    ap = argparse.ArgumentParser(description="I40b: 記憶板を忘れありで畳み直し、段ごとの鍵の数と、日・週の板の明るい鍵を出す")
+    ap.add_argument("--memory", required=True, help="I40a の記憶板 JSON")
+    ap.add_argument("--cache", required=True, help="本の解析済み JSON（ふだんの会話の割合）")
+    ap.add_argument("--out", help="畳み直した記憶板の JSON（非公開）")
+    ap.add_argument("--top", type=int, default=30)
+    a = ap.parse_args()
+    works = json.load(open(a.cache, encoding="utf-8"))
+    pb = R.PieceBoards(works)
+    for fg in (False, True):
+        m = replay(a.memory, works, pb.pieces, forget=fg)
+        print(("忘れあり" if fg else "忘れなし"), json.dumps(m.summary(), ensure_ascii=False))
+        for lv in ("時", "日"):
+            if m.boards[lv]:
+                b = m.boards[lv][-1]
+                top = sorted(b["keys"].items(), key=lambda x: -x[1])[:a.top]
+                print(f"  {lv}（最後の 1 枚、鍵 {len(b['keys'])}）:", "・".join(f"{k}×{v}" for k, v in top))
+        if fg and a.out:
+            m.save(a.out)
+
+
+if __name__ == "__main__":
+    main()
