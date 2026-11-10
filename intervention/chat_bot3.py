@@ -223,9 +223,23 @@ class Bot3(C2.Bot2):
         m = max(s.values())
         return math.exp(s[lab] - m) / sum(math.exp(v - m) for v in s.values())
 
+    def flow(self, toks, line):
+        """I37d: つながりの見込み。本の隣り合う台詞で数えた受けの板で、この行が相手の行を受けている見込み P(隣) − 0.5（−0.5〜0.5）。"""
+        hums = [ln for ln in self.conv["lines"] if ln["who"] == "人"]
+        if self.uptake is None or not hums:
+            return 0.0
+        a = dict(text="「" + hums[-1]["text"] + "」", toks=hums[-1]["toks"])
+        s = R.uptake_score(self.uptake, a, dict(text="「" + line + "」", toks=toks))
+        return 1.0 / (1.0 + math.exp(-max(min(s, 30), -30))) - 0.5
+
     def value(self, toks, line):
         """I37b: 返事の見込みの点 = P(良かった) − P(指摘) + 好奇心（経験の少なさ: 2 値の見込みの事後のばらつきの上限 0.5/√(n+2)）。
         所のある行は所ごとの平均、所の無い行（「はい。」「ああ、ならん。」）は行のまるごとの経験で。"""
+        return self._value(toks, line) + (self.flow(toks, line) if self.use_flow else 0.0)
+
+    use_flow = False
+
+    def _value(self, toks, line):
         pcs = self.pb.pieces(toks)
         if pcs:
             q = self._is_q(toks)
@@ -711,6 +725,7 @@ def main():
     ap.add_argument("--conv_share", type=float, help="場の板の中の、人の行（相手の話題）の割合（例 0.5）")
     ap.add_argument("--attrs", help="語板の属性（content_boards.json）。相手の話題の名詞の、まだ出ていない属性を聞く（I35q）")
     ap.add_argument("--smooth", default="全体", choices=("全体", "事後"), help="経験の器の寄せ方（事後 = I35r: 1 つの経験を何度も数えない）")
+    ap.add_argument("--flow", action="store_true", help="I37d: 返事の点に、相手の行を受けている見込み（受けの板）を足す")
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板（相手が受けた・先生が褒めた）と好奇心の点で返事を選ぶ")
     ap.add_argument("--explore", action="store_true", help="I35t: 作り直しが直らない時、相槌で黙らず、いちばん指摘の見込みの小さい行を言ってみて確かめる")
     ap.add_argument("--attr_field", action="store_true", help="I35u: 行づくりの場の板に、本の似た行の代わりに相手の名詞の語板の属性の行を入れる（--attrs が要る）")
@@ -737,6 +752,7 @@ def main():
     bot.attr_field = a.attr_field
     bot.no_ask = a.no_ask
     bot.use_good = a.good
+    bot.use_flow = a.flow
     bot.use_chain = not a.one_clause
     bot.use_book = not a.attr_field
     bot.trial_mode = a.trial
