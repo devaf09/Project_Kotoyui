@@ -24,6 +24,7 @@ import os
 import random
 import sys
 import time
+import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -48,7 +49,7 @@ TEACHER = (
     "2. 指摘は「〜だよ」「〜のほうが自然かな？」のように、優しい話し言葉で。難しい言葉は使わない。\n"
     "3. 間違いがあれば、おかしい所をボットの返事からそのまま抜き出し（odd_part）、自然な返事の例（suggested_reply）を 1 つ出す。\n"
     "4. 間違いが無ければ「うんうん、自然だね！」のように褒める。\n"
-    "出力は次の JSON だけ（考えは JSON の前に書いてよい）:\n"
+    "出力は次の JSON だけ:\n"
     '{"has_error": true または false, "odd_part": "ボットの返事の中のおかしい所（無ければ空）", '
     '"suggested_reply": "自然な返事の例（無ければ空）", "intervention_message": "ボットへの優しいことば"}\n'
 )
@@ -64,28 +65,54 @@ def teacher_eval(host, model, history, reply, stage):
     hist = "\n".join(history[-6:])
     msgs = [dict(role="system", content=TEACHER + STAGES[stage]),
             dict(role="user", content=f"会話の流れ:\n{hist}\n\nボットの返事:\n{reply}")]
-    text = ollama_chat(host, model, msgs, temperature=0.2, first_line=False, num_predict=1024)
+    text = ollama_chat(host, model, msgs, temperature=0.2, first_line=False, num_predict=512, fmt="json")
     j = text[text.find("{"): text.rfind("}") + 1] if "{" in text else ""
     try:
         r = json.loads(j)
     except Exception:
-        return None
+        return None, "読めない"
     r["has_error"] = r.get("has_error") in (True, "true", "True")
-    return r
+    odd, sug = str(r.get("odd_part") or "").strip("「」。 "), str(r.get("suggested_reply") or "").strip()
+    r["odd_part"], r["suggested_reply"] = odd, sug
+    # 見立てが自分と食い違うものは経験に入れない（決まりの見本をそのまま返す・変と言った所をお手本でも言う・返事に無い所を変と言う）
+    if r.get("intervention_message", "").strip() in ("ボットへの優しいことば", ""):
+        return None, "見本の写し"
+    if r["has_error"]:
+        if not odd or odd not in reply:
+            return None, "返事に無い所"
+        if sug.strip("。") == reply.strip("。"):
+            return None, "お手本が同じ"
+    return r, ""
 
 
-def ollama_chat(host, model, messages, temperature=0.7, first_line=True, num_predict=80):
-    body = json.dumps(dict(model=model, messages=messages, stream=False,
-                           options=dict(temperature=temperature, num_predict=num_predict))).encode("utf-8")
-    req = urllib.request.Request(host.rstrip("/") + "/api/chat", data=body, headers={"Content-Type": "application/json"})
+def ollama_chat(host, model, messages, temperature=0.7, first_line=True, num_predict=80, fmt=None, tries=3):
+    """考えてから答える型のモデル（Qwen3・R1 系）は、考えに num_predict を使い切って本文が空になる。
+    考えを止め（think: false）、それでも本文が空なら問い直す。最後まで空なら "" を返す（代わりの返事を作らない。数に残す）。"""
+    for k in range(tries):
+        opts = dict(model=model, messages=messages, stream=False, think=False,
+                    options=dict(temperature=temperature, num_predict=num_predict * (k + 1)))
+        if fmt:
+            opts["format"] = fmt
+        try:
+            out = _post(host, opts)
+        except urllib.error.HTTPError:                     # 考えを止められないモデルは think を外して問い直す
+            opts.pop("think")
+            out = _post(host, opts)
+        text = out["message"]["content"].strip()
+        if "</think>" in text:                               # 考えの部分を本文に出すモデルは、その後ろだけ
+            text = text.split("</think>", 1)[1].strip()
+        elif "<think>" in text:                              # 考えの途中で切れた
+            text = ""
+        if text:
+            return text if not first_line else text.splitlines()[0].strip()
+    return ""
+
+
+def _post(host, body):
+    req = urllib.request.Request(host.rstrip("/") + "/api/chat", data=json.dumps(body).encode("utf-8"),
+                                 headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=300) as r:
-        out = json.loads(r.read().decode("utf-8"))
-    text = out["message"]["content"].strip()
-    if "</think>" in text:                                   # 考えの部分を出すモデルは、その後ろだけ
-        text = text.split("</think>", 1)[1].strip()
-    if not first_line:
-        return text
-    return text.splitlines()[0].strip() if text else "うん。"
+        return json.loads(r.read().decode("utf-8"))
 
 
 def main():
@@ -135,7 +162,7 @@ def main():
         bot.asked, bot.trial, bot._asked_attr = None, [], None
         human = rng.choice(openers)
         msgs = [dict(role="system", content=PARTNER), dict(role="assistant", content=human)]
-        c = dict(会話=ci + 1, 往復=0, 指摘=0, 受け=0, 中身なし=0, 先生の指摘=0, 先生の段=stage)
+        c = dict(会話=ci + 1, 往復=0, 指摘=0, 受け=0, 中身なし=0, 先生の指摘=0, 先生の段=stage, 先生の見立てを捨てた=0, 相手の空=0)
         hist = [f"相手: {human}"]
         log += [f"## 会話 {ci + 1}", ""]
         prev_bot = None
@@ -159,7 +186,14 @@ def main():
                 c["中身なし"] += 1
             log += [f"- 相手: {human}", f"- ボット: **{line}** （{r['why']}、{time.time() - t0:.1f} 秒）"]
             if a.teacher:                                   # 先生の見立て（話し相手とは別）
-                ev = teacher_eval(a.host, a.teacher, hist, line, stage)
+                ev, bad = teacher_eval(a.host, a.teacher, hist, line, stage)
+                if ev is not None and ev["has_error"] and ev["suggested_reply"]:   # 変と言った所を、お手本でも言っている（同じ所に両方の経験が入る）
+                    key = lambda t: {(p["ns"], p["c"], p["ps"]) for p in bot.pb.pieces(B3.CB.to_toks(nlp(t)))}
+                    if key(ev["odd_part"]) & key(ev["suggested_reply"]):
+                        ev, bad = None, "お手本が同じ"
+                if bad:
+                    c["先生の見立てを捨てた"] += 1
+                    log.append(f"  - 先生（段 {stage}）: 見立てを捨てた（{bad}）")
                 if ev is not None:
                     got = bot.taught(ev["has_error"], ev.get("odd_part", ""), "" if a.no_model_reply else ev.get("suggested_reply", ""))
                     if ev["has_error"]:
@@ -173,6 +207,9 @@ def main():
             hist.append(f"ボット: {line}")
             msgs.append(dict(role="user", content=line))
             human = ollama_chat(a.host, a.model, msgs) if a.model != "echo" else "うん、そうなんだ。"   # echo: 試し用
+            if not human:                                   # 話し相手の本文が空（数に残し、会話はここで切る）
+                c["相手の空"] += 1
+                break
             msgs.append(dict(role="assistant", content=human))
             hist.append(f"相手: {human}")
             prev_bot = line
