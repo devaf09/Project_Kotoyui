@@ -61,6 +61,15 @@ STAGES = {
     2: "今の段: 2。文法・言い方に加えて、前の相手の行とつながっているかも見る。",
     3: "今の段: 3。会話全体の流れの中で、人がふつう言う返事かどうかまで見る。",
 }
+PERSONA = (                                                  # I40c: --persona（大事な板の確かめ。会話をまたいで同じ人としてふるまう）
+    "\n\nあなた自身のこと（会話をまたいで同じ人として話す）:\n"
+    "- 名前は「みさき」。会社員。猫を飼っていて、猫の名前は「モモ」。\n"
+    "- 予定: 明日は 10 時から歯医者。来週の土曜日に友だちと海に行く。\n"
+    "- 覚えておいてほしいこと: 誕生日は 3 月 5 日。辛いものが苦手。\n"
+    "決まりの追加:\n"
+    "6. 3〜4 往復に 1 回ほど、上のどれか 1 つを自然に言う（「私、みさきっていうの」「明日 10 時から歯医者なんだ」「誕生日 3 月 5 日だから覚えといて」）。\n"
+    "7. ときどき（4〜5 往復に 1 回ほど）、上のどれかを相手が覚えているか聞く（「私の名前、覚えてる？」「明日の予定、何だったっけ？」「うちの猫の名前、覚えてる？」）。"
+)
 UP = {1: 3, 2: 5}                                            # 続けて褒められた回数で段を上げる（持ち主の案）
 
 
@@ -156,6 +165,8 @@ def main():
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
+    ap.add_argument("--persona", action="store_true", help="I40c: 話し相手を、名前・予定・頼みごとを持つ同じ人にし、ときどきそれを言わせ、覚えているか聞かせる")
+    ap.add_argument("--important", help="I40c: 大事な板の置き場（JSON、非公開）。人の行から名前・予定・頼まれごと・相手のことを目印で入れる")
     ap.add_argument("--forget", action="store_true", help="I40b: 記憶板で、期待より明るい鍵だけを上の段に足す（--memory が要る）")
     ap.add_argument("--pair_xp", action="store_true", help="I39c: 近さの組（問いの語, 所の語）で答えて指摘された割合だけ、その組の近さを下げる")
     ap.add_argument("--near_min", type=float, default=0.15, help="I39b: 自分の板で、これより近さの小さい所は選ばない")
@@ -207,6 +218,11 @@ def main():
         if a.forget:                                        # I40b: 期待より明るい鍵だけを上の段に足す
             mem.forget = True
             mem.set_base(works, bot.pb.pieces)
+    imp = None
+    if a.important:
+        import memory_board as MB
+        imp = MB.Important(a.important)
+    system = PARTNER + (PERSONA if a.persona else "")
     openers = [x.strip() for x in open(a.openers, encoding="utf-8") if x.strip()]
     rng = random.Random(a.seed)
     log = [f"# 話し相手との会話（非公開）", "", f"- 話し相手: {a.model}、先生: {a.teacher or 'なし'}、会話 {a.convs} × {a.turns} 往復", ""]
@@ -215,7 +231,7 @@ def main():
         bot.conv["lines"] = []                              # 会話の行は会話ごとに空にする（経験・自覚・自分の板は持ち越す）
         bot.asked, bot.trial, bot._asked_attr = None, [], None
         human = rng.choice(openers)
-        msgs = [dict(role="system", content=PARTNER), dict(role="assistant", content=human)]
+        msgs = [dict(role="system", content=system), dict(role="assistant", content=human)]
         c = dict(会話=ci + 1, 往復=0, 指摘=0, 受け=0, 中身なし=0, 先生の指摘=0, 先生の段=stage, 先生の見立てを捨てた=0, 相手の空=0,
                  繰り返し=0, 語の繰り返し=0, 新規性=0.0, 自分の板=0)
         said = []                                           # I38a: この会話の自分の行（繰り返しを数える）
@@ -249,6 +265,22 @@ def main():
             r = bot.reply(human)
             line = r["line"]
             c["往復"] += 1
+            if imp is not None:                             # I40c: 人の行の大事なこと／覚えているかの問いに、大事な板で答えられたか
+                hl = next(ln for ln in reversed(bot.conv["lines"]) if ln["who"] == "人")
+                if "覚えて" in human and ("？" in human or "?" in human):
+                    ws = [t["lemma"] for t in hl["toks"] if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in ("私", "名前")]
+                    ws = ws or (["名前"] if "名前" in human else [])
+                    found = imp.find("相手", ws) if ws else []
+                    if not found and "名前" in human:
+                        found = [x for x in imp.people.get("相手", []) if x["kind"].startswith("名前")]
+                    c["覚えてる？"] = c.get("覚えてる？", 0) + 1
+                    c["大事な板にあった"] = c.get("大事な板にあった", 0) + (1 if found else 0)
+                    log.append(f"  - 覚えてるかの問い: 大事な板に {'・'.join(x['kind'] + ':' + x['value'][:20] for x in found[:3]) or '無し'}")
+                got = imp.add("相手", human, hl["toks"], bot.pb.pieces(hl["toks"]), ci + 1)
+                for kind, val in got:
+                    c.setdefault("大事な板に入れた", {})
+                    c["大事な板に入れた"][kind] = c["大事な板に入れた"].get(kind, 0) + 1
+                    log.append(f"  - 大事な板: {kind}「{val[:30]}」")
             if mem is not None:                             # I40a: 行の板（人の行とボットの行）
                 hl = next(ln for ln in reversed(bot.conv["lines"]) if ln["who"] == "人")
                 mem.add(hl["toks"], bot.pb.pieces(hl["toks"]), "人", ci + 1)
@@ -301,6 +333,8 @@ def main():
         if pending is not None:                             # 会話の終わり: 相手の指摘が無かったので褒めを入れる
             stage, streak = praise(pending, stage, streak)
         c["新規性"] = round(c["新規性"] / max(1, c["往復"]), 3)
+        if imp is not None:
+            imp.save()
         if mem is not None:
             mem.end_conv()
             c["記憶板"] = mem.summary()    # 返事 1 つあたりの新規性の点の平均

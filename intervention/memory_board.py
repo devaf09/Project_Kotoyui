@@ -170,6 +170,96 @@ class Memory:
         self._span = d["span"]
 
 
+# ---- I40c: 大事な板（相手ごと、薄めない） ----
+TIME_W = ("明日", "明後日", "あさって", "来週", "再来週", "今週末", "週末", "来月", "今度", "今夜", "今晩", "午前", "午後",
+          "月曜", "火曜", "水曜", "木曜", "金曜", "土曜", "日曜", "誕生日")
+ASK_KEEP = ("覚えて", "覚えと", "お願い", "忘れないで", "してほしい", "して欲しい", "教えて")
+NAME_CUE = ("名前は", "って呼んで", "と呼んで", "っていうの", "って言うの", "です。私", "私は")
+
+
+def _span(toks, i):
+    """i の名詞から、続く名詞・固有名詞をつないだ表記（「言」「結」→「言結」）。"""
+    j = i
+    while j + 1 < len(toks) and toks[j + 1]["pos"] in NOUN and toks[j + 1]["head"] in (toks[j]["i"], toks[j + 1]["head"]):
+        j += 1
+    return "".join(t["text"] for t in toks[i:j + 1])
+
+
+class Important:
+    """大事な板: 相手ごとに、名前・予定・頼みごと・相手のこと を、薄めずに置く（初めは目印で入れる。後で学ぶ）。"""
+
+    def __init__(self, path=None):
+        self.path = path
+        self.people = {}                                    # 相手 → [項目]
+        if path and os.path.exists(path):
+            self.people = json.load(open(path, encoding="utf-8"))
+
+    def kinds(self, text, toks):
+        out = []
+        if "覚えて" in text and text.rstrip("。！!…").endswith(("？", "?")):   # 覚えているかの問いは、大事なことそのものではない
+            return out
+        nouns = [t for t in toks if t["pos"] in NOUN]
+        if any(c in text for c in NAME_CUE + ("って",)):
+            nm, whose = [], ""
+            if "名前は" in text:
+                k = text.index("名前は")
+                nm = [text[k + 3:].split("。")[0].split("、")[0].split("だ")[0].split("です")[0].strip("「」 ")]
+                pre = text[:k].rstrip("の")                 # 「うちの猫の名前は」の 猫（相手のでなければ、誰の名前かを付ける）
+                own = [t for t in toks if t["pos"] in NOUN and pre.endswith(t["text"])]
+                if own and own[-1]["lemma"] not in ("私", "僕", "俺", "うち", "あたし"):
+                    whose = own[-1]["lemma"]
+            for cue in ("っていう", "って言う", "って呼んで", "と呼んで"):
+                if not nm and cue in text:
+                    pre = text.split(cue, 1)[0]
+                    w = [t for t in toks if t["pos"] in NOUN + ("PRON",) and pre.endswith(t["text"])]
+                    if w and w[-1]["lemma"] not in ("私", "名前", "こと"):
+                        nm = [w[-1]["text"]]
+            if not nm and any(c in text for c in NAME_CUE):
+                nm = [_span(toks, t["i"]) for t in toks if t["pos"] == "PROPN"]
+            if nm and nm[0]:
+                out.append(("名前" + (f"（{whose}）" if whose else ""), nm[0]))
+        tw = [t["text"] for t in toks if t["text"] in TIME_W or (t["pos"] == "NUM" and any(
+            k["text"] in ("時", "日", "月") for k in toks if k["i"] == t["i"] + 1))]
+        if tw and any(t["pos"] in ("VERB", "NOUN") for t in toks if t["text"] not in TIME_W):
+            out.append(("予定", text))
+        if any(c in text for c in ASK_KEEP) and not text.rstrip("。！!…").endswith(("？", "?")):   # 「覚えてる？」は問い（頼みではない）
+            out.append(("頼まれごと", text))
+        if not out and any(t["lemma"] in ("私", "僕", "俺", "あたし", "うち") for t in toks) and any(t["lemma"] not in ("私", "僕", "俺", "あたし", "うち") for t in toks if t["pos"] in NOUN + ("PRON",)):
+            out.append(("相手のこと", text))
+        return out
+
+    def add(self, who, text, toks, pieces, conv):
+        ks = self.kinds(text, toks)
+        items = self.people.setdefault(who, [])
+        got = []
+        for kind, val in ks:
+            keys = sorted({f"組|{pc['n']}|{pc['c']}:{pc['p']}" for pc in pieces} | {f"名|{t['lemma']}" for t in toks if t["pos"] in NOUN})
+            hit = next((x for x in items if x["kind"] == kind and (x["value"] == val or (keys and set(keys) == set(x["keys"])))), None)
+            if hit:
+                hit["mentions"] += 1
+                hit["convs"] = sorted(set(hit["convs"]) | {conv})
+            else:
+                items.append(dict(kind=kind, value=val, keys=keys, convs=[conv], t=time.time(), mentions=1, done=False))
+            got.append((kind, val))
+        return got
+
+    def find(self, who, words):
+        """相手の大事な板で、語を鍵に持つ項目（新しい順）。"""
+        out = []
+        for x in reversed(self.people.get(who, [])):
+            if any(any(k.endswith("|" + w) or f"|{w}|" in k for k in x["keys"]) or w in x["value"] for w in words):
+                out.append(x)
+        return out
+
+    def save(self, path=None):
+        path = path or self.path
+        if not path:
+            return
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self.people, f, ensure_ascii=False, indent=1)
+
+
 def replay(path, works, pieces, forget=True, day=None):
     """I40b: 書いた記憶板（I40a の JSON）の行の板を、もう一度畳み直す（忘れの有無を、話し相手なしで比べる）。"""
     d = json.load(open(path, encoding="utf-8"))
