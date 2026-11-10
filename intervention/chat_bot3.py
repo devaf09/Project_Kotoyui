@@ -214,11 +214,67 @@ class Bot3(C2.Bot2):
         self.__dict__.setdefault("line_pointed", Counter())[k] += w
         self.__dict__.setdefault("conv_dark", set()).add(k)
 
+    use_good = False                                        # I37b: 褒めの板と好奇心の点で返事を選ぶ
+
+    def p_lab(self, pc, question, lab):
+        s = self.grain.scores(self.sym(pc, question))
+        if lab not in s:
+            return 0.0
+        m = max(s.values())
+        return math.exp(s[lab] - m) / sum(math.exp(v - m) for v in s.values())
+
+    def value(self, toks, line):
+        """I37b: 返事の見込みの点 = P(良かった) − P(指摘) + 好奇心（経験の少なさ: 2 値の見込みの事後のばらつきの上限 0.5/√(n+2)）。
+        所のある行は所ごとの平均、所の無い行（「はい。」「ああ、ならん。」）は行のまるごとの経験で。"""
+        pcs = self.pb.pieces(toks)
+        if pcs:
+            q = self._is_q(toks)
+            vs = []
+            for pc in pcs:
+                n = min((sum(self.grain.f[t].values()) for t in self.sym(pc, q) if t in self.grain.f), default=0)
+                if any(t not in self.grain.f for t in self.sym(pc, q)):
+                    n = 0
+                vs.append(self.p_lab(pc, q, "良") - self.p_point(pc, q) + 0.5 / math.sqrt(n + 2))
+            return sum(vs) / len(vs)
+        k = self._line_key(line)
+        d = self.__dict__
+        said = d.setdefault("line_said", Counter())[k]
+        g, pt = d.setdefault("line_good", Counter())[k], d.setdefault("line_pointed", Counter())[k]
+        return (g + 0.1) / (said + 1.0) - (pt + 0.1) / (said + 1.0) + 0.5 / math.sqrt(said + 2)
+
+    def good(self, toks, line, q=None, w=1.0):
+        """I37b: 前の返事が良かった（相手が受けて話を続けた・先生が褒めた）: 所を「良」の経験に、行のまるごとも良かった行に。"""
+        q = self._is_q(toks) if q is None else q
+        for pc in self.pb.pieces(toks):
+            self.grain.add(self.sym(pc, q), "良")
+            self.aware[("良かった", pc["ns"] + pc["c"] + pc["ps"])] += w
+        self.__dict__.setdefault("line_good", Counter())[self._line_key(line)] += w
+
     def reply(self, text):
         if not self.conv["lines"]:                          # 新しい会話: この会話で指摘された行は空にする
             self.conv_dark = set()
-        out = self._said(self._reply_dark(text))
-        return out
+        snap = (list(self.conv["lines"]), list(getattr(self, "trial", [])), getattr(self, "_asked_attr", None), self.asked)
+        out = self._reply_dark(text)
+        if self.use_good and len(self.conv["lines"]) >= 2:  # I37b: ほかの返し方（行づくり）とも比べ、見込みの点の大きい方を言う
+            v0 = self.value(self.conv["lines"][-1]["toks"], out["line"])
+            keep = (out, list(self.conv["lines"]), list(self.trial), getattr(self, "_asked_attr", None), self.asked)
+            self.conv["lines"] = list(snap[0])
+            self._plain, ex = True, self.explore
+            self.explore = True
+            try:
+                alt = C2.Bot2.reply(self, text)
+            finally:
+                self._plain, self.explore = False, ex
+            alt = self._end_turn(self._name(alt))
+            v1 = self.value(self.conv["lines"][-1]["toks"], alt["line"]) if not self.dark_line(alt["line"]) else -9.0
+            if v1 > v0 and alt["line"] != out["line"]:
+                alt["why"] = f"「{out['line']}」（点 {v0:.2f}）より、行づくりの「{alt['line']}」（点 {v1:.2f}）を言う。" + alt["why"]
+                self._asked_attr, self.asked = snap[2], None
+                out = alt
+            else:
+                out, self.conv["lines"], self.trial, self._asked_attr, self.asked = keep
+                out["why"] += f"（点 {v0:.2f}、行づくり {v1:.2f}）"
+        return self._said(out)
 
     def _said(self, out):
         self.__dict__.setdefault("line_said", Counter())[self._line_key(out["line"])] += 1
@@ -298,6 +354,10 @@ class Bot3(C2.Bot2):
             if cs:
                 out = self.pointed(text, toks, a, cs, hums[-1]["text"] if hums else None)
                 return self._end_turn(out)
+            took = self.uptake is not None and R.uptake_score(self.uptake, a, b) > 0
+            if self.use_good and took:                     # I37b: 相手が前の返事を受けて話を続けた: 良かった経験
+                self.good(a["toks"], bots[-1]["text"])
+                trial = []
             if trial and self.uptake is not None and R.uptake_score(self.uptake, a, b) <= 0:
                 self.unresolved += [pc["ns"] + pc["c"] + pc["ps"] for pc, _ in trial]
                 trial = []                                  # 相手の行が前の返事を受けていない: 通じたかは分からない（経験にしない）
@@ -422,6 +482,9 @@ class Bot3(C2.Bot2):
                     self.aware_keys[k] += 1.0
                 self.learned.append(w)
                 out.append(("指摘", w))
+        elif self.use_good:                                 # I37b: 先生が褒めた: 良かった経験
+            self.good(toks, bots[-1]["text"], q)
+            out += [("良", pc["ns"] + pc["c"] + pc["ps"]) for pc in pcs] or [("良", bots[-1]["text"])]
         else:
             for pc in pcs:
                 w = pc["ns"] + pc["c"] + pc["ps"]
@@ -648,6 +711,7 @@ def main():
     ap.add_argument("--conv_share", type=float, help="場の板の中の、人の行（相手の話題）の割合（例 0.5）")
     ap.add_argument("--attrs", help="語板の属性（content_boards.json）。相手の話題の名詞の、まだ出ていない属性を聞く（I35q）")
     ap.add_argument("--smooth", default="全体", choices=("全体", "事後"), help="経験の器の寄せ方（事後 = I35r: 1 つの経験を何度も数えない）")
+    ap.add_argument("--good", action="store_true", help="I37b: 褒めの板（相手が受けた・先生が褒めた）と好奇心の点で返事を選ぶ")
     ap.add_argument("--explore", action="store_true", help="I35t: 作り直しが直らない時、相槌で黙らず、いちばん指摘の見込みの小さい行を言ってみて確かめる")
     ap.add_argument("--attr_field", action="store_true", help="I35u: 行づくりの場の板に、本の似た行の代わりに相手の名詞の語板の属性の行を入れる（--attrs が要る）")
     ap.add_argument("--no_ask", action="store_true", help="属性の問い（I35q）を使わない")
@@ -672,6 +736,7 @@ def main():
     bot.explore = a.explore
     bot.attr_field = a.attr_field
     bot.no_ask = a.no_ask
+    bot.use_good = a.good
     bot.use_chain = not a.one_clause
     bot.use_book = not a.attr_field
     bot.trial_mode = a.trial
