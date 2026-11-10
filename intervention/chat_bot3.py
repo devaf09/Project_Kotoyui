@@ -328,6 +328,43 @@ class Bot3(C2.Bot2):
                 got |= {self._norm("ある") + "/する", self._norm("いる") + "/する"}   # 話に出た物は「ある・いる」（聞くと前提を聞き直すことになる）
         return got
 
+    def taught(self, has_error, odd="", model=""):
+        """I35z: 先生役の見立てを、前の返事の所の経験に足す。間違いなら、先生が抜き出した所（無ければ自分でいちばん怪しいと見る所）を指摘に、
+        合っていれば全部の所をそのままに。お手本の返事（model）の所もそのままの経験に足す（先生の好みを学ぶことになるので、記録は分ける）。"""
+        bots = [ln for ln in self.conv["lines"] if ln["who"] == "ボット"]
+        if not bots:
+            return []
+        toks = bots[-1]["toks"]
+        q = self._is_q(toks)
+        pcs = self.pb.pieces(toks)
+        out = []
+        if has_error:
+            tgt = [pc for pc in pcs if odd and ((pc["ns"] + pc["c"] + pc["ps"]) in odd or (len(pc["ns"]) >= 2 and pc["ns"] in odd))]
+            if not tgt and pcs:
+                tgt = [max(pcs, key=lambda pc: self.p_point(pc, q))]
+            for pc in tgt:
+                w = pc["ns"] + pc["c"] + pc["ps"]
+                self.grain.add(self.sym(pc, q), "指摘")
+                self.aware[("指摘された", w)] += 1.0
+                for k in (("補語", pc["n"]), ("目的語", pc["n"])):
+                    self.aware_keys[k] += 1.0
+                self.learned.append(w)
+                out.append(("指摘", w))
+        else:
+            for pc in pcs:
+                w = pc["ns"] + pc["c"] + pc["ps"]
+                self.grain.add(self.sym(pc, q), "そのまま")
+                self.aware[("確かめた", w)] += 1.0
+                self.confirmed.append(w)
+                out.append(("そのまま", w))
+        if model:
+            mt = CB.to_toks(self.nlp(model))
+            for pc in self.pb.pieces(mt):
+                self.grain.add(self.sym(pc, self._is_q(mt)), "そのまま")
+                out.append(("お手本", pc["ns"] + pc["c"] + pc["ps"]))
+        self.trial = []                                     # 先生の見立てで確かめ終わった
+        return out
+
     def answer(self, a, b):
         """I35x: 自分の属性の問いへの相手の答えを相手の板に入れる（はい = 1、いいえ = 0）。"""
         k = self.__dict__.get("_asked_attr")
