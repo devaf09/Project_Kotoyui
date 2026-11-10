@@ -25,7 +25,8 @@ from collections import Counter, defaultdict
 
 CONTENT = ("NOUN", "PROPN", "VERB", "ADJ", "PRON")
 LIGHT = {"する", "ある", "いる", "なる", "ない", "無い", "こと", "もの", "物", "の", "中", "所", "ところ", "私", "君", "みる", "特に",
-         "たい", "出る", "行く", "来る", "言う", "思う", "今", "まだ", "いつも", "これから", "これ"}   # 同じ語でも近さを薄くする語
+         "たい", "出る", "行く", "来る", "言う", "思う", "今", "まだ", "いつも", "これから", "これ",
+         "いい", "良い", "よい"}   # 同じ語でも近さを薄くする語
 SKIP = {"何", "どこ", "誰", "いつ", "どう", "どれ", "どんな", "なぜ", "どうして", "どの", "どっち", "どちら",
         "君", "あなた", "お前", "貴方", "あんた", "きみ", "ことゆい", "そっち", "そちら"}
 NEG = ("ない", "無い", "いない")
@@ -153,7 +154,7 @@ class SelfBoard:
                     v1 = 0.0 if (q in LIGHT or w in LIGHT) else self.npmi(q, w)
                     v2 = 0.0 if (q in LIGHT or w in LIGHT) else self.board(q, w)
                     v, src = (v1, "本で一緒に出る") if v1 >= v2 else (v2, "語板で近い")
-                v *= k
+                v *= k * self.pair_ok(q, w)
                 if v > best:
                     best, how = v, (q, w, "同じ語" if q == w else src)
         return best, how
@@ -209,6 +210,26 @@ class SelfBoard:
                 s, ne = self._plain(base)
                 out.append(("説明+これから+問い", h + s + ("なので" if ne else "ので") + "、" + self.surf(fut) + "。君は？", [base, fut]))
         return out
+
+    use_pair = False                                       # I39c: 近さの経験（--pair_xp）
+
+    def pair_ok(self, q, w):
+        """I39c: 問いの語 q と所の語 w の近さで答えて、指摘された（先生の「質問に答えて」など）割合だけ近さを下げる。
+        (言った − 指摘 + 1) / (言った + 1)。まだ言っていない組は 1。"""
+        if not self.use_pair:
+            return 1.0
+        c = self.pair_xp.get((q, w))
+        if not c:
+            return 1.0
+        return max(0.0, (c["言った"] - c["指摘"] + 1.0) / (c["言った"] + 1.0))
+
+    @property
+    def pair_xp(self):
+        return self.__dict__.setdefault("_pair_xp", defaultdict(Counter))
+
+    def note_pair(self, pair, lab):
+        if pair:
+            self.pair_xp[pair][lab] += 1
 
     def form_score(self, f):
         c = self.form_xp[f]

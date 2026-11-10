@@ -347,8 +347,10 @@ class Bot3(C2.Bot2):
     def _said(self, out):
         if self.sb is not None:                             # I39a: 形の経験（言った数）。結果は相手の次の行・先生の見立てで足す
             self._last_form = out.get("form")
+            self._last_pair = out.get("pair")
             if self._last_form:
                 self.sb.note(self._last_form, "言った")
+                self.sb.note_pair(self._last_pair, "言った")
         self.__dict__.setdefault("line_said", Counter())[self._line_key(out["line"])] += 1
         if self.nov is not None and getattr(self, "_asked_attr", None):   # I38a: この会話で聞いた属性（読み手が問いの行の所を取れなくても、同じ属性をまた聞かない）
             self.__dict__.setdefault("conv_asked", set()).add(self._asked_attr)
@@ -475,6 +477,7 @@ class Bot3(C2.Bot2):
     # ---- I39a: 自分の板（プロフィールの「自分のこと」）で、自分への問いに答える ----
     sb = None                                               # self_board.SelfBoard（--profile）
     _last_form = None                                       # 前の返事の形（自分の板で答えた時だけ）
+    _last_pair = None                                       # I39c: 前の返事で使った近さの組（問いの語, 所の語）
 
     def self_answer(self, text):
         """問いの語・はい/いいえで自分のことを聞かれたら、自分の板から話題に近い所を（近さ × 重みの割合で）選び、
@@ -520,7 +523,7 @@ class Bot3(C2.Bot2):
         self.conv["lines"].append(dict(text=line, toks=lt, who="ボット"))
         why = (f"自分の板: 「{self.sb.surf(pc)}」（{pc['item']}・{pc['time']}、重み {pc['w']:.1f}、近さ {v:.2f}: "
                f"「{how[0]}」と「{how[1]}」が{how[2]}）、形 {f}（{'・'.join(tried)}）")
-        return dict(line=line, tries=0, breaks=[], sim=0, why=why, form=f)
+        return dict(line=line, tries=0, breaks=[], sim=0, why=why, form=f, pair=how[:2])
 
     def _end_turn(self, out):
         if out.pop("explored", False):                      # I35t: 言ってみた行の所は全部、確かめ中にする
@@ -624,6 +627,7 @@ class Bot3(C2.Bot2):
         if has_error:
             if self.sb is not None and self._last_form:
                 self.sb.note(self._last_form, "指摘")
+                self.sb.note_pair(self._last_pair, "指摘")
             self.mark_line(bots[-1]["text"])
             out.append(("行", bots[-1]["text"]))
             tgt = [pc for pc in pcs if odd and ((pc["ns"] + pc["c"] + pc["ps"]) in odd or (len(pc["ns"]) >= 2 and pc["ns"] in odd))]
@@ -820,6 +824,7 @@ class Bot3(C2.Bot2):
         qa = self._is_q(a["toks"])
         if self.sb is not None and self._last_form:          # I39a: 自分の板で答えた形が指摘された
             self.sb.note(self._last_form, "指摘")
+            self.sb.note_pair(self._last_pair, "指摘")
         self.mark_line(a["text"].strip("「」"))              # I37a: 行のまるごとも、指摘された行として残す
         for pc in tgt:                                      # 1. 経験を足す
             self.grain.add(self.sym(pc, qa), "指摘")
@@ -881,6 +886,7 @@ def main():
     ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
     ap.add_argument("--profile", help="I39a: プロフィール（assets/characters/*.json）の「自分のこと」から自分の板を始め、自分への問いに答える")
+    ap.add_argument("--pair_xp", action="store_true", help="I39c: 近さの組（問いの語, 所の語）で答えて指摘された割合だけ、その組の近さを下げる")
     ap.add_argument("--near_min", type=float, default=0.15, help="I39b: 自分の板で、これより近さの小さい所は選ばない")
     ap.add_argument("--self_attrs", help="I39a: 自分の板の近さに使う語板（content_boards.json）。無ければ --attrs")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
@@ -915,6 +921,7 @@ def main():
     if a.profile:
         bot.sb = SB.SelfBoard(nlp, works, a.profile, attrs=SB.load_attrs(a.self_attrs) if a.self_attrs else bot.attrs)
         bot.sb.NEAR_MIN = a.near_min
+        bot.sb.use_pair = a.pair_xp
     print(f"（読み込み {bot.load_s:.0f} 秒）", flush=True)
     log = ["# チャットボット 3 の記録（非公開）", "", f"- 本: {len(works)} 作品、振り返りの回数 {a.budget}、"
            + ("I34d の決め方" if a.self_lines else "振り分けのグレイン"), ""]

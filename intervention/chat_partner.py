@@ -155,6 +155,7 @@ def main():
     ap.add_argument("--novelty", action="store_true", help="I38a: 返事の点に新規性の感覚を足す（--good が要る）")
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
+    ap.add_argument("--pair_xp", action="store_true", help="I39c: 近さの組（問いの語, 所の語）で答えて指摘された割合だけ、その組の近さを下げる")
     ap.add_argument("--near_min", type=float, default=0.15, help="I39b: 自分の板で、これより近さの小さい所は選ばない")
     ap.add_argument("--self_attrs", help="I39a: 自分の板の近さに使う語板（content_boards.json）。無ければ --attrs")
     ap.add_argument("--no_model_reply", action="store_true", help="先生のお手本の返事を経験に足さない")
@@ -193,6 +194,7 @@ def main():
         import self_board as SB
         bot.sb = SB.SelfBoard(nlp, works, a.profile, attrs=SB.load_attrs(a.self_attrs) if a.self_attrs else bot.attrs)
         bot.sb.NEAR_MIN = a.near_min
+        bot.sb.use_pair = a.pair_xp
     if a.attrs:
         bot.attr_field, bot.use_book, bot.conv_share = True, False, 0.2
     bot.use_chain = a.no_one_clause
