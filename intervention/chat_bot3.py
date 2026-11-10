@@ -297,7 +297,7 @@ class Bot3(C2.Bot2):
             self.conv_asked = set()
         snap = (list(self.conv["lines"]), list(getattr(self, "trial", [])), getattr(self, "_asked_attr", None), self.asked)
         out = self._reply_dark(text)
-        if self.use_good and len(self.conv["lines"]) >= 2 and not out.get("form"):  # I37b（I39a: 自分の板で答えた時は、形の候補どうしで比べ済み）: ほかの返し方（行づくり）とも比べ、見込みの点の大きい方を言う
+        if self.use_good and len(self.conv["lines"]) >= 2 and not out.get("form") and not out.get("recall"):  # I37b（I39a: 自分の板で答えた時は、形の候補どうしで比べ済み）: ほかの返し方（行づくり）とも比べ、見込みの点の大きい方を言う
             v0 = self.value(self.conv["lines"][-1]["toks"], out["line"])
             keep = (out, list(self.conv["lines"]), list(self.trial), getattr(self, "_asked_attr", None), self.asked)
             self.conv["lines"] = list(snap[0])
@@ -469,10 +469,62 @@ class Bot3(C2.Bot2):
                 q = bots[-1]["text"].rstrip("。…").endswith(("？", "?"))
                 for pc in self.pb.pieces(a["toks"]):
                     self.grain.add(self.sym(pc, q), "そのまま")
+        r = self.recall_answer(text)                        # I40d: 「覚えてる？」には、大事な板・記憶板から
+        if r is not None:
+            return self._end_turn(self._name(r))
         r = self.self_answer(text)                          # I39a: 自分への問いは、自分の板（プロフィールの「自分のこと」）の所から
         if r is not None:
             return self._end_turn(self._name(r))
         return self._end_turn(self._name(self.checked_reply(text)))
+
+    # ---- I40d: 覚えているかの問いに、大事な板・記憶板で答える ----
+    imp = None                                              # memory_board.Important（--recall）
+    mem = None                                              # memory_board.Memory
+    RECALL_CUE = ("覚えて", "何だったっけ", "なんだったっけ", "だっけ", "言ったっけ")
+    ENDS = ("なんだよね", "なんだよ", "なんだ", "なの", "だよね", "だよ", "だから覚えといて", "だから覚えておいて", "覚えといて",
+            "覚えておいて", "よ", "ね", "の", "だ", "です")
+
+    def _restate(self, v):
+        v = v.strip("。！!…「」 ")
+        for _ in range(3):
+            for e in self.ENDS:
+                if v.endswith(e) and len(v) > len(e) + 1:
+                    v = v[: -len(e)].rstrip("、 ")
+                    break
+        v = v.replace("私", "").replace("うちの", "").lstrip("、 ")
+        return v
+
+    def recall_answer(self, text):
+        if self.imp is None or self._plain or not any(c in text for c in self.RECALL_CUE) or not text.rstrip("。…").endswith(("？", "?")):
+            return None
+        toks = CB.to_toks(self.nlp(text))
+        ws = [t["lemma"] for t in toks if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in ("私", "名前", "こと", "何")]
+        items = self.imp.find("相手", ws) if ws else []
+        if "名前" in text:                                  # 名前の問い: 誰の名前か（「猫の名前」）で分ける
+            whose = next((w for w in ws if w not in ("私",)), None)
+            nm = [x for x in self.imp.people.get("相手", []) if x["kind"].startswith("名前")
+                  and ((f"（{whose}）" in x["kind"]) if whose else x["kind"] == "名前")]
+            items = nm or items
+        if not items and ("予定" in text or "予定" in ws):
+            items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "予定"]
+        self.conv["lines"].append(dict(text=text, toks=toks, who="人"))
+        if items:
+            x = items[0]
+            line = (x["value"] if x["kind"].startswith("名前") else self._restate(x["value"])) + "、だよね。"
+            why = f"大事な板: {x['kind']}「{x['value'][:30]}」（会話 {'・'.join(map(str, x['convs']))}、{x['mentions']} 回）から答える"
+        else:
+            hits = self.mem.recall(ws) if (self.mem is not None and ws) else []
+            if hits:
+                lv, i, k, v = hits[0]
+                w = k.split("|")[1]
+                line = f"{w}の話は覚えてる。"
+                why = f"大事な板に無いが、記憶板の {lv} の段に「{k}」（{v:.2g}）があるので、話したことだけ言う"
+            else:
+                line = "ごめん、覚えてない。"
+                why = "大事な板にも記憶板にも、問いの語が無い"
+        lt = CB.to_toks(self.nlp(line))
+        self.conv["lines"].append(dict(text=line, toks=lt, who="ボット"))
+        return dict(line=line, tries=0, breaks=[], sim=0, why=why, recall=True)
 
     # ---- I39a: 自分の板（プロフィールの「自分のこと」）で、自分への問いに答える ----
     sb = None                                               # self_board.SelfBoard（--profile）
