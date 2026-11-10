@@ -134,6 +134,7 @@ def pred_surfaces(works):
 
 
 class Bot2(CB.Bot):
+    explore = False                                         # I35t（chat_bot3 の --explore）
     def __init__(self, nlp, works, dialogue=None, self_lines=None, **kw):
         kw_dialogue = dialogue
         super().__init__(nlp, works, **kw)
@@ -373,6 +374,7 @@ class Bot2(CB.Bot):
         # 気づき 5: 作った行の中の小さな不自然さ（違和感）。助詞が述語に合うか、修飾を取るはずの名詞が裸か。
         # 違和感があれば、自覚の板に残し（会話をまたいで持ち越す）、その語を暗くして作り直す（介入）。直らなければ相槌で受ける。
         notes = []
+        tried = []                                          # I35t: 作り直す前の行（言ってみる時に、いちばん指摘の見込みの小さいものを選ぶ）
         for attempt in range(self.budget + 1):
             L.set_mode("I32")
             X.Chain.L = self.layers
@@ -390,6 +392,7 @@ class Bot2(CB.Bot):
             pg, pb = self.odd_hist(d)
             if pg <= pb:                                    # 本の行に近い: そのまま言う
                 break
+            tried.append((pg, out["line"], rd))
             self.aware[where] += d
             for k in keys:
                 self.aware_keys[k] += d
@@ -397,10 +400,16 @@ class Bot2(CB.Bot):
             del self.conv["lines"][-2:]                     # 言わなかった行と、もう一度足される人の行を外す
         else:
             self.conv["lines"].append(dict(text=text, toks=toks, who="人"))
-            head = self.intj("問いでない", "相槌")
-            out["line"] = head + "。"
-            self.conv["lines"].append(dict(text=out["line"], toks=CB.to_toks(self.nlp(out["line"])), who="ボット"))
-            notes.append("直らないので相槌で受ける")
+            if self.explore and tried:                      # I35t: 相槌で黙る代わりに、いちばん見込みの小さい行を言ってみて確かめる
+                pg, line, rd = min(tried, key=lambda x: x[0])
+                out["line"], out["explored"] = line, True
+                self.conv["lines"].append(dict(text=line, toks=rd, who="ボット"))
+                notes.append(f"直らないので、いちばん見込みの小さい行（{pg:.2f}）を言ってみて確かめる")
+            else:
+                head = self.intj("問いでない", "相槌")
+                out["line"] = head + "。"
+                self.conv["lines"].append(dict(text=out["line"], toks=CB.to_toks(self.nlp(out["line"])), who="ボット"))
+                notes.append("直らないので相槌で受ける")
         out["why"] = "行づくり（つなぎ・述部の形つき）" + ("。" + " ／ ".join(notes) if notes else "") + \
             (f"。作り直し {len(notes) - (1 if '直らない' in notes[-1] else 0)} 回" if notes else "")
         return out

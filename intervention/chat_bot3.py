@@ -244,6 +244,9 @@ class Bot3(C2.Bot2):
         return self._end_turn(self._name(self.checked_reply(text)))
 
     def _end_turn(self, out):
+        if out.pop("explored", False):                      # I35t: 言ってみた行の所は全部、確かめ中にする
+            q = out["line"].rstrip("。…").endswith(("？", "?"))
+            self._trials.setdefault(out["line"], []).extend((pc, q) for pc in self.pb.pieces(self.conv["lines"][-1]["toks"]))
         self.trial = self._trials.get(out["line"], [])
         self._trials = {}
         if self.trial:
@@ -445,6 +448,7 @@ def main():
     ap.add_argument("--conv_share", type=float, help="場の板の中の、人の行（相手の話題）の割合（例 0.5）")
     ap.add_argument("--attrs", help="語板の属性（content_boards.json）。相手の話題の名詞の、まだ出ていない属性を聞く（I35q）")
     ap.add_argument("--smooth", default="全体", choices=("全体", "事後"), help="経験の器の寄せ方（事後 = I35r: 1 つの経験を何度も数えない）")
+    ap.add_argument("--explore", action="store_true", help="I35t: 作り直しが直らない時、相槌で黙らず、いちばん指摘の見込みの小さい行を言ってみて確かめる")
     ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
@@ -455,6 +459,7 @@ def main():
     bot = Bot3(nlp, works, pointing=None if a.self_lines else a.pointing, route=a.route, budget=a.budget,
                dialogue=a.dialogue, self_lines=a.self_lines, smooth=a.smooth)
     bot.quiet_ok = a.quiet_ok
+    bot.explore = a.explore
     bot.trial_mode = a.trial
     bot.use_you = a.you
     bot.conv_share = a.conv_share
