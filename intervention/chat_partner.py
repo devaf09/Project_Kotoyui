@@ -148,6 +148,7 @@ def main():
     ap.add_argument("--reader", default="ginza", choices=("ginza", "own"), help="I36: own = GiNZA を使わない読み手")
     ap.add_argument("--think", default="on", choices=("on", "off", "unset"), help="考える型のモデルの考え: on = 考えて本文だけ使う")
     ap.add_argument("--flow", action="store_true", help="I37d: 返事の点に、相手の行を受けている見込みを足す")
+    ap.add_argument("--novelty", action="store_true", help="I38a: 返事の点に新規性の感覚を足す（--good が要る）")
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--no_model_reply", action="store_true", help="先生のお手本の返事を経験に足さない")
     a = ap.parse_args()
@@ -173,6 +174,11 @@ def main():
     bot.trial_mode, bot.use_you = "unseen", True
     bot.use_good = a.good
     bot.use_flow = a.flow
+    if a.novelty:
+        import i38_novelty as NV
+        bot.nov = NV.Novelty(NV.novelty_board(works))
+    import i38_novelty as NV
+    nov_count = NV.Novelty(NV.novelty_board(works))          # 数えるための物差し（--novelty が無くても同じ物差しで新規性の点を数える）
     if a.uptake:
         bot.uptake = json.load(open(a.uptake, encoding="utf-8"))
     if a.attrs:
@@ -187,7 +193,9 @@ def main():
         bot.asked, bot.trial, bot._asked_attr = None, [], None
         human = rng.choice(openers)
         msgs = [dict(role="system", content=PARTNER), dict(role="assistant", content=human)]
-        c = dict(会話=ci + 1, 往復=0, 指摘=0, 受け=0, 中身なし=0, 先生の指摘=0, 先生の段=stage, 先生の見立てを捨てた=0, 相手の空=0)
+        c = dict(会話=ci + 1, 往復=0, 指摘=0, 受け=0, 中身なし=0, 先生の指摘=0, 先生の段=stage, 先生の見立てを捨てた=0, 相手の空=0,
+                 繰り返し=0, 語の繰り返し=0, 新規性=0.0)
+        said = []                                           # I38a: この会話の自分の行（繰り返しを数える）
         hist = [f"相手: {human}"]
         log += [f"## 会話 {ci + 1}", ""]
         prev_bot = None
@@ -218,6 +226,14 @@ def main():
             c["往復"] += 1
             if not bot.pb.pieces(bot.conv["lines"][-1]["toks"]):
                 c["中身なし"] += 1
+            lt = bot.conv["lines"][-1]["toks"]
+            if bot._line_key(line) in {bot._line_key(x) for x, _ in said}:   # 繰り返し: この会話の前の自分の行と同じ行
+                c["繰り返し"] += 1
+            prevw = {s_ for _, T in said[-3:] for s_ in NV.nov_syms(T) if s_.startswith("語:")}
+            if any(s_ in prevw for s_ in NV.nov_syms(lt) if s_.startswith("語:")):   # 語の繰り返し: 直近 3 行の自分の行と同じ内容語がある
+                c["語の繰り返し"] += 1
+            c["新規性"] += nov_count.score(lt, [T for _, T in reversed(said)])[0]
+            said.append((line, lt))
             log += [f"- 相手: {human}", f"- ボット: **{line}** （{r['why']}、{time.time() - t0:.1f} 秒）"]
             if a.teacher:                                   # 先生の見立て（話し相手とは別）
                 ev, bad = teacher_eval(a.host, a.teacher, hist, line, stage)
@@ -247,11 +263,12 @@ def main():
             prev_bot = line
         if pending is not None:                             # 会話の終わり: 相手の指摘が無かったので褒めを入れる
             stage, streak = praise(pending, stage, streak)
+        c["新規性"] = round(c["新規性"] / max(1, c["往復"]), 3)    # 返事 1 つあたりの新規性の点の平均
         log += ["", f"- 数: {json.dumps(c, ensure_ascii=False)}", ""]
         print(c, flush=True)
         if a.stats:
             with open(a.stats, "a", encoding="utf-8") as f:
-                f.write(json.dumps(dict(exp="I35z" if a.teacher else "I35y", model=a.model, teacher=a.teacher, **c), ensure_ascii=False) + "\n")
+                f.write(json.dumps(dict(exp="I35z" if a.teacher else "I35y", novelty=a.novelty, nov_out=bot.nov_out if bot.nov else None, model=a.model, teacher=a.teacher, **c), ensure_ascii=False) + "\n")
         if a.log:
             os.makedirs(os.path.dirname(os.path.abspath(a.log)), exist_ok=True)
             with open(a.log, "w", encoding="utf-8") as f:

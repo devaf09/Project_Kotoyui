@@ -210,6 +210,7 @@ class Bot3(C2.Bot2):
         return said > 0 and (pt + 0.1) / (said + 1.0) > 0.5
 
     def mark_line(self, line, w=1.0):
+        self.nov_result("指摘")
         k = self._line_key(line)
         self.__dict__.setdefault("line_pointed", Counter())[k] += w
         self.__dict__.setdefault("conv_dark", set()).add(k)
@@ -235,9 +236,21 @@ class Bot3(C2.Bot2):
     def value(self, toks, line):
         """I37b: 返事の見込みの点 = P(良かった) − P(指摘) + 好奇心（経験の少なさ: 2 値の見込みの事後のばらつきの上限 0.5/√(n+2)）。
         所のある行は所ごとの平均、所の無い行（「はい。」「ああ、ならん。」）は行のまるごとの経験で。"""
-        return self._value(toks, line) + (self.flow(toks, line) if self.use_flow else 0.0)
+        return self._value(toks, line) + (self.flow(toks, line) if self.use_flow else 0.0) + self.novelty(toks)[0]
 
     use_flow = False
+    nov = None                                              # I38a: 新規性の感覚（i38_novelty.Novelty、--novelty）
+
+    def own_prev(self):
+        """この会話の自分の前の行（新しい順）。conv の最後の行は、今言おうとしている行なので外す。"""
+        return [ln["toks"] for ln in reversed(self.conv["lines"][:-1]) if ln["who"] == "ボット"]
+
+    def novelty(self, toks):
+        """I38a: 新規性の点（−0.5〜0.5）と記号ごとの (記号, 観測, 期待)。自分の直近の行で使った語・形・型を、
+        本の同じ話し手が繰り返す割合より繰り返すほど減らし、使っていないものほど足す（語の無い行は足さない）。"""
+        if self.nov is None:
+            return 0.0, []
+        return self.nov.score(toks, self.own_prev())
 
     def _value(self, toks, line):
         pcs = self.pb.pieces(toks)
@@ -263,10 +276,12 @@ class Bot3(C2.Bot2):
             self.grain.add(self.sym(pc, q), "良")
             self.aware[("良かった", pc["ns"] + pc["c"] + pc["ps"])] += w
         self.__dict__.setdefault("line_good", Counter())[self._line_key(line)] += w
+        self.nov_result("良")
 
     def reply(self, text):
         if not self.conv["lines"]:                          # 新しい会話: この会話で指摘された行は空にする
             self.conv_dark = set()
+            self.conv_asked = set()
         snap = (list(self.conv["lines"]), list(getattr(self, "trial", [])), getattr(self, "_asked_attr", None), self.asked)
         out = self._reply_dark(text)
         if self.use_good and len(self.conv["lines"]) >= 2:  # I37b: ほかの返し方（行づくり）とも比べ、見込みの点の大きい方を言う
@@ -288,11 +303,63 @@ class Bot3(C2.Bot2):
             else:
                 out, self.conv["lines"], self.trial, self._asked_attr, self.asked = keep
                 out["why"] += f"（点 {v0:.2f}、行づくり {v1:.2f}）"
+            if self.nov is not None and self.novelty(self.conv["lines"][-1]["toks"])[0] < 0:
+                out = self._novel_alt(out)
         return self._said(out)
+
+    def _novel_alt(self, out):
+        """I38a: 選んだ返事が自分の直近の行の繰り返し（新規性の点が負）なら、話題の語のまだ出ていない属性を聞く行
+        （相手の今の行に名詞が無ければ、名詞のあった前の相手の行の語）も候補にし、点の大きい方を言う。"""
+        last = self.conv["lines"][-1]
+        v0 = self.value(last["toks"], out["line"])
+        saved = getattr(self, "_asked_attr", None)
+        for ln in reversed([x for x in self.conv["lines"][:-1] if x["who"] == "人"]):
+            r = self.topic_line(ln["toks"], "問いでない")
+            if r is None:
+                continue
+            if self.dark_line(r[0]):
+                break
+            cand = dict(text=r[0], toks=CB.to_toks(self.nlp(r[0])), who="ボット")
+            self.conv["lines"][-1] = cand
+            v1 = self.value(cand["toks"], r[0])
+            if v1 > v0:
+                self.trial, self.asked = [], None
+                return dict(line=r[0], tries=0, breaks=[], sim=0,
+                            why=f"「{out['line']}」（点 {v0:.2f}）は自分の直近の行の繰り返しなので、{r[1]}（点 {v1:.2f}）")
+            self.conv["lines"][-1] = last
+            break
+        self._asked_attr = saved
+        return out
 
     def _said(self, out):
         self.__dict__.setdefault("line_said", Counter())[self._line_key(out["line"])] += 1
+        if self.nov is not None and getattr(self, "_asked_attr", None):   # I38a: この会話で聞いた属性（読み手が問いの行の所を取れなくても、同じ属性をまた聞かない）
+            self.__dict__.setdefault("conv_asked", set()).add(self._asked_attr)
+        if self.nov is not None and self.conv["lines"] and self.conv["lines"][-1]["who"] == "ボット":
+            v, det = self.novelty(self.conv["lines"][-1]["toks"])
+            for sy, o, _ in det:                            # 自覚の板: この返事で新しく使った・繰り返した記号（会話をまたいで持ち越す）
+                self.aware[("繰り返した" if o else "新しかった", sy)] += 1.0
+            self._last_nov = v
+            b = self.nov_bin(v)
+            self.nov_out[b]["言った"] += 1                  # 新規性の点の帯ごとの、言った数・良かった数・指摘された数（重みを学ぶ材料）
+            rp = [sy for sy, o, _ in det if o]
+            out["why"] += f"（新規性 {v:+.2f}" + ("、繰り返し " + "・".join(rp[:4]) if rp else "") + "）"
         return out
+
+    _last_nov = None
+
+    @staticmethod
+    def nov_bin(v):
+        return "−" if v < -0.05 else ("+" if v > 0.05 else "0")
+
+    @property
+    def nov_out(self):
+        return self.__dict__.setdefault("_nov_out", {b: Counter() for b in ("−", "0", "+")})
+
+    def nov_result(self, lab):
+        """前の返事の結果（良・指摘）を、その返事の新規性の帯に数える。"""
+        if self._last_nov is not None:
+            self.nov_out[self.nov_bin(self._last_nov)][lab] += 1
 
     def _reply_dark(self, text):
         out = self._reply_once(text)
@@ -470,6 +537,8 @@ class Bot3(C2.Bot2):
                     if k["head"] == t["i"] and k["pos"] == "ADJ":
                         got.add("性質:" + self._norm(k["lemma"]))
                 got |= {self._norm("ある") + "/する", self._norm("いる") + "/する"}   # 話に出た物は「ある・いる」（聞くと前提を聞き直すことになる）
+        if self.nov is not None:
+            got |= {k for m, k in self.__dict__.get("conv_asked", ()) if m == n}
         return got
 
     def taught(self, has_error, odd="", model=""):
@@ -726,6 +795,7 @@ def main():
     ap.add_argument("--attrs", help="語板の属性（content_boards.json）。相手の話題の名詞の、まだ出ていない属性を聞く（I35q）")
     ap.add_argument("--smooth", default="全体", choices=("全体", "事後"), help="経験の器の寄せ方（事後 = I35r: 1 つの経験を何度も数えない）")
     ap.add_argument("--flow", action="store_true", help="I37d: 返事の点に、相手の行を受けている見込み（受けの板）を足す")
+    ap.add_argument("--novelty", action="store_true", help="I38a: 返事の点に新規性の感覚（本の同じ話し手の繰り返しの割合との比べ）を足す（--good が要る）")
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板（相手が受けた・先生が褒めた）と好奇心の点で返事を選ぶ")
     ap.add_argument("--explore", action="store_true", help="I35t: 作り直しが直らない時、相槌で黙らず、いちばん指摘の見込みの小さい行を言ってみて確かめる")
     ap.add_argument("--attr_field", action="store_true", help="I35u: 行づくりの場の板に、本の似た行の代わりに相手の名詞の語板の属性の行を入れる（--attrs が要る）")
@@ -753,6 +823,9 @@ def main():
     bot.no_ask = a.no_ask
     bot.use_good = a.good
     bot.use_flow = a.flow
+    if a.novelty:
+        import i38_novelty as NV
+        bot.nov = NV.Novelty(NV.novelty_board(works))
     bot.use_chain = not a.one_clause
     bot.use_book = not a.attr_field
     bot.trial_mode = a.trial
@@ -820,6 +893,8 @@ def main():
         log.extend(["", "- 属性の問いへの相手の答え（相手の板に入れた）: " + "・".join(f"{n} {k} {'はい' if y else 'いいえ'}" for (n, k), y in bot.answers)])
     if bot.learned:
         log.extend(["", f"- 会話で足した経験（指摘された所）: {'・'.join(bot.learned)}"])
+    if bot.nov is not None:
+        log.extend(["", "- 新規性の帯ごとの 言った・良・指摘: " + json.dumps(bot.nov_out, ensure_ascii=False)])
     if a.log:
         os.makedirs(os.path.dirname(os.path.abspath(a.log)), exist_ok=True)
         with open(a.log, "w", encoding="utf-8") as f:
