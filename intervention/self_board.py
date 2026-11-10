@@ -144,19 +144,31 @@ class SelfBoard:
             return self.link(w, q)
         return 0.0
 
+    MORE = 0.3                                             # ほかの問いの語でも当たった時に足す割合（「好きな食べ物」は 好き と 食べ物 の両方に当たる所）
+
     def close(self, qs, pc):
-        best, how = 0.0, None
+        per = []
         for q in qs:
-            for w, k in pc["words"]:
-                if q == w:
-                    v = 0.3 if q in LIGHT else 1.0
-                else:                                       # 軽い語どうしは、本で一緒に出ても近さにしない（何とでも一緒に出る）
-                    v1 = 0.0 if (q in LIGHT or w in LIGHT) else self.npmi(q, w)
-                    v2 = 0.0 if (q in LIGHT or w in LIGHT) else self.board(q, w)
-                    v, src = (v1, "本で一緒に出る") if v1 >= v2 else (v2, "語板で近い")
-                v *= k * self.pair_ok(q, w)
-                if v > best:
-                    best, how = v, (q, w, "同じ語" if q == w else src)
+            bq = self._close1(q, pc)
+            if bq[0] > 0:
+                per.append(bq)
+        if not per:
+            return 0.0, None
+        per.sort(key=lambda x: -x[0])
+        return per[0][0] + self.MORE * sum(x[0] for x in per[1:]), per[0][1]
+
+    def _close1(self, q, pc):
+        best, how = 0.0, None
+        for w, k in pc["words"]:
+            if q == w:
+                v = 0.3 if q in LIGHT else 1.0
+            else:                                           # 軽い語どうしは、本で一緒に出ても近さにしない（何とでも一緒に出る）
+                v1 = 0.0 if (q in LIGHT or w in LIGHT) else self.npmi(q, w)
+                v2 = 0.0 if (q in LIGHT or w in LIGHT) else self.board(q, w)
+                v, src = (v1, "本で一緒に出る") if v1 >= v2 else (v2, "語板で近い")
+            v *= k * self.pair_ok(q, w)
+            if v > best:
+                best, how = v, (q, w, "同じ語" if q == w else src)
         return best, how
 
     def near(self, toks):
