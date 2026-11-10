@@ -9,7 +9,9 @@
   受け継ぐのと同じ形）なので、上の段ほど、何度も出た鍵でないと明るくならない。期待 = ふだんの会話でその段の行の数のうちに出る見込み 1 − exp(−割合 × 行の数)。
   ふだんの割合 = (本の台詞での数 + これまでの行の板での数) / (本の行の数 + これまでの行の数)。
   差が「発見」（期待より明るい）で、|1 − 差| < |0 − 差|（残す方が近い）の鍵だけを上の段に足す。上の段ほど行の数が多いので、
-  期待が大きくなり、よく出た所だけが残る。段の板そのもの（boards）は全部残し、上に足さなかった鍵の数を記録する。
+  期待が大きくなり、よく出た所だけが明るく残る。
+  持ち主（2026-11-11）「完全に消えなくて OK、多少時間と共に薄れるくらいで OK」: 残す方に入らなかった鍵も消さず、
+  上の段には半分の重さ（FADE）で足す。1 度だけ出た鍵は 時 1 → 日 0.5 → 週 0.25 と薄れていき、何度も出た鍵は薄れない。
   行の板: 所 ("組", 名詞, 助詞:述語)、話題の名詞 ("名", 名詞)、誰、時刻、会話、結果（相手の次の行で 良・指摘）
   段: 分 = 話題の名詞が替わるまで、時 = 1 会話、日 = DAY 会話、週 = 7 日
 """
@@ -93,7 +95,7 @@ class Memory:
         i = LEVELS.index(lv)
         if i + 1 < len(LEVELS):
             up = self.kept(b["keys"], b["n"], 2.0 ** i) if self.forget else b["keys"]
-            b["dropped"] = len(b["keys"]) - len(up)
+            b["faded"] = self.__dict__.pop("_faded", 0)
             self._push(LEVELS[i + 1], up, b["end"], b["n"])
         self.open[lv] = Counter()
         self._span[lv] = [None, None, 0]
@@ -113,12 +115,18 @@ class Memory:
         r = (self.base.get(k, 0) + self.seen.get(k, 0) + 0.5) / (self.base_n + self.seen_n + 1.0)
         return 1.0 - math.exp(-r * n)
 
+    FADE = 0.5                                              # 残す方に入らなかった鍵を、上の段に足す時の重さ（薄れる）
+
     def kept(self, keys, n, sat=1.0):
-        out = {}
+        out, faded = {}, 0
         for k, v in keys.items():
             d, kind = react(self.expect(k, n), 1.0 - math.exp(-v / sat))
             if kind == "発見" and abs(1.0 - d) < abs(0.0 - d):
                 out[k] = v
+            else:
+                out[k] = v * self.FADE
+                faded += 1
+        self._faded = faded
         return out
 
     def end_conv(self):
@@ -145,7 +153,7 @@ class Memory:
 
     def summary(self):
         return {lv: dict(枚=len(self.boards[lv]), 鍵=sum(len(b["keys"]) for b in self.boards[lv]),
-                         上に足さなかった=sum(b.get("dropped", 0) for b in self.boards[lv])) for lv in LEVELS} | dict(行=len(self.lines))
+                         薄れた=sum(b.get("faded", 0) for b in self.boards[lv])) for lv in LEVELS} | dict(行=len(self.lines))
 
     # ---- 置き場（非公開。PC のフォルダに JSON） ----
     def save(self, path):
@@ -187,7 +195,7 @@ def main():
     import sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import i35_route_grain as R
-    ap = argparse.ArgumentParser(description="I40b: 記憶板を忘れありで畳み直し、段ごとの鍵の数と、日・週の板の明るい鍵を出す")
+    ap = argparse.ArgumentParser(description="I40b: 記憶板を薄れありで畳み直し、段ごとの鍵の数と、日・週の板の明るい鍵を出す")
     ap.add_argument("--memory", required=True, help="I40a の記憶板 JSON")
     ap.add_argument("--cache", required=True, help="本の解析済み JSON（ふだんの会話の割合）")
     ap.add_argument("--out", help="畳み直した記憶板の JSON（非公開）")
@@ -197,7 +205,7 @@ def main():
     pb = R.PieceBoards(works)
     for fg in (False, True):
         m = replay(a.memory, works, pb.pieces, forget=fg)
-        print(("忘れあり" if fg else "忘れなし"), json.dumps(m.summary(), ensure_ascii=False))
+        print(("薄れあり" if fg else "薄れなし"), json.dumps(m.summary(), ensure_ascii=False))
         for lv in ("時", "日"):
             if m.boards[lv]:
                 b = m.boards[lv][-1]
