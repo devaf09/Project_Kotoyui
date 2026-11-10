@@ -390,6 +390,10 @@ class Bot2(CB.Bot):
             rd = CB.to_toks(self.nlp(out["line"]))
             d, where, keys = self.oddness(rd)
             pg, pb = self.odd_hist(d)
+            if getattr(self, "dark_line", lambda _: False)(out["line"]):   # I37a: 前に指摘された行（行のまるごとの経験）は言わない
+                pg, pb = max(pg, 1.0), 0.0
+                if not where[1]:
+                    where = ("指摘された行", out["line"])
             if pg <= pb:                                    # 本の行に近い: そのまま言う
                 break
             tried.append((pg, out["line"], rd))
@@ -400,6 +404,8 @@ class Bot2(CB.Bot):
             del self.conv["lines"][-2:]                     # 言わなかった行と、もう一度足される人の行を外す
         else:
             self.conv["lines"].append(dict(text=text, toks=toks, who="人"))
+            dark = getattr(self, "dark_line", lambda _: False)
+            tried = [x for x in tried if not dark(x[1])]    # I37a: 前に指摘された行は、言ってみる行にしない
             if self.explore and tried:                      # I35t: 相槌で黙る代わりに、いちばん見込みの小さい行を言ってみて確かめる
                 pg, line, rd = min(tried, key=lambda x: x[0])
                 out["line"], out["explored"] = line, True

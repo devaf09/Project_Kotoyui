@@ -151,6 +151,13 @@ def main():
     a = ap.parse_args()
     ollama_chat.__defaults__ = ollama_chat.__defaults__[:-1] + ({"on": True, "off": False, "unset": None}[a.think],)
     import chat_bot3 as B3
+
+    def praise(ev, stage, streak):
+        bot.taught(False, "", "" if a.no_model_reply else ev.get("suggested_reply", ""))
+        streak += 1
+        if stage in UP and streak >= UP[stage]:
+            stage, streak = stage + 1, 0
+        return stage, streak
     import i35_route_grain as R
     works = json.load(open(a.cache, encoding="utf-8"))
     if a.reader == "own":                                   # I36: GiNZA を使わない読み手
@@ -180,6 +187,7 @@ def main():
         hist = [f"相手: {human}"]
         log += [f"## 会話 {ci + 1}", ""]
         prev_bot = None
+        pending = None
         for ti in range(a.turns):
             if prev_bot is not None:                        # 話し相手の行が、前の返事への指摘か・受けか（ボットの見分けと同じ物差し）
                 ta = bot.conv["lines"][-1]["toks"]
@@ -188,7 +196,15 @@ def main():
                 cs = R.cues(A_, B_, bot.negx)
                 if bot._is_q(ta):                           # 問いへの「ううん」は答え（chat_bot3 と同じ）
                     cs = [x for x in cs if x[0] not in ("否定の始め", "否定の繰り返し")]
-                if cs or "って？" in human:
+                pointed = bool(cs or "って？" in human)
+                if pending is not None:                     # 先生が褒めた行を、話し相手は聞き返した: 2 人の見立てが食い違うので、褒めた方を経験に入れない
+                    if pointed:
+                        c["先生の見立てを捨てた"] += 1
+                        log.append(f"  - 先生: 前の褒めを捨てた（相手の指摘と食い違う）")
+                    else:
+                        stage, streak = praise(pending, stage, streak)
+                    pending = None
+                if pointed:
                     c["指摘"] += 1
                 elif bot.uptake is not None and R.uptake_score(bot.uptake, A_, B_) > 0:
                     c["受け"] += 1
@@ -208,16 +224,14 @@ def main():
                 if bad:
                     c["先生の見立てを捨てた"] += 1
                     log.append(f"  - 先生（段 {stage}）: 見立てを捨てた（{bad}）")
-                if ev is not None:
-                    got = bot.taught(ev["has_error"], ev.get("odd_part", ""), "" if a.no_model_reply else ev.get("suggested_reply", ""))
-                    if ev["has_error"]:
-                        c["先生の指摘"] += 1
-                        streak = 0
-                    else:
-                        streak += 1
-                        if stage in UP and streak >= UP[stage]:
-                            stage, streak = stage + 1, 0
+                if ev is not None and ev["has_error"]:
+                    got = bot.taught(True, ev.get("odd_part", ""), "" if a.no_model_reply else ev.get("suggested_reply", ""))
+                    c["先生の指摘"] += 1
+                    streak = 0
                     log.append(f"  - 先生（段 {stage}）: {ev.get('intervention_message', '')} ／ 経験: {'・'.join(k + ':' + w for k, w in got) or 'なし'}")
+                elif ev is not None:                        # 褒めは、話し相手の次の行を見てから経験に入れる
+                    pending = ev
+                    log.append(f"  - 先生（段 {stage}）: {ev.get('intervention_message', '')} ／ 経験: 相手の次の行を見てから")
             hist.append(f"ボット: {line}")
             msgs.append(dict(role="user", content=line))
             human = ollama_chat(a.host, a.model, msgs) if a.model != "echo" else "うん、そうなんだ。"   # echo: 試し用
@@ -227,6 +241,8 @@ def main():
             msgs.append(dict(role="assistant", content=human))
             hist.append(f"相手: {human}")
             prev_bot = line
+        if pending is not None:                             # 会話の終わり: 相手の指摘が無かったので褒めを入れる
+            stage, streak = praise(pending, stage, streak)
         log += ["", f"- 数: {json.dumps(c, ensure_ascii=False)}", ""]
         print(c, flush=True)
         if a.stats:

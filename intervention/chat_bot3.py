@@ -195,7 +195,66 @@ class Bot3(C2.Bot2):
                    why=f"聞き返した「{w}」の説明を自分の板に入れ（{w} を知った・{w} は {root['lemma']}）、説明の述語で受ける")
         return self._log(text, toks, out)
 
+    @staticmethod
+    def _line_key(line):
+        return "".join(ch for ch in line if ch not in "。、！？!?…「」 　")
+
+    def dark_line(self, line):
+        """I37a: 行のまるごとの経験。この会話で聞き返された・先生に変と言われた行は言わない（所の無い行「ああ、ならん。」「はい。」も）。
+        会話をまたいでは、言った数のうち指摘された割合が、されなかった割合より大きい行だけ（「はい。」はふつう通じる）。"""
+        k = self._line_key(line)
+        d = self.__dict__
+        if k in d.setdefault("conv_dark", set()):
+            return True
+        said, pt = d.setdefault("line_said", Counter())[k], d.setdefault("line_pointed", Counter())[k]
+        return said > 0 and (pt + 0.1) / (said + 1.0) > 0.5
+
+    def mark_line(self, line, w=1.0):
+        k = self._line_key(line)
+        self.__dict__.setdefault("line_pointed", Counter())[k] += w
+        self.__dict__.setdefault("conv_dark", set()).add(k)
+
     def reply(self, text):
+        if not self.conv["lines"]:                          # 新しい会話: この会話で指摘された行は空にする
+            self.conv_dark = set()
+        out = self._said(self._reply_dark(text))
+        return out
+
+    def _said(self, out):
+        self.__dict__.setdefault("line_said", Counter())[self._line_key(out["line"])] += 1
+        return out
+
+    def _reply_dark(self, text):
+        out = self._reply_once(text)
+        if self.dark_line(out["line"]) and len(self.conv["lines"]) >= 2:   # 前に指摘された行をまた言いそう: 行づくりで言い直し、直らなければ見込みの小さい行を言ってみる
+            first = out
+            del self.conv["lines"][-2:]
+            self._plain, ex = True, self.explore
+            self.explore = True
+            try:
+                out = C2.Bot2.reply(self, text)
+            finally:
+                self._plain, self.explore = False, ex
+            out = self._end_turn(self._name(out))
+            out["why"] = f"「{first['line']}」は前に指摘された行なので言い直す。" + out["why"]
+            if self.dark_line(out["line"]):                 # 言い直しも前に指摘された行: 相手の行の話題の語を聞き返す（言えることが無い時は、相手に話してもらう）
+                ns = []
+                for ln in reversed(self.conv["lines"][:-1]):    # 相手の行に名詞が無い（「『はい』って？」）: 前の相手の行の話題の語
+                    if ln["who"] == "人":
+                        ns = [t for t in ln["toks"] if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in C2.YOU
+                              and not self.dark_line(self.ask_back(t))]
+                        if ns:
+                            break
+                if ns:
+                    t = max(ns, key=lambda x: (self.idf.get(x["lemma"], 0.0), -x["i"]))
+                    line = self.ask_back(t)
+                    self.conv["lines"][-1] = dict(text=line, toks=CB.to_toks(self.nlp(line)), who="ボット")
+                    out = dict(line=line, tries=0, breaks=[], sim=0,
+                               why=out["why"] + f"。それも前に指摘された行なので、相手の話題の語「{t['text']}」を聞き返す")
+                    self.trial = []
+        return out
+
+    def _reply_once(self, text):
         if self.asked:
             out = self.explained(text)
             if out is not None:
@@ -221,7 +280,7 @@ class Bot3(C2.Bot2):
             chunk = ""
             for mk in ("って", "？", "?"):
                 if mk in text:
-                    c0 = text.split(mk, 1)[0].lstrip("「『 　")
+                    c0 = text.split(mk, 1)[0].strip("「」『』 　")   # 「天気がなるの」って？ の閉じかっこも外す
                     if len(c0) >= 2 and c0 in bots[-1]["text"]:
                         chunk = c0
                         break
@@ -233,6 +292,8 @@ class Bot3(C2.Bot2):
                 else:
                     continue
                 break
+            if chunk and not cs:                            # I37a: 所の無い行の一続き（「ならん」って？）を返された: 行への聞き返し
+                cs = [("聞き返し", None)]
             trial, self.trial = self.trial, []
             if cs:
                 out = self.pointed(text, toks, a, cs, hums[-1]["text"] if hums else None)
@@ -348,6 +409,8 @@ class Bot3(C2.Bot2):
         pcs = self.pb.pieces(toks)
         out = []
         if has_error:
+            self.mark_line(bots[-1]["text"])
+            out.append(("行", bots[-1]["text"]))
             tgt = [pc for pc in pcs if odd and ((pc["ns"] + pc["c"] + pc["ps"]) in odd or (len(pc["ns"]) >= 2 and pc["ns"] in odd))]
             if not tgt and pcs:
                 tgt = [max(pcs, key=lambda pc: self.p_point(pc, q))]
@@ -537,6 +600,7 @@ class Bot3(C2.Bot2):
         if not tgt and pcs:                                 # 指摘された語が分からない（「え？」）: 自分でいちばん怪しいと見る所
             tgt = [max(pcs, key=self.p_point)]
         qa = self._is_q(a["toks"])
+        self.mark_line(a["text"].strip("「」"))              # I37a: 行のまるごとも、指摘された行として残す
         for pc in tgt:                                      # 1. 経験を足す
             self.grain.add(self.sym(pc, qa), "指摘")
             self.learned.append(pc["ns"] + pc["c"] + pc["ps"])
@@ -545,7 +609,7 @@ class Bot3(C2.Bot2):
                 self.aware_keys[k] += 1.0
         r = self.pick_route([k for k, _ in cs])
         kinds = "・".join(dict.fromkeys(k for k, _ in cs))
-        where = "・".join(pc["ns"] + pc["c"] + pc["ps"] for pc in tgt) or "（所なし）"
+        where = "・".join(pc["ns"] + pc["c"] + pc["ps"] for pc in tgt) or "（所なし、行「" + a["text"].strip("「」") + "」）"
         route = r[1] if r else "そのまま"
         head = f"相手の指摘（{kinds}）→ 所「{where}」を経験に足し、自覚の板に残す。回し先 {route}"
         if route == "介入" and prev_human:
