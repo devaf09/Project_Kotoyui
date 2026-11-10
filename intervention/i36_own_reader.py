@@ -51,6 +51,7 @@ class OwnReader:
         self.att = defaultdict(Counter)                     # 係り先の経験: 記号 → (係る, 係らない) の数
         self.te_aux = defaultdict(Counter)                  # 「て」のあとの述語 → (補助, 補助でない) の数
         self.N = 0
+        self.emit = os.environ.get("OWN_EMIT", "1") == "1"
 
     # ---- 板を数える（読んだ行から） ----
     def learn(self, toks):
@@ -84,8 +85,8 @@ class OwnReader:
             w = s[i:j]
             if w in self.lex:
                 tot = sum(self.lex[w].values())
-                for (pos, lem), v in self.lex[w].items():
-                    out.append((j, w, pos, lem, math.log(v / tot)))
+                for (pos, lem), v in self.lex[w].items():  # EMIT: 品詞から語の出やすさ（流れの読みと同じ向き）。字の並びからの割合だと、1 度だけ見た並びが強すぎる
+                    out.append((j, w, pos, lem, math.log(v / max(self.pos_n[pos], 1)) if self.emit else math.log(v / tot)))
         j = i + 1                                           # 板に無い: 字の種類の続きを 1 語に
         ct = ctype(s[i])
         while j < len(s) and ctype(s[j]) == ct and ct != "記" and (j - i < MAXLEN or ct == "カ"):
@@ -93,7 +94,7 @@ class OwnReader:
         w = s[i:j]
         if ct == "カ" and w not in self.lex:                 # カタカナの続きは、知っている語に分けずに 1 つの名詞とみる（名詞のふつうの出やすさで）
             out.append((j, w, "NOUN", w, math.log(max(self.pos_n["NOUN"], 1) / max(self.N, 1) / max(len(self.lex), 1)) + 5))
-        elif w not in self.lex:
+        elif w not in self.lex and not (self.emit and out and ct == "漢"):   # I36e: 知っている語で始まる漢字の続き（「毎朝散歩」）は、知っている語から読む
             pos = {"漢": "NOUN", "カ": "NOUN", "英": "NOUN", "数": "NUM", "記": "SYM", "ひ": "NOUN"}[ct]
             out.append((j, w, pos, w, math.log(0.5 / (self.N + 1)) * (1 if ct != "ひ" else 2)))
         return out
