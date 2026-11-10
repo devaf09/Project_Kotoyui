@@ -155,6 +155,7 @@ def main():
     ap.add_argument("--novelty", action="store_true", help="I38a: 返事の点に新規性の感覚を足す（--good が要る）")
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
+    ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
     ap.add_argument("--pair_xp", action="store_true", help="I39c: 近さの組（問いの語, 所の語）で答えて指摘された割合だけ、その組の近さを下げる")
     ap.add_argument("--near_min", type=float, default=0.15, help="I39b: 自分の板で、これより近さの小さい所は選ばない")
     ap.add_argument("--self_attrs", help="I39a: 自分の板の近さに使う語板（content_boards.json）。無ければ --attrs")
@@ -198,6 +199,10 @@ def main():
     if a.attrs:
         bot.attr_field, bot.use_book, bot.conv_share = True, False, 0.2
     bot.use_chain = a.no_one_clause
+    mem = None
+    if a.memory:
+        import memory_board as MB
+        mem = MB.Memory(a.memory)
     openers = [x.strip() for x in open(a.openers, encoding="utf-8") if x.strip()]
     rng = random.Random(a.seed)
     log = [f"# 話し相手との会話（非公開）", "", f"- 話し相手: {a.model}、先生: {a.teacher or 'なし'}、会話 {a.convs} × {a.turns} 往復", ""]
@@ -234,10 +239,17 @@ def main():
                     c["指摘"] += 1
                 elif bot.uptake is not None and R.uptake_score(bot.uptake, A_, B_) > 0:
                     c["受け"] += 1
+                if mem is not None:                         # I40a: 前のボットの行の結果
+                    mem.result("指摘" if pointed else ("良" if bot.uptake is not None and R.uptake_score(bot.uptake, A_, B_) > 0 else None))
             t0 = time.time()
             r = bot.reply(human)
             line = r["line"]
             c["往復"] += 1
+            if mem is not None:                             # I40a: 行の板（人の行とボットの行）
+                hl = next(ln for ln in reversed(bot.conv["lines"]) if ln["who"] == "人")
+                mem.add(hl["toks"], bot.pb.pieces(hl["toks"]), "人", ci + 1)
+                bl = bot.conv["lines"][-1]
+                mem.add(bl["toks"], bot.pb.pieces(bl["toks"]), "ボット", ci + 1)
             if r["why"].startswith("自分の板"):
                 c["自分の板"] += 1
             if not bot.pb.pieces(bot.conv["lines"][-1]["toks"]):
@@ -284,7 +296,10 @@ def main():
             prev_bot = line
         if pending is not None:                             # 会話の終わり: 相手の指摘が無かったので褒めを入れる
             stage, streak = praise(pending, stage, streak)
-        c["新規性"] = round(c["新規性"] / max(1, c["往復"]), 3)    # 返事 1 つあたりの新規性の点の平均
+        c["新規性"] = round(c["新規性"] / max(1, c["往復"]), 3)
+        if mem is not None:
+            mem.end_conv()
+            c["記憶板"] = mem.summary()    # 返事 1 つあたりの新規性の点の平均
         log += ["", f"- 数: {json.dumps(c, ensure_ascii=False)}", ""]
         print(c, flush=True)
         if a.stats:
