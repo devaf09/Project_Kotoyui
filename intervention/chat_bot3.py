@@ -518,6 +518,7 @@ def main():
     ap.add_argument("--attr_field", action="store_true", help="I35u: 行づくりの場の板に、本の似た行の代わりに相手の名詞の語板の属性の行を入れる（--attrs が要る）")
     ap.add_argument("--no_ask", action="store_true", help="属性の問い（I35q）を使わない")
     ap.add_argument("--at", action="store_true", help="I35v: 所の記号に語板の属性の記号を足す（--attrs が要る）")
+    ap.add_argument("--one_clause", action="store_true", help="I35w: 行づくりで節をつながず、1 つの節で言い切る")
     ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
@@ -531,6 +532,7 @@ def main():
     bot.explore = a.explore
     bot.attr_field = a.attr_field
     bot.no_ask = a.no_ask
+    bot.use_chain = not a.one_clause
     bot.use_book = not a.attr_field
     bot.trial_mode = a.trial
     bot.use_you = a.you

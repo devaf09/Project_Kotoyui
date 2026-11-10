@@ -72,6 +72,7 @@ class Bot:
         self.conv = dict(name="会話", lines=[])
         self.load_s = time.time() - t0
 
+    use_chain = True                                      # I35w: 節をつなぐか（False なら 1 つの節で言い切る）
     use_book = True                                       # I35u: 場の板に入力に似た本の行を入れるか
 
     def extra_lines(self, toks):
@@ -144,7 +145,7 @@ class Bot:
             out = dict(line="……。", tries=0, breaks=[], sim=len(sim))
         else:
             X.propose = X2.propose2
-            (line, cl, chk, d2), tries = X.ring(self.nlp, ch, pairs, self.budget, True)
+            (line, cl, chk, d2), tries = X.ring(self.nlp, ch, pairs, self.budget, self.use_chain)
             out = dict(line=line, tries=tries, breaks=[f"{j + 1}:{k}" for (j, k), v in chk.items() if not v], sim=len(sim))
         rd = self.nlp(out["line"])
         self.conv["lines"].append(dict(text=out["line"], toks=to_toks(rd), who="ボット"))
