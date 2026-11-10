@@ -37,6 +37,7 @@ def to_toks(doc):
 
 
 class Bot:
+    conv_share = None                                     # I35p: 場の板の中の人の行の割合（None なら前のとおり w_conv）
     def __init__(self, nlp, works, budget=2, k_lines=40, ctx=2, w_conv=1.0, decay=0.5):
         self.nlp, self.budget, self.k_lines, self.ctx, self.w_conv, self.decay = nlp, budget, k_lines, ctx, w_conv, decay
         t0 = time.time()
@@ -101,6 +102,13 @@ class Bot:
                     rows.append((s / top / (1 + abs(d)), self.rows[wi][lj]))
             for k, v in self.works[wi]["_text"].items():
                 text_of.setdefault(k, v)
+        if self.conv_share:                               # I35p: 人の行の重みを、本の行の重みの和に対する割合で決める（相手の話題を場の板の半分に）
+            nconv = len(mine)
+            wc = sum(wt for wt, _ in rows[:nconv])
+            wb = sum(wt for wt, _ in rows[nconv:])
+            if wc > 0 and wb > 0:
+                f = self.conv_share / (1 - self.conv_share) * wb / wc
+                rows = [(wt * f, b) for wt, b in rows[:nconv]] + rows[nconv:]
         BB = Board()
         for wt, b in rows:
             for k, v in b.items():

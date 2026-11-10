@@ -350,6 +350,7 @@ def main():
                     help="試しの介入: unseen=知らない記号のある所、thin=それに加えて薄い記号 1 つに頼る見込みの所は、作り直さずに言ってみて相手の次の行で確かめる")
     ap.add_argument("--uptake", help="受けの板（i35_route_grain --uptake）。試しの所は、相手の次の行が前の返事を受けている時だけ通じたとする")
     ap.add_argument("--you", action="store_true", help="相手の語の記号（相手が直前に言った語を使った所）を足す")
+    ap.add_argument("--conv_share", type=float, help="場の板の中の、人の行（相手の話題）の割合（例 0.5）")
     ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
@@ -362,6 +363,7 @@ def main():
     bot.quiet_ok = a.quiet_ok
     bot.trial_mode = a.trial
     bot.use_you = a.you
+    bot.conv_share = a.conv_share
     if a.uptake:
         bot.uptake = json.load(open(a.uptake, encoding="utf-8"))
     print(f"（読み込み {bot.load_s:.0f} 秒）", flush=True)
