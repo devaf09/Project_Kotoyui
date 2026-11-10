@@ -130,6 +130,11 @@ class OwnReader:
     # ---- 係り先 ----
     def _att_cands(self, toks):
         for t in toks:
+            if t["pos"] == "ADV":                           # I36d: 副詞も、同じ経験の板で係る述語を選ぶ（助詞の代わりに「副」の記号）
+                cands = [c for c in toks[t["i"] + 1:] if c["pos"] in PRED]
+                if cands:
+                    yield t, "副", cands
+                continue
             if t["pos"] not in NOUNISH:
                 continue
             nxt = toks[t["i"] + 1] if t["i"] + 1 < len(toks) else None
@@ -154,7 +159,7 @@ class OwnReader:
         return x["pos"]
 
     def _att_sym(self, toks, t, case, k, c):
-        between = toks[t["i"] + 2:c["i"]]
+        between = toks[t["i"] + (1 if case == "副" else 2):c["i"]]
         comma = any(x["text"] in ("、", ",", "，") for x in between)
         same = any(x["text"] == case and x["pos"] == "ADP" for x in between)          # 間に同じ助詞（別の名詞の枠）
         rel = sum(1 for x in between if x["pos"] in PRED and self._after(toks, x) == "名詞へ")   # 間の、名詞に続く述語
@@ -209,8 +214,11 @@ class OwnReader:
                 t["head"] = nx["i"] if nx else (root["i"] if root else t["i"])
                 t["dep"] = "acl" if nx is not None and nx["pos"] in NOUNISH else "advcl"
         for n, h in self.attach(toks).items():
-            c = toks[n + 1]["text"]
             toks[n]["head"] = h
+            if toks[n]["pos"] == "ADV":
+                toks[n]["dep"] = "advmod"
+                continue
+            c = toks[n + 1]["text"]
             toks[n]["dep"] = {"が": "nsubj", "は": "nsubj", "を": "obj"}.get(c, "obl")
         for t in toks:                                      # 名詞+の+名詞
             if t["pos"] in NOUNISH and t["dep"] == "dep" and t["i"] + 2 < len(toks) and toks[t["i"] + 1]["text"] == "の" \
