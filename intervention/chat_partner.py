@@ -154,6 +154,8 @@ def main():
     ap.add_argument("--flow", action="store_true", help="I37d: 返事の点に、相手の行を受けている見込みを足す")
     ap.add_argument("--novelty", action="store_true", help="I38a: 返事の点に新規性の感覚を足す（--good が要る）")
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
+    ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
+    ap.add_argument("--self_attrs", help="I39a: 自分の板の近さに使う語板（content_boards.json）。無ければ --attrs")
     ap.add_argument("--no_model_reply", action="store_true", help="先生のお手本の返事を経験に足さない")
     a = ap.parse_args()
     ollama_chat.__defaults__ = ollama_chat.__defaults__[:-1] + ({"on": True, "off": False, "unset": None}[a.think],)
@@ -186,6 +188,9 @@ def main():
     nov_count = NV.Novelty(NV.novelty_board(works))          # 数えるための物差し（--novelty が無くても同じ物差しで新規性の点を数える）
     if a.uptake:
         bot.uptake = json.load(open(a.uptake, encoding="utf-8"))
+    if a.profile:
+        import self_board as SB
+        bot.sb = SB.SelfBoard(nlp, works, a.profile, attrs=SB.load_attrs(a.self_attrs) if a.self_attrs else bot.attrs)
     if a.attrs:
         bot.attr_field, bot.use_book, bot.conv_share = True, False, 0.2
     bot.use_chain = a.no_one_clause
@@ -199,7 +204,7 @@ def main():
         human = rng.choice(openers)
         msgs = [dict(role="system", content=PARTNER), dict(role="assistant", content=human)]
         c = dict(会話=ci + 1, 往復=0, 指摘=0, 受け=0, 中身なし=0, 先生の指摘=0, 先生の段=stage, 先生の見立てを捨てた=0, 相手の空=0,
-                 繰り返し=0, 語の繰り返し=0, 新規性=0.0)
+                 繰り返し=0, 語の繰り返し=0, 新規性=0.0, 自分の板=0)
         said = []                                           # I38a: この会話の自分の行（繰り返しを数える）
         hist = [f"相手: {human}"]
         log += [f"## 会話 {ci + 1}", ""]
@@ -229,6 +234,8 @@ def main():
             r = bot.reply(human)
             line = r["line"]
             c["往復"] += 1
+            if r["why"].startswith("自分の板"):
+                c["自分の板"] += 1
             if not bot.pb.pieces(bot.conv["lines"][-1]["toks"]):
                 c["中身なし"] += 1
             lt = bot.conv["lines"][-1]["toks"]
@@ -278,7 +285,7 @@ def main():
         print(c, flush=True)
         if a.stats:
             with open(a.stats, "a", encoding="utf-8") as f:
-                f.write(json.dumps(dict(exp="I35z" if a.teacher else "I35y", novelty=a.novelty, nov_out=bot.nov_out if bot.nov else None, model=a.model, teacher=a.teacher, **c), ensure_ascii=False) + "\n")
+                f.write(json.dumps(dict(exp="I35z" if a.teacher else "I35y", profile=bool(a.profile), novelty=a.novelty, nov_out=bot.nov_out if bot.nov else None, model=a.model, teacher=a.teacher, **c), ensure_ascii=False) + "\n")
         if a.log:
             os.makedirs(os.path.dirname(os.path.abspath(a.log)), exist_ok=True)
             with open(a.log, "w", encoding="utf-8") as f:

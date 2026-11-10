@@ -33,6 +33,7 @@ import i33_predicate_grain as G  # noqa: E402
 import i34_dialogue_board as D  # noqa: E402
 import i32_function_layers as L  # noqa: E402
 import i35_route_grain as R  # noqa: E402
+import self_board as SB  # noqa: E402
 from board_ops import react  # noqa: E402
 from i27l_wave_scale import FORMAL2 as FORMAL  # noqa: E402
 
@@ -287,6 +288,8 @@ class Bot3(C2.Bot2):
             self.aware[("良かった", pc["ns"] + pc["c"] + pc["ps"])] += w
         self.__dict__.setdefault("line_good", Counter())[self._line_key(line)] += w
         self.nov_result("良")
+        if self.sb is not None and self._last_form:
+            self.sb.note(self._last_form, "良")
 
     def reply(self, text):
         if not self.conv["lines"]:                          # 新しい会話: この会話で指摘された行は空にする
@@ -294,7 +297,7 @@ class Bot3(C2.Bot2):
             self.conv_asked = set()
         snap = (list(self.conv["lines"]), list(getattr(self, "trial", [])), getattr(self, "_asked_attr", None), self.asked)
         out = self._reply_dark(text)
-        if self.use_good and len(self.conv["lines"]) >= 2:  # I37b: ほかの返し方（行づくり）とも比べ、見込みの点の大きい方を言う
+        if self.use_good and len(self.conv["lines"]) >= 2 and not out.get("form"):  # I37b（I39a: 自分の板で答えた時は、形の候補どうしで比べ済み）: ほかの返し方（行づくり）とも比べ、見込みの点の大きい方を言う
             v0 = self.value(self.conv["lines"][-1]["toks"], out["line"])
             keep = (out, list(self.conv["lines"]), list(self.trial), getattr(self, "_asked_attr", None), self.asked)
             self.conv["lines"] = list(snap[0])
@@ -342,6 +345,10 @@ class Bot3(C2.Bot2):
         return out
 
     def _said(self, out):
+        if self.sb is not None:                             # I39a: 形の経験（言った数）。結果は相手の次の行・先生の見立てで足す
+            self._last_form = out.get("form")
+            if self._last_form:
+                self.sb.note(self._last_form, "言った")
         self.__dict__.setdefault("line_said", Counter())[self._line_key(out["line"])] += 1
         if self.nov is not None and getattr(self, "_asked_attr", None):   # I38a: この会話で聞いた属性（読み手が問いの行の所を取れなくても、同じ属性をまた聞かない）
             self.__dict__.setdefault("conv_asked", set()).add(self._asked_attr)
@@ -460,7 +467,60 @@ class Bot3(C2.Bot2):
                 q = bots[-1]["text"].rstrip("。…").endswith(("？", "?"))
                 for pc in self.pb.pieces(a["toks"]):
                     self.grain.add(self.sym(pc, q), "そのまま")
+        r = self.self_answer(text)                          # I39a: 自分への問いは、自分の板（プロフィールの「自分のこと」）の所から
+        if r is not None:
+            return self._end_turn(self._name(r))
         return self._end_turn(self._name(self.checked_reply(text)))
+
+    # ---- I39a: 自分の板（プロフィールの「自分のこと」）で、自分への問いに答える ----
+    sb = None                                               # self_board.SelfBoard（--profile）
+    _last_form = None                                       # 前の返事の形（自分の板で答えた時だけ）
+
+    def self_answer(self, text):
+        """問いの語・はい/いいえで自分のことを聞かれたら、自分の板から話題に近い所を（近さ × 重みの割合で）選び、
+        形の候補（言い切り・説明・これから・問い返し・説明+これから+問い）を返事の点 + 形の経験で比べて言う。
+        近い所が無ければ None（今までの返し方に任せる）。"""
+        if self.sb is None or self._plain:
+            return None
+        toks = CB.to_toks(self.nlp(text))
+        qt = D.q_type(toks, text).split(":")[0]
+        wh = [t for t in toks if t["dep"] in ("nsubj", "dislocated") and t["lemma"] in SB.SKIP and t["lemma"] not in C2.YOU]
+        rest = [t for t in toks if t not in wh]             # 「どっちが好き？」の「どっち」は人を指す主語ではない
+        if qt not in ("問いの語", "はい/いいえ") or not self.about_me(rest):
+            return None
+        s = self.sb.pick(toks)
+        if s is None:
+            return None
+        _, v, how, pc = s
+        head = ""
+        if qt == "はい/いいえ":                              # 問いの述語と同じ述語の所で答える時だけ、はい/いいえ の感動詞を付ける
+            qp = {t["lemma"] for t in toks if t["pos"] in ("VERB", "ADJ")}
+            if (qp & set(self.sb.lem[pc["p"]])) - SB.LIGHT:
+                head = self.intj("はい/いいえ", "否定" if pc["p"].endswith(SB.NEG) else "肯定")
+        for t in toks:
+            if t["pos"] in C2.NOUN:
+                self.you[("名", t["lemma"])] += 1
+        self.conv["lines"].append(dict(text=text, toks=toks, who="人"))
+        best, tried = None, []
+        for f, line, _ in self.sb.forms(pc, head):
+            if self.dark_line(line):                        # 前に指摘された行は言わない
+                tried.append(f"{f} 指摘された行")
+                continue
+            lt = CB.to_toks(self.nlp(line))
+            self.conv["lines"].append(dict(text=line, toks=lt, who="ボット"))
+            sc = self.value(lt, line) + self.sb.form_score(f)
+            self.conv["lines"].pop()
+            tried.append(f"{f} {sc:.2f}")
+            if best is None or sc > best[0]:
+                best = (sc, f, line, lt)
+        if best is None:
+            self.conv["lines"].pop()
+            return None
+        sc, f, line, lt = best
+        self.conv["lines"].append(dict(text=line, toks=lt, who="ボット"))
+        why = (f"自分の板: 「{self.sb.surf(pc)}」（{pc['item']}・{pc['time']}、重み {pc['w']:.1f}、近さ {v:.2f}: "
+               f"「{how[0]}」と「{how[1]}」が{how[2]}）、形 {f}（{'・'.join(tried)}）")
+        return dict(line=line, tries=0, breaks=[], sim=0, why=why, form=f)
 
     def _end_turn(self, out):
         if out.pop("explored", False):                      # I35t: 言ってみた行の所は全部、確かめ中にする
@@ -562,6 +622,8 @@ class Bot3(C2.Bot2):
         pcs = self.pb.pieces(toks)
         out = []
         if has_error:
+            if self.sb is not None and self._last_form:
+                self.sb.note(self._last_form, "指摘")
             self.mark_line(bots[-1]["text"])
             out.append(("行", bots[-1]["text"]))
             tgt = [pc for pc in pcs if odd and ((pc["ns"] + pc["c"] + pc["ps"]) in odd or (len(pc["ns"]) >= 2 and pc["ns"] in odd))]
@@ -756,6 +818,8 @@ class Bot3(C2.Bot2):
         if not tgt and pcs:                                 # 指摘された語が分からない（「え？」）: 自分でいちばん怪しいと見る所
             tgt = [max(pcs, key=self.p_point)]
         qa = self._is_q(a["toks"])
+        if self.sb is not None and self._last_form:          # I39a: 自分の板で答えた形が指摘された
+            self.sb.note(self._last_form, "指摘")
         self.mark_line(a["text"].strip("「」"))              # I37a: 行のまるごとも、指摘された行として残す
         for pc in tgt:                                      # 1. 経験を足す
             self.grain.add(self.sym(pc, qa), "指摘")
@@ -816,6 +880,8 @@ def main():
     ap.add_argument("--reader", default="ginza", choices=("ginza", "own"), help="I36: 読み手。own = GiNZA を使わない読み手")
     ap.add_argument("--quiet_ok", action="store_true", help="相手が指摘しなかった返事の所を「そのまま」の経験として足す")
     ap.add_argument("--rounds", type=int, default=1, help="--say を何回くり返すか（会話をまたいで変わるかを見る）")
+    ap.add_argument("--profile", help="I39a: プロフィール（assets/characters/*.json）の「自分のこと」から自分の板を始め、自分への問いに答える")
+    ap.add_argument("--self_attrs", help="I39a: 自分の板の近さに使う語板（content_boards.json）。無ければ --attrs")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
     a = ap.parse_args()
     if a.reader == "ginza":
@@ -845,6 +911,8 @@ def main():
     bot.conv_share = a.conv_share
     if a.uptake:
         bot.uptake = json.load(open(a.uptake, encoding="utf-8"))
+    if a.profile:
+        bot.sb = SB.SelfBoard(nlp, works, a.profile, attrs=SB.load_attrs(a.self_attrs) if a.self_attrs else bot.attrs)
     print(f"（読み込み {bot.load_s:.0f} 秒）", flush=True)
     log = ["# チャットボット 3 の記録（非公開）", "", f"- 本: {len(works)} 作品、振り返りの回数 {a.budget}、"
            + ("I34d の決め方" if a.self_lines else "振り分けのグレイン"), ""]
