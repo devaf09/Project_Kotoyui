@@ -51,7 +51,10 @@ TEACHER = (
     "4. 間違いが無ければ「うんうん、自然だね！」のように褒める。\n"
     "出力は次の JSON だけ:\n"
     '{"has_error": true または false, "odd_part": "ボットの返事の中のおかしい所（無ければ空）", '
+    '"kind": "文法 か 言い方 か つながり か 足りない（間違いの種類。無ければ空）", '
     '"suggested_reply": "自然な返事の例（無ければ空）", "intervention_message": "ボットへの優しいことば"}\n'
+    "kind の決め方: 文法 = 助詞・活用・語の組み合わせの誤り。言い方 = 意味は通るが、ふつうはそう言わない言葉づかい。"
+    "つながり = 文はふつうだが、前の相手の行に答えていない・話が飛ぶ。足りない = 文はふつうだが、短すぎる・素っ気ない。\n"
 )
 STAGES = {
     1: "今の段: 1（はじめ）。文法と言い方だけを見る。話のつながりは少しずれていても間違いにしない。",
@@ -245,7 +248,12 @@ def main():
                     c["先生の見立てを捨てた"] += 1
                     log.append(f"  - 先生（段 {stage}）: 見立てを捨てた（{bad}）")
                 if ev is not None and ev["has_error"]:
-                    got = bot.taught(True, ev.get("odd_part", ""), "" if a.no_model_reply else ev.get("suggested_reply", ""))
+                    kind = str(ev.get("kind") or "").strip()
+                    c.setdefault("先生の種類", {})
+                    c["先生の種類"][kind or "なし"] = c["先生の種類"].get(kind or "なし", 0) + 1
+                    # I37e: 所（名詞+助詞+述語）のせいにするのは、文法・言い方の指摘だけ。つながり・足りないは行のまるごとの経験にだけ入れる
+                    odd = ev.get("odd_part", "") if kind in ("文法", "言い方") else ""
+                    got = bot.taught(True, odd, "" if a.no_model_reply else ev.get("suggested_reply", ""))
                     c["先生の指摘"] += 1
                     streak = 0
                     log.append(f"  - 先生（段 {stage}）: {ev.get('intervention_message', '')} ／ 経験: {'・'.join(k + ':' + w for k, w in got) or 'なし'}")
