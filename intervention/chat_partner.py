@@ -65,7 +65,7 @@ def teacher_eval(host, model, history, reply, stage):
     hist = "\n".join(history[-6:])
     msgs = [dict(role="system", content=TEACHER + STAGES[stage]),
             dict(role="user", content=f"会話の流れ:\n{hist}\n\nボットの返事:\n{reply}")]
-    text = ollama_chat(host, model, msgs, temperature=0.2, first_line=False, num_predict=512, fmt="json")
+    text = ollama_chat(host, model, msgs, temperature=0.2, first_line=False, num_predict=2048, fmt="json")
     j = text[text.find("{"): text.rfind("}") + 1] if "{" in text else ""
     try:
         r = json.loads(j)
@@ -85,27 +85,39 @@ def teacher_eval(host, model, history, reply, stage):
     return r, ""
 
 
-def ollama_chat(host, model, messages, temperature=0.7, first_line=True, num_predict=80, fmt=None, tries=3):
-    """考えてから答える型のモデル（Qwen3・R1 系）は、考えに num_predict を使い切って本文が空になる。
-    考えを止め（think: false）、それでも本文が空なら問い直す。最後まで空なら "" を返す（代わりの返事を作らない。数に残す）。"""
+def ollama_chat(host, model, messages, temperature=0.7, first_line=True, num_predict=1024, fmt=None, tries=3, think=True):
+    """考えてから答える型のモデル（Qwen3・R1 系）は、考えを別の欄（message.thinking）に分けて返す。考えは止めずに捨て、本文だけ使う。
+    （think: false にすると、考えを英語の本文として書き出すモデルがある。）本文が空か、日本語で始まらない（考えが漏れた）なら問い直す。
+    最後まで駄目なら "" を返す（代わりの返事を作らない。数に残す）。"""
     for k in range(tries):
-        opts = dict(model=model, messages=messages, stream=False, think=False,
+        opts = dict(model=model, messages=messages, stream=False,
                     options=dict(temperature=temperature, num_predict=num_predict * (k + 1)))
+        if think is not None:
+            opts["think"] = think
         if fmt:
             opts["format"] = fmt
         try:
             out = _post(host, opts)
-        except urllib.error.HTTPError:                     # 考えを止められないモデルは think を外して問い直す
-            opts.pop("think")
+        except urllib.error.HTTPError:                     # 考えの指定を受けないモデルは、指定を外して問い直す
+            opts.pop("think", None)
             out = _post(host, opts)
         text = out["message"]["content"].strip()
-        if "</think>" in text:                               # 考えの部分を本文に出すモデルは、その後ろだけ
+        if "</think>" in text:                               # 考えを本文に出すモデルは、その後ろだけ
             text = text.split("</think>", 1)[1].strip()
         elif "<think>" in text:                              # 考えの途中で切れた
             text = ""
-        if text:
-            return text if not first_line else text.splitlines()[0].strip()
+        if first_line and text:
+            text = text.splitlines()[0].strip()
+        if text and (fmt or ja(text)):
+            return text
     return ""
+
+
+def ja(text):
+    """日本語の行か: かな・漢字の字が、英字より多い。"""
+    n = sum(1 for ch in text if "\u3040" <= ch <= "\u30ff" or "\u4e00" <= ch <= "\u9fff")
+    e = sum(1 for ch in text if ch.isascii() and ch.isalpha())
+    return n > e
 
 
 def _post(host, body):
@@ -134,8 +146,10 @@ def main():
     ap.add_argument("--no_one_clause", action="store_true")
     ap.add_argument("--teacher", help="I35z: 先生役のモデル（Ollama の名前）。毎回の返事を見て、指摘をボットの経験に足す")
     ap.add_argument("--reader", default="ginza", choices=("ginza", "own"), help="I36: own = GiNZA を使わない読み手")
+    ap.add_argument("--think", default="on", choices=("on", "off", "unset"), help="考える型のモデルの考え: on = 考えて本文だけ使う")
     ap.add_argument("--no_model_reply", action="store_true", help="先生のお手本の返事を経験に足さない")
     a = ap.parse_args()
+    ollama_chat.__defaults__ = ollama_chat.__defaults__[:-1] + ({"on": True, "off": False, "unset": None}[a.think],)
     import chat_bot3 as B3
     import i35_route_grain as R
     works = json.load(open(a.cache, encoding="utf-8"))
