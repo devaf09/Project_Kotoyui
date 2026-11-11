@@ -527,6 +527,10 @@ class Bot3(C2.Bot2):
         return v
 
     def recall_answer(self, text):
+        # I44d: 「私の誕生日はいつか知ってる？」「うちの猫の名前、何だった？」も思い出しの問い（私の・うちの がある時だけ。「〇〇って知ってる？」は物知りの問い）
+        if any(x in text for x in ("私の", "うちの")) and any(c in text for c in ("知ってる", "何だった", "なんだった")):
+            for c in ("知ってる", "何だった", "なんだった"):
+                text = text.replace(c, "覚えてる")
         if self.imp is None or self._plain or not any(c in text for c in self.RECALL_CUE):
             return None
         import re as _re
@@ -550,7 +554,7 @@ class Bot3(C2.Bot2):
         names = {x["value"] for x in self.imp.people.get("相手", []) if x["kind"] == "名前"}
         if "名前" not in text and ("私のこと" in text or any(w in names for w in ws)):
             text = text + "（名前）"
-            ws = [w for w in ws if w not in names]
+        ws = [w for w in ws if w not in names]              # I44d: 「私の名前、みさきって覚えてる？」の みさき は誰の名前でなく、答えの候補
         whose = None
         wh_plan = any(w in text for w in ("どこ", "いつ", "何時", "何曜", "何日"))   # I41c: 「どこに行くか覚えてる？」は予定の問い
         if wh_plan and "名前" not in text and "誕生日" not in text:
