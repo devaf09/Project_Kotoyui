@@ -311,8 +311,25 @@ class Bot3(C2.Bot2):
         if not self.conv["lines"]:                          # 新しい会話: この会話で指摘された行は空にする
             self.conv_dark = set()
             self.conv_asked = set()
+        if self.use_restate and getattr(self, "_prev_recall", False) and not fixed:
+            # I46k: 思い出しの答えへの答え合わせ（「正解！よく覚えてるね。」）は受けるだけにし、残りの文（「モモ、今日も機嫌がいいよ。」）に返す
+            sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
+            chk = lambda x: x.strip().lstrip("うんええそう、！! 「").startswith(("正解", "当たり", "覚えてくれ", "よく覚えて", "すごい", "そうそう")) \
+                or any(w in x for w in ("正解", "覚えてくれ", "よく覚えて"))
+            rest = [x for x in sents if not chk(x)]
+            if len(rest) < len(sents):
+                if rest:
+                    text = "".join(rest).strip()
+                else:
+                    h = self.intj("問いでない", "相槌")
+                    line = (h or "うん") + "。"
+                    self.conv["lines"] += [dict(text=text, toks=CB.to_toks(self.nlp(text)), who="人"),
+                                           dict(text=line, toks=CB.to_toks(self.nlp(line)), who="ボット")]
+                    self._prev_recall = False
+                    return dict(line=line, tries=0, breaks=[], sim=0, why="思い出しの答え合わせなので、相槌で受ける")
         snap = (list(self.conv["lines"]), list(getattr(self, "trial", [])), getattr(self, "_asked_attr", None), self.asked)
         out = self._reply_dark(text)
+        self._prev_recall = bool(out.get("recall"))
         if self.use_good and len(self.conv["lines"]) >= 2 and not out.get("form") and not out.get("recall"):  # I37b（I39a: 自分の板で答えた時は、形の候補どうしで比べ済み）: ほかの返し方（行づくり）とも比べ、見込みの点の大きい方を言う
             v0 = self.value(self.conv["lines"][-1]["toks"], out["line"])
             keep = (out, list(self.conv["lines"]), list(self.trial), getattr(self, "_asked_attr", None), self.asked)
@@ -1081,9 +1098,19 @@ class Bot3(C2.Bot2):
                     if root is not None and root["pos"] in L.PRED and ro:
                         e = C2.S.ratio(self.G, C2.Board(), ("有", ro, root["lemma"]), ("出", root["lemma"]))
                         ok = react(e, 1.0)[0] < react(e, 0.0)[0]
+                    self._ctx_noun = ctx[1]
                     ctx = ctx[1] + ctx[2] + "、" if ok else ""
             else:
                 ctx = ""
+        self.__dict__.pop("_ctx_noun", None)
+        ctx_noun = ""
+        if ctx == "" and prev_human:                        # I46k: 相手の話の語（助詞を問わず、いちばん珍しい名詞）
+            names_ = {x["value"] for x in self.imp.people.get("相手", []) if x["kind"].startswith("名前")} if getattr(self, "imp", None) is not None else set()
+            cand = [t for t in CB.to_toks(self.nlp(prev_human)) if t["pos"] == "NOUN" and t["lemma"] not in body and t["lemma"] not in C2.YOU
+                    and t["lemma"] not in names_ and t["lemma"] not in self.imp_time and t["lemma"] not in ("時", "こと", "もの", "の", "話")
+                    and not any(ch.isdigit() for ch in t["text"])]
+            if cand:
+                ctx_noun = max(cand, key=lambda t: self.idf.get(t["lemma"], 0.0))["text"]
         for tail in ("だけど、君は", "けど、君は", "。君は", "、君は"):   # 自分の板の問い返しの形（「…だけど、君は？」）の後ろは、聞き返された所でない
             if body.endswith(tail) and len(body) > len(tail) + 1:
                 body, sent = body[: -len(tail)], body[: -len(tail)] + "。"
@@ -1167,6 +1194,8 @@ class Bot3(C2.Bot2):
                     bx = max(e.get("B", {}).items(), key=lambda x: x[1], default=(None, 0))[0]
                     desc = "、".join(x for x in ((bx.split(":", 1)[-1] + "もの") if bx else "", (cl_.split(":", 1)[-1].split("(")[0] + "の") if cl_ else "") if x)
                     ctx = wn["text"] + "は" + desc + "で、" if desc and not body.startswith(wn["text"]) else ""
+                if not ctx and ctx_noun:                    # I46k: 語板でも言えない時は、相手の話の語につないで言い直す（「冬の話で、雪は消えるってこと。」）
+                    ctx = ctx_noun + "の話で、"
             line = (head + "、" if head else "") + ctx + body + "ってこと。"
             why = "自分の行「" + sent.strip() + "」を言い直す"
         if self.dark_line(line):
