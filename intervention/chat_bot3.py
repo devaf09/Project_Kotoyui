@@ -527,19 +527,20 @@ class Bot3(C2.Bot2):
                 rest = acc
                 for w in self.imp_time + ("、",):
                     rest = rest.replace(w, "")
-                if len([ch for ch in rest if not ch.isdigit()]) >= 3:
-                    break
+                if len([ch for ch in rest if not ch.isdigit()]) >= 3 and (any(ch.isdigit() for ch in acc) or not any(ch.isdigit() for ch in v)):
+                    break                                   # I46j: 数のある節（3月5日）があれば、そこまで入れる
             v = acc.lstrip("はもがを、 ")
         for _ in range(3):
             for e in self.ENDS:
                 if v.endswith(e) and len(v) > len(e) + 1:
                     v = v[: -len(e)].rstrip("、 ")
                     break
-        v = v.replace("私", "").replace("うちの", "").lstrip("、 ")
-        v = v.lstrip("のはもがをに、 ")
+        v = re.sub(r"(だ|なん?だ)?から覚え.*$", "", v).rstrip("、 ")   # I46j: 「3月5日だから覚えと」の後ろ
+        v = v.replace("私の", "").replace("うちの", "").replace("私", "").lstrip("、 ")   # I46j: 「私の」は「の」ごと外す
         for pre in ("そういえば", "そうそう", "ところで", "あ、", "ねえ"):   # I41h: 頭の前置き
             if v.startswith(pre):
-                v = v[len(pre):].lstrip("、 ")                         # I41d: 「私の誕生日」から 私 を外した時に残る「の」
+                v = v[len(pre):].lstrip("、 ")
+        v = v.lstrip("のはもがをに、 ")                     # I41d: 前置きを外した後に残る「の」も
         return v
 
     TOPIC_CUE = ("何話し", "何を話し", "何の話", "どんな話", "何について話", "なに話し", "何をしゃべ", "何しゃべ")
@@ -1052,7 +1053,7 @@ class Bot3(C2.Bot2):
                       st[0]["pos"] == "INTJ" and len(st) > 1 and st[1]["text"] in ("、", "。", "！", "…")):   # 頭の「はい、」を外す（I46h: 「あっという間」の あっ は外さない）
             st = st[1:]
         body = "".join(t["text"] for t in st).rstrip("。！!？?…")
-        if getattr(self, "_chunk", "") in ("こと", "もの", "の", "それ", "これ", "あれ", "やつ", "ほう"):   # I46i: 軽い語の聞き返しは言い直さない
+        if getattr(self, "_chunk", "") in ("こと", "もの", "の", "それ", "これ", "あれ", "やつ", "ほう", "時", "前", "とき"):   # I46i: 軽い語の聞き返しは言い直さない
             return None
         if body.endswith(("ってこと", "のかなって", "何のことかなって")):   # I46f: 言い直しの行をまた聞き返された: 重ねて言い直さず、作り直す
             return None
@@ -1099,7 +1100,10 @@ class Bot3(C2.Bot2):
         qx = getattr(self, "_qtext", "")
         q0 = re.split(r"[、。！？!?「」『』\s]", qx.split("って")[0])[-1] if "って" in qx else ""
         wt = next((t for t in st if t["pos"] == "NOUN" and t["text"] in (k0, q0)), None)
-        if not q_own and wt is not None and wt["lemma"] in att:
+        imp_names = {x["value"] for x in self.imp.people.get("相手", []) if x["kind"].startswith("名前")} if getattr(self, "imp", None) is not None else set()
+        if any(n_ in body for n_ in imp_names) and any(t["lemma"] in ("私", "僕") for t in st):
+            return None                                     # I46j: 相手の名前を自分の名として言った行（「私はみさきっていう」）は言い直さない
+        if not q_own and wt is not None and wt["lemma"] in att and wt["text"] not in imp_names:   # I46j: 名前（モモ）は語板で説明しない
             # I46h: 自分の行の一語（「電気って？」）を聞き返された: 語板の属性（よく受ける動き・クラス）でその語を説明する
             e = att[wt["lemma"]]["attrs"]
             mv = max(e.get("C", {}).items(), key=lambda x: x[1], default=(None, 0))[0]
@@ -1155,17 +1159,14 @@ class Bot3(C2.Bot2):
             body = cl if len(cl) >= 2 else body
             if not ctx and not mine:                        # I46i: 前に置く語が無く、元の行をそのまま言うだけになる: 中の名詞を語板の属性で説明するか、作り直す
                 wn = next((t for t in st if t["pos"] == "NOUN" and t["lemma"] in att and t["lemma"] not in ("こと", "もの")), None)
-                if wn is None:
-                    return None
-                e = att[wn["lemma"]]["attrs"]
-                cl_ = max(e.get("D", {}).items(), key=lambda x: x[1], default=(None, 0))[0]
-                bx = max(e.get("B", {}).items(), key=lambda x: x[1], default=(None, 0))[0]
-                if not (cl_ or bx):
-                    return None
-                desc = "、".join(x for x in ((bx.split(":", 1)[-1] + "もの") if bx else "", (cl_.split(":", 1)[-1].split("(")[0] + "の") if cl_ else "") if x)
-                ctx = wn["text"] + "は" + desc + "で、" if not body.startswith(wn["text"]) else ""
-                if not ctx:
-                    return None
+                if wn is None:                              # I46j: 語板に無い時は、そのまま言い直す（作り直しにすると「はい、〜の？」が戻った）
+                    wn = None
+                if wn is not None:
+                    e = att[wn["lemma"]]["attrs"]
+                    cl_ = max(e.get("D", {}).items(), key=lambda x: x[1], default=(None, 0))[0]
+                    bx = max(e.get("B", {}).items(), key=lambda x: x[1], default=(None, 0))[0]
+                    desc = "、".join(x for x in ((bx.split(":", 1)[-1] + "もの") if bx else "", (cl_.split(":", 1)[-1].split("(")[0] + "の") if cl_ else "") if x)
+                    ctx = wn["text"] + "は" + desc + "で、" if desc and not body.startswith(wn["text"]) else ""
             line = (head + "、" if head else "") + ctx + body + "ってこと。"
             why = "自分の行「" + sent.strip() + "」を言い直す"
         if self.dark_line(line):
