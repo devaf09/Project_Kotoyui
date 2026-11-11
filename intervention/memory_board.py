@@ -247,7 +247,7 @@ class Important:
                    and t["pos"] != "NUM"]
         if tw and content:                                  # I40h: 時の語のほかに中身の名詞がある時だけ（「うん、明日のこと。」は入れない）
             out.append(("予定", text))
-        if any(c in re.sub(r"覚えて(る|くれ)", "", text) for c in ASK_KEEP) and not text.rstrip("。！!…").endswith(("？", "?")):   # 「覚えてる？」は問い（頼みではない）
+        if any(c in re.sub(r"覚えて(る|くれ|た|い)", "", text) for c in ASK_KEEP) and not text.rstrip("。！!…").endswith(("？", "?")):   # 「覚えてる？」は問い（頼みではない）
             out.append(("頼まれごと", text))
         if not out and any(t["lemma"] in ("私", "僕", "俺", "あたし", "うち") for t in toks) and any(t["lemma"] not in ("私", "僕", "俺", "あたし", "うち") for t in toks if t["pos"] in NOUN + ("PRON",)):
             out.append(("相手のこと", text))

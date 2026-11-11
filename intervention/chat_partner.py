@@ -166,6 +166,7 @@ def main():
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
+    ap.add_argument("--imp_p", type=float, default=0.9, help="I41e: 目印なしの行を、学んだ見込みで大事な板に入れる P の下限")
     ap.add_argument("--rev", action="store_true", help="I42e: 述語の形を、本で見ていない印の組は逆引き（意味の組 → 繋ぎの語と並び、i42_fused_flow）で作る")
     ap.add_argument("--learn_imp", action="store_true", help="I41a: 大事かどうかを、後で「覚えてる？」と聞かれたかから学び、目印に当たらない行も P(大事) が高ければ大事な板に入れる")
     ap.add_argument("--recall", action="store_true", help="I40d: 「覚えてる？」に大事な板・記憶板で答える（--important が要る）")
@@ -314,7 +315,7 @@ def main():
                             log.append(f"  - 大事さ: P(大事) {p_:.2f}（目印 {'あり' if mk else 'なし'}）")
                             # I41c: 問いの文と聞き返し（「〜って？」）は入れない。言った事実の文だけを入れる
                             fact = "".join(x for x in re.split(r"(?<=[。！!？?])", human) if x.strip() and not x.rstrip().endswith(("？", "?")))
-                            if p_ > 0.5 and not mk and fact.strip():   # 目印に当たらないが、学んだ見込みでは大事: 相手のこととして入れる
+                            if p_ > a.imp_p and not mk and fact.strip():   # 目印に当たらないが、学んだ見込みでは大事: 相手のこととして入れる
                                 imp.people.setdefault("相手", []).append(dict(kind="相手のこと", value=fact.strip(), keys=sorted(
                                     {f"名|{t['lemma']}" for t in hl["toks"] if t["pos"] in ("NOUN", "PROPN")}), convs=[ci + 1],
                                     t=time.time(), mentions=1, done=False, learned=True))
