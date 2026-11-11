@@ -266,7 +266,9 @@ class Important:
                    and t["pos"] != "NUM"]
         hearsay = re.search(r"(らしい|みたい|そうだ|そうよ|予報|天気|雨|雪|晴れ|曇)", text)   # I41h: 「明日は雨が降るらしい」は予定でない
         if tw and content and not hearsay:                  # I40h: 時の語のほかに中身の名詞がある時だけ（「うん、明日のこと。」は入れない）
-            out.append(("予定", text))
+            # I44e: 予定の値は、時の語のある文だけ（「いい靴だったから…。あ、そういえば私、みさきっていうの。」の後ろを付けない）
+            ss = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip() and any(w in x for w in tw)]
+            out.append(("予定", "".join(ss) or text))
         if any(c in re.sub(r"覚えて(る|くれ|た|い)", "", text) for c in ASK_KEEP) and not text.rstrip("。！!…").endswith(("？", "?")):   # 「覚えてる？」は問い（頼みではない）
             out.append(("頼まれごと", text))
         if not out and any(t["lemma"] in ("私", "僕", "俺", "あたし", "うち") for t in toks) and any(t["lemma"] not in ("私", "僕", "俺", "あたし", "うち") for t in toks if t["pos"] in NOUN + ("PRON",)):

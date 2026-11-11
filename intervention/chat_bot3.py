@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import math
 from collections import Counter
 import os
@@ -297,7 +298,9 @@ class Bot3(C2.Bot2):
         # I44b: 思い出しで答えたすぐ後に相手が「ううん・違う」と直したら、その項目を弱める（再記憶の逆）
         x = self._last_recall_item
         self._last_recall_item = None
-        if x is not None and text.lstrip("「 ").startswith(("ううん", "違う", "ちがう", "いや", "え、違", "そうじゃなく")):
+        first = re.split(r"(?<=[。！!？?])", text.strip())[0]
+        if x is not None and (text.lstrip("「 ").startswith(("ううん", "違う", "ちがう", "いや", "え、違", "そうじゃなく"))
+                              or first.rstrip().endswith(("って？", "って?"))):   # I44e: 聞き返し（「履こうって？」）も直しの合図
             x["mentions"] = max(1, x.get("mentions", 1) - 2)
             x["corrected"] = x.get("corrected", 0) + 1
         if not self.conv["lines"]:                          # 新しい会話: この会話で指摘された行は空にする
@@ -561,6 +564,7 @@ class Bot3(C2.Bot2):
             items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] in ("予定", "頼まれごと")
                      and (not ws or any(w in x["value"] for w in ws))] or \
                 [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "予定"]
+            items.sort(key=lambda x: -x.get("mentions", 1))   # I44e: 同じ問いに合う予定が 2 つあれば、多く言われた（再記憶された）方
         elif "名前" in text:
             whose = next((w for w in ws if w not in ("私", "うち", "僕", "俺", "あたし")), None)
             items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"].startswith("名前")
@@ -579,6 +583,7 @@ class Bot3(C2.Bot2):
         elif "予定" in text or any(w in self.imp_time for w in ws):
             items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] in ("予定", "頼まれごと")
                      and (not [w for w in ws if w != "予定"] or any(w in x["value"] for w in ws if w != "予定"))]
+            items.sort(key=lambda x: -x.get("mentions", 1))   # I44e
         if not wh_plan and "名前" not in text and "予定" not in text and not any(w in self.imp_time for w in ws):
             items = [x for x in items if not x["kind"].startswith("名前")] if ws else \
                 [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "名前"]   # 「私のこと覚えてる？」: 名前で答える
