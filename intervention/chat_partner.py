@@ -166,6 +166,7 @@ def main():
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
+    ap.add_argument("--learn_marks", action="store_true", help="I41k: 大事な板の目印を見込みの記号にし、種類ごとに後で聞かれた割合で入れるか決める")
     ap.add_argument("--imp_p", type=float, default=0.9, help="I41e: 目印なしの行を、学んだ見込みで大事な板に入れる P の下限。負なら I41i: 経験から（目印のある行と同じくらい後で聞かれる帯だけ）")
     ap.add_argument("--rev", action="store_true", help="I42e: 述語の形を、本で見ていない印の組は逆引き（意味の組 → 繋ぎの語と並び、i42_fused_flow）で作る")
     ap.add_argument("--learn_imp", action="store_true", help="I41a: 大事かどうかを、後で「覚えてる？」と聞かれたかから学び、目印に当たらない行も P(大事) が高ければ大事な板に入れる")
@@ -294,7 +295,18 @@ def main():
                     c["覚えてる？"] = c.get("覚えてる？", 0) + 1
                     c["大事な板にあった"] = c.get("大事な板にあった", 0) + (1 if found else 0)
                     log.append(f"  - 覚えてるかの問い: 大事な板に {'・'.join(x['kind'] + ':' + x['value'][:20] for x in found[:3]) or '無し'}")
-                got = imp.add("相手", human, hl["toks"], bot.pb.pieces(hl["toks"]), ci + 1)
+                pre = None
+                if learner is not None and a.learn_marks and not r.get("recall"):   # I41k: 目印を記号にして見込みを出し、種類ごとに経験で入れるか決める
+                    ks0 = imp.kinds(human, hl["toks"])
+                    pre = learner.see(human, hl["toks"], ci + 1, ti, marked=bool(ks0), kinds=[k for k, _ in ks0])
+                    allow = (lambda k, p0=pre[0]: learner.kind_ok(k, p0))
+                    dropped = [k for k, _ in ks0 if not allow(k)]
+                    if dropped:
+                        c["目印を経験で外した"] = c.get("目印を経験で外した", 0) + len(dropped)
+                        log.append(f"  - 大事な板: 目印 {'・'.join(dropped)} は経験で入れない")
+                    got = imp.add("相手", human, hl["toks"], bot.pb.pieces(hl["toks"]), ci + 1, allow=allow)
+                else:
+                    got = imp.add("相手", human, hl["toks"], bot.pb.pieces(hl["toks"]), ci + 1)
                 if learner is not None:                     # I41a: 大事さの経験と、学んだ見込みでの出し入れ
                     if r.get("recall"):
                         qs = human.split("ねえ、")[-1]
@@ -305,7 +317,7 @@ def main():
                         c["大事の経験"] = c.get("大事の経験", 0) + len(hit)
                         log.append(f"  - 大事さ: 問い「{qs[:30]}」→ 大事の経験 {len(hit)}（" + "・".join(h["text"][:20] for h in hit[:3]) + "）")
                     else:
-                        p_, sy_ = learner.see(human, hl["toks"], ci + 1, ti, marked=bool(got))
+                        p_, sy_ = pre if pre is not None else learner.see(human, hl["toks"], ci + 1, ti, marked=bool(got))
                         mk = bool(got)
                         if p_ is not None:
                             lab = "学んだ見込みで大事" if p_ > 0.5 else "学んだ見込みでふつう"

@@ -262,8 +262,10 @@ class Important:
             out.append(("相手のこと", text))
         return out
 
-    def add(self, who, text, toks, pieces, conv):
+    def add(self, who, text, toks, pieces, conv, allow=None):
         ks = self.kinds(text, toks)
+        if allow is not None:                               # I41k: 目印の種類のうち、経験で入れてよいとされたものだけ
+            ks = [(k, v) for k, v in ks if allow(k)]
         items = self.people.setdefault(who, [])
         got = []
         for kind, val in ks:
@@ -339,6 +341,8 @@ class ImportanceLearner:
                 self.df.update({t["lemma"] for t in ln["toks"] if t["pos"] in NOUN})
         self.seen = Counter()                               # この相手との会話に出た名詞
         self.asked_n = Counter()                            # I41b: 「覚えてる？」で聞かれた名詞
+        self.out_all = Counter()                            # I41j: 全部の行の、後で聞かれたか
+        self.out_kind = defaultdict(Counter)                # I41k: 目印の種類 × 見込みの高低 の、後で聞かれたか
         self.out_mark = Counter()                           # I41i: 目印のある行の、後で聞かれた(1)／聞かれず(0)
         self.out_bin = defaultdict(Counter)                 # I41i: 目印なしの行の、見込みの帯ごとの 後で聞かれたか
         self.log = []
@@ -384,13 +388,25 @@ class ImportanceLearner:
     # 行ごとに「見込み P の帯（0.1 刻み）」と「後で聞かれたか」を数え、目印のある行が後で聞かれた割合を物差しにする。
     # 目印なしの行は、その P の帯で後で聞かれた割合が、目印のある行の割合に届いていれば入れる（目印と同じくらい当たるなら入れる）。
     def _outcome(self, c, hit):
+        self.out_all[hit] += 1
+        for k in c.get("kinds") or ():
+            self.out_kind[(k.split("（")[0], self._hi(c.get("p")))][hit] += 1
         if c.get("marked"):
             self.out_mark[hit] += 1
         elif c.get("p") is not None:
             self.out_bin[min(int(c["p"] * 10), 9)][hit] += 1
 
+    def base(self):
+        n = sum(self.out_all.values())
+        return self.out_all[1] / n if n else 0.0
+
+    @staticmethod
+    def _hi(p):
+        return "無" if p is None else ("高" if p > 0.5 else "低")
+
     def insert_ok(self, p):
-        """目印なしの行を、見込み p で大事な板に入れてよいか。経験が無い帯では入れない。"""
+        """目印なしの行を、見込み p で大事な板に入れてよいか。経験が無い帯では入れない。
+        I41j: 帯の割合は、全部の行の聞かれた割合に 1 行ぶん寄せる（経験 1〜2 行の帯で たまたま届いた、を減らす）。"""
         if p is None:
             return False
         nm = sum(self.out_mark.values())
@@ -399,14 +415,29 @@ class ImportanceLearner:
         if not nm or not nb:
             return False
         rm = self.out_mark[1] / nm
-        return b[1] / nb >= rm
+        return (b[1] + self.base()) / (nb + 1) >= rm
+
+    def kind_ok(self, kind, p):
+        """I41k: 目印の種類（名前・予定・頼まれごと・相手のこと）を、手の決まりのまま入れずに経験で確かめる。
+        その種類（と見込みの高低）の行が後で聞かれた割合（全部の行の割合に 1 行ぶん寄せる）が、全部の行の割合より高ければ入れる。
+        経験の無いうちは目印のまま入れる（初めの手がかり）。"""
+        b = self.out_kind[(kind.split("（")[0], self._hi(p))]
+        n = sum(b.values())
+        if not n:
+            return True
+        r0 = self.base()
+        return (b[1] + r0) / (n + 1) > r0
 
     def line_stats(self):
-        return dict(目印あり={"聞かれた": self.out_mark[1], "聞かれず": self.out_mark[0]},
+        return dict(全部={"聞かれた": self.out_all[1], "聞かれず": self.out_all[0]},
+                    種類={f"{k}・{h}": {"聞かれた": v[1], "聞かれず": v[0]} for (k, h), v in sorted(self.out_kind.items())},
+                    目印あり={"聞かれた": self.out_mark[1], "聞かれず": self.out_mark[0]},
                     帯={f"{k / 10:.1f}": {"聞かれた": v[1], "聞かれず": v[0]} for k, v in sorted(self.out_bin.items())})
 
-    def see(self, text, toks, conv, turn, marked=False):
+    def see(self, text, toks, conv, turn, marked=False, kinds=None):
         sy, nouns = self.symbols(text, toks)
+        if kinds is not None:                               # I41k: 目印は見込みの記号の 1 つ
+            sy = sy + ["目印:" + k.split("（")[0] for k in sorted(set(kinds))] + ([] if kinds else ["目印:無し"])
         # I41h: 答え合わせの受け（「正解！よく覚えてくれたね」）と、問い・聞き返しだけの行は、経験にも見込みにもしない
         sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
         fact = [x for x in sents if not x.rstrip().endswith(("？", "?"))
@@ -414,7 +445,7 @@ class ImportanceLearner:
         if not fact:
             return None, sy
         p = self.p_imp(sy)
-        self.pending.append(dict(text=text, sy=sy, nouns=nouns, conv=conv, turn=turn, p=p, marked=marked))
+        self.pending.append(dict(text=text, sy=sy, nouns=nouns, conv=conv, turn=turn, p=p, marked=marked, kinds=list(kinds or [])))
         self.seen.update(nouns)
         return p, sy
 
