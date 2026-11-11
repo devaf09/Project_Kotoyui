@@ -455,16 +455,22 @@ class Bot3(C2.Bot2):
                 self.answer(a, b)
             # 自分の行の所（名詞+助詞+述語）や代名詞をそのまま「って」「？」で返されたら、その所への聞き返し。
             # 自分の行の一続き（「何を見の」）を返された時も、その中の所への聞き返し（I35o）
+            qtext = "".join(x for x in re.split(r"(?<=[。！!？?])", text) if x.rstrip().endswith(("？", "?")))
+            if self.use_restate:                            # I46i: 「会話って楽しいよね」は聞き返しでない（「？」で終わる文の中の「Xって」だけ）
+                cs = [c for c in cs if c[0] != "聞き返し" or (c[1] and any(t["lemma"] == c[1] and (t["text"] + "って" in qtext or t["text"] + "？" in qtext)
+                                                                          for t in a["toks"]))]
             chunk = ""
+            qtext = "".join(x for x in re.split(r"(?<=[。！!？?])", text) if x.rstrip().endswith(("？", "?")))
             for mk in ("って", "？", "?"):
-                if mk in text:
-                    c0 = text.split(mk, 1)[0].strip("「」『』 　")   # 「天気がなるの」って？ の閉じかっこも外す
+                if mk in qtext:
+                    c0 = qtext.split(mk, 1)[0].strip("「」『』 　")   # 「天気がなるの」って？ の閉じかっこも外す
                     if (len(c0) >= 2 or c0 and c0 == bots[-1]["text"].strip("「」？?。 ")) and c0 in bots[-1]["text"]:   # I46d: 1 字の語だけの行（「海？」）も
                         chunk = c0
                         break
             for pc in self.pb.pieces(a["toks"]):
                 for w in (pc["ns"] + pc["c"] + pc["ps"], pc["ns"]):
-                    if w + "って" in text or w + "？" in text or (chunk and w in chunk and len(w) >= 2):
+                    qs_ = [x for x in re.split(r"(?<=[。！!？?])", text) if x.rstrip().endswith(("？", "?"))]   # I46i: 聞き返しは「？」で終わる文だけ（「会話って楽しいよね」を取らない）
+                    if any(w + "って" in x or w + "？" in x for x in qs_) or (chunk and w in chunk and len(w) >= 2):
                         cs = [("聞き返し", pc["n"])] + [c for c in cs if c[0] != "短い問い返し"]
                         break
                 else:
@@ -598,6 +604,8 @@ class Bot3(C2.Bot2):
         names = {x["value"] for x in self.imp.people.get("相手", []) if x["kind"] == "名前"}
         if "名前" not in text and ("私のこと" in text or any(w in names for w in ws)):
             text = text + "（名前）"
+        allnames = {x["value"]: x for x in reversed(self.imp.people.get("相手", [])) if x["kind"].startswith("名前")}
+        nm_hit = [w for w in ws if w in allnames and "名前" not in text]   # I46i: 「モモのこと覚えてる？」: 名前の値そのものを聞かれた
         ws = [w for w in ws if w not in names]              # I44d: 「私の名前、みさきって覚えてる？」の みさき は誰の名前でなく、答えの候補
         whose = None
         wh_plan = any(w in text for w in ("どこ", "いつ", "何時", "何曜", "何日"))   # I41c: 「どこに行くか覚えてる？」は予定の問い
@@ -628,6 +636,8 @@ class Bot3(C2.Bot2):
         if not wh_plan and "名前" not in text and "予定" not in text and not any(w in self.imp_time for w in ws):
             items = [x for x in items if not x["kind"].startswith("名前")] if ws else \
                 [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "名前"]   # 「私のこと覚えてる？」: 名前で答える
+        if not items and nm_hit:
+            items = [allnames[nm_hit[0]]]
         qv = [t["lemma"] for t in qt if t["pos"] == "VERB" and t["lemma"] not in ("覚える", "する", "いる", "ある", "知る")]
         if qv and not wh_plan and "名前" not in text:      # I46g: 「海に行くの、覚えてる？」（動詞のある問い）: 同じ動詞のある予定を『相手のこと』より先に
             items = sorted(items, key=lambda x: (not (x["kind"] == "予定" and any(v[:1] in x["value"] for v in qv)), x["kind"] != "予定"))
@@ -1042,6 +1052,8 @@ class Bot3(C2.Bot2):
                       st[0]["pos"] == "INTJ" and len(st) > 1 and st[1]["text"] in ("、", "。", "！", "…")):   # 頭の「はい、」を外す（I46h: 「あっという間」の あっ は外さない）
             st = st[1:]
         body = "".join(t["text"] for t in st).rstrip("。！!？?…")
+        if getattr(self, "_chunk", "") in ("こと", "もの", "の", "それ", "これ", "あれ", "やつ", "ほう"):   # I46i: 軽い語の聞き返しは言い直さない
+            return None
         if body.endswith(("ってこと", "のかなって", "何のことかなって")):   # I46f: 言い直しの行をまた聞き返された: 重ねて言い直さず、作り直す
             return None
         if not body or len(body) < 2 and any(t["pos"] in ("VERB", "ADJ", "AUX") for t in st):
@@ -1141,6 +1153,19 @@ class Bot3(C2.Bot2):
                     cl = cl[: -len(tail)]
                     break
             body = cl if len(cl) >= 2 else body
+            if not ctx and not mine:                        # I46i: 前に置く語が無く、元の行をそのまま言うだけになる: 中の名詞を語板の属性で説明するか、作り直す
+                wn = next((t for t in st if t["pos"] == "NOUN" and t["lemma"] in att and t["lemma"] not in ("こと", "もの")), None)
+                if wn is None:
+                    return None
+                e = att[wn["lemma"]]["attrs"]
+                cl_ = max(e.get("D", {}).items(), key=lambda x: x[1], default=(None, 0))[0]
+                bx = max(e.get("B", {}).items(), key=lambda x: x[1], default=(None, 0))[0]
+                if not (cl_ or bx):
+                    return None
+                desc = "、".join(x for x in ((bx.split(":", 1)[-1] + "もの") if bx else "", (cl_.split(":", 1)[-1].split("(")[0] + "の") if cl_ else "") if x)
+                ctx = wn["text"] + "は" + desc + "で、" if not body.startswith(wn["text"]) else ""
+                if not ctx:
+                    return None
             line = (head + "、" if head else "") + ctx + body + "ってこと。"
             why = "自分の行「" + sent.strip() + "」を言い直す"
         if self.dark_line(line):
