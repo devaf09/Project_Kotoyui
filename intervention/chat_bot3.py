@@ -560,7 +560,8 @@ class Bot3(C2.Bot2):
             why = f"記憶板の「{name}」の段の明るい名詞（{'・'.join(f'{w}×{v:.2g}' for w, v in tp)}）から答える"
             if getattr(self.mem, "rehearse", False):
                 self.mem.recall([w for w, _ in tp])
-            self._last_topic = [w for w, _ in tp]           # I45b: 次の相手の行で直されたかを見る
+            if name == "さっき":                            # I45b: 次の相手の行で直されたかを見る（I46c: 話し相手は会話をまたいで覚えないので「さっき」だけ）
+                self._last_topic = [w for w, _ in tp]
         else:
             line, why = "ごめん、覚えてない。", f"記憶板の「{name}」の段に話題の名詞が無い"
         self.conv["lines"].append(dict(text=line, toks=CB.to_toks(self.nlp(line)), who="ボット"))
