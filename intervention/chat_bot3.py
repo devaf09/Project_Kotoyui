@@ -508,7 +508,8 @@ class Bot3(C2.Bot2):
         # I40f: 問いの種類と語は、思い出す目印（覚えて・だっけ）のある文だけから取る（「楽しみにするよ。ねえ、私の名前覚えてる？」の前置きを見ない）
         sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
         q = next((x for x in reversed(sents) if any(c in x for c in self.RECALL_CUE)), text)
-        q = q.split("ねえ、")[-1]
+        for pre in ("ねえ、", "ところで、", "ところで", "あ、", "そういえば、", "そうそう、"):   # I40g: 前置きを切る
+            q = q.split(pre)[-1]
         text = q
         qt = CB.to_toks(self.nlp(q))
         ws = [t["lemma"] for t in qt if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in ("私", "名前", "こと", "何")]
@@ -518,6 +519,8 @@ class Bot3(C2.Bot2):
             whose = next((w for w in ws if w not in ("私", "うち", "僕", "俺", "あたし")), None)
             items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"].startswith("名前")
                      and ((f"（{whose}）" in x["kind"]) if whose else x["kind"] == "名前")]
+            if not whose:                                   # I40g: 「私の名前」は、誰のでもない名前のうち、いちばん多く言われたもの
+                items.sort(key=lambda x: -x["mentions"])
             if not items and whose:                         # 「猫の名前」を「うちの猫はモモ」のような行で言っていた
                 items = [x for x in self.imp.find("相手", [whose]) if x["kind"] in ("相手のこと", "名前（" + whose + "）")]
         elif "予定" in text or any(w in self.imp_time for w in ws):

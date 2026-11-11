@@ -205,7 +205,7 @@ class Important:
         if len(keep) < len(sents):
             text = "".join(keep)
             toks = [t for t in toks if t["text"] in text]
-        if text.startswith(("正解", "そうそう", "当たり")):   # 答え合わせの受けは、大事なことではない
+        if text.lstrip("うんええそう、 ").startswith(("正解", "そうそう", "当たり", "覚えてくれ")):   # 答え合わせの受けは、大事なことではない
             return out
         nouns = [t for t in toks if t["pos"] in NOUN]
         if any(c in text for c in NAME_CUE):
@@ -223,9 +223,19 @@ class Important:
                     w = [t for t in toks if t["pos"] in NOUN + ("PRON",) and pre.endswith(t["text"])]
                     if w and w[-1]["lemma"] not in ("私", "名前", "こと"):
                         nm = [w[-1]["text"]]
-                        own = [t for t in toks if t["pos"] in NOUN and t["i"] < w[-1]["i"] and t["lemma"] not in ("私", "僕", "俺", "うち", "あたし", "名前")]
-                        if own and not whose:               # 「うちの猫はモモっていうの」: 猫の名前
-                            whose = own[-1]["lemma"]
+                        # I40g: 誰の名前かは「うちの猫」「猫の名前」のように の でつながる名詞か、前の文で飼っている物（「猫を飼ってるよ。モモって言うんだ」）から
+                        pre_t = pre
+                        for o in ("うちの", "私の", "うちで飼ってる", "飼ってる"):
+                            if o in text:
+                                aft = text.split(o, 1)[1]
+                                own = [t for t in toks if t["pos"] in NOUN and aft.startswith(t["text"])]
+                                if own and not whose:
+                                    whose = own[0]["lemma"]
+                        if not whose and "飼" in text:
+                            own = [t for t in toks if t["pos"] in NOUN and t["i"] < w[-1]["i"] and any(
+                                k["head"] == t["i"] and k["text"] == "を" for k in toks)]
+                            if own:
+                                whose = own[-1]["lemma"]
             if not nm and any(c in text for c in NAME_CUE):
                 nm = [_span(toks, t["i"]) for t in toks if t["pos"] == "PROPN"]
             if nm and nm[0]:
