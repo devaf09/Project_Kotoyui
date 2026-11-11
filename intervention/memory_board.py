@@ -308,6 +308,9 @@ def _bin(v, cuts):
     return str(len(cuts))
 
 
+LIGHT_N = ("私", "僕", "俺", "あたし", "うち", "君", "あなた", "こと", "もの", "名前", "何", "予定", "今日", "明日", "感じ", "話")
+
+
 class ImportanceLearner:
     """人の行を記号にし、後で相手がその中身を「覚えてる？」と聞いたら 大事、聞かれないまま AGE 会話たったら ふつう、の経験にする。
     記号は目印そのもの（時の語・名前の言い方・頼み）に加えて、名詞の珍しさ・新しさ・自分のことか・行の長さ。
@@ -324,18 +327,29 @@ class ImportanceLearner:
                 self.n_lines += 1
                 self.df.update({t["lemma"] for t in ln["toks"] if t["pos"] in NOUN})
         self.seen = Counter()                               # この相手との会話に出た名詞
+        self.asked_n = Counter()                            # I41b: 「覚えてる？」で聞かれた名詞
         self.log = []
 
     def symbols(self, text, toks):
+        # I41b: 問いの文（「君は明日何するの？」）は、言った事実の大事さを下げないように記号から外す
+        sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
+        fact = "".join(x for x in sents if not x.rstrip().endswith(("？", "?"))) or text
+        qa = fact != text
         nouns = [t["lemma"] for t in toks if t["pos"] in NOUN]
+        fn = [n for n in nouns if n in fact and n not in LIGHT_N]
+        text = fact
         sy = []
+        # I41b: I41a は言い方（名乗りの形）を学んでいた。中身の名詞そのもの（名詞:歯医者）と、
+        # 前に聞かれた名詞を含むか（聞かれた名詞:あり）を記号に足す。
+        sy += ["名詞:" + n for n in sorted(set(fn))[:4]]
+        sy.append("聞かれた名詞:" + ("あり" if any(self.asked_n.get(n) for n in fn) else "なし"))
         sy.append("時:" + ("あり" if any(w in text for w in TIME_W) else "なし"))
         sy.append("数:" + ("あり" if any(t["pos"] == "NUM" for t in toks) else "なし"))
         sy.append("名の言い方:" + ("あり" if any(c in text for c in ("っていう", "って言う", "名前は", "呼んで")) else "なし"))
         sy.append("頼み:" + ("あり" if any(c in text for c in ASK_KEEP) else "なし"))
         sy.append("自分:" + ("あり" if any(t["lemma"] in ("私", "僕", "俺", "あたし", "うち") for t in toks) else "なし"))
         sy.append("固有:" + ("あり" if any(t["pos"] == "PROPN" for t in toks) else "なし"))
-        sy.append("問い:" + ("あり" if any(x in text for x in ("？", "?")) else "なし"))
+        sy.append("問い:" + ("あり" if qa else "なし"))
         rare = max((math.log((self.n_lines + 1) / (self.df.get(n, 0) + 1)) for n in nouns), default=0.0)
         sy.append("珍しさ:" + _bin(rare, (4.0, 6.0, 8.0)))
         new = sum(1 for n in nouns if not self.seen.get(n)) / len(nouns) if nouns else 0.0
@@ -347,6 +361,9 @@ class ImportanceLearner:
         if not self.grain.n.get("大事") or not self.grain.n.get("ふつう"):
             return None
         sc = self.grain.scores(sy)
+        # I41b: 大事 20 対 ふつう 175 のように偏るので、全体の割合（前の見込み）を外して、記号の比だけで比べる
+        N = self.grain.N
+        sc = {k: v - math.log(self.grain.n[k] / N) + math.log(0.5) for k, v in sc.items()}
         m = max(sc.values())
         z = sum(math.exp(v - m) for v in sc.values())
         return math.exp(sc.get("大事", -1e9) - m) / z
@@ -361,6 +378,7 @@ class ImportanceLearner:
     def asked(self, words, value, conv, turn):
         """「覚えてる？」の問い: 前の人の行のうち、問いの語か、思い出した答えの中身を含む行を 大事 の経験にする。"""
         hit = []
+        self.asked_n.update(w for w in (words or []) if w not in LIGHT_N)
         for c in list(self.pending):
             if (c["conv"], c["turn"]) >= (conv, turn):
                 continue

@@ -539,7 +539,10 @@ class Bot3(C2.Bot2):
             if not whose:                                   # I40g: 「私の名前」は、誰のでもない名前のうち、いちばん多く言われたもの
                 items.sort(key=lambda x: -x["mentions"])
             if not items and whose:                         # 「猫の名前」を「うちの猫はモモ」のような行で言っていた
-                items = [x for x in self.imp.find("相手", [whose]) if x["kind"] in ("相手のこと", "名前（" + whose + "）")]
+                # I41b: 「猫を飼ってる」のように名前の無い行で答えない（「猫は〇〇」「猫の名前は〇〇」の形がある時だけ）
+                items = [x for x in self.imp.find("相手", [whose]) if x["kind"] == "名前（" + whose + "）" or
+                         (x["kind"] == "相手のこと" and re.search(whose + r"(の名前)?は([^、。！？は]{1,8}?)(だ|です|って|っていう|よ|ね|。|$)", x["value"])
+                          and not re.search(whose + r"(の名前)?は[^、。！？]*(飼|好き|いる|可愛|かわい)", x["value"]))]
         elif "予定" in text or any(w in self.imp_time for w in ws):
             items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] in ("予定", "頼まれごと")
                      and (not [w for w in ws if w != "予定"] or any(w in x["value"] for w in ws if w != "予定"))]

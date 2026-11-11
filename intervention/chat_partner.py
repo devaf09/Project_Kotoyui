@@ -239,7 +239,10 @@ def main():
         bot.conv["lines"] = []                              # 会話の行は会話ごとに空にする（経験・自覚・自分の板は持ち越す）
         bot.asked, bot.trial, bot._asked_attr = None, [], None
         human = rng.choice(openers)
-        msgs = [dict(role="system", content=system), dict(role="assistant", content=human)]
+        sys_c = system
+        if a.persona and ci % 5 == 2:                       # I41b: 誕生日を 3 回続けて言わなかったので、5 会話に 1 回は必ず言わせる
+            sys_c += "\n今回の会話のどこかで（3 往復目までに）、必ず「私の誕生日、3 月 5 日だから覚えといて」と言う。"
+        msgs = [dict(role="system", content=sys_c), dict(role="assistant", content=human)]
         c = dict(会話=ci + 1, 往復=0, 指摘=0, 受け=0, 中身なし=0, 先生の指摘=0, 先生の段=stage, 先生の見立てを捨てた=0, 相手の空=0,
                  繰り返し=0, 語の繰り返し=0, 新規性=0.0, 自分の板=0)
         said = []                                           # I38a: この会話の自分の行（繰り返しを数える）
