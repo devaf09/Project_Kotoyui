@@ -22,7 +22,7 @@ import re
 import os
 import time
 import math
-from collections import Counter
+from collections import Counter, defaultdict
 
 from board_ops import react
 
@@ -339,6 +339,8 @@ class ImportanceLearner:
                 self.df.update({t["lemma"] for t in ln["toks"] if t["pos"] in NOUN})
         self.seen = Counter()                               # この相手との会話に出た名詞
         self.asked_n = Counter()                            # I41b: 「覚えてる？」で聞かれた名詞
+        self.out_mark = Counter()                           # I41i: 目印のある行の、後で聞かれた(1)／聞かれず(0)
+        self.out_bin = defaultdict(Counter)                 # I41i: 目印なしの行の、見込みの帯ごとの 後で聞かれたか
         self.log = []
 
     def symbols(self, text, toks):
@@ -378,7 +380,32 @@ class ImportanceLearner:
         z = sum(math.exp(v - m) for v in sc.values())
         return math.exp(sc.get("大事", -1e9) - m) / z
 
-    def see(self, text, toks, conv, turn):
+    # I41i: 目印なしの行を入れる線（I41e の P 0.9）を手で置かず、経験から決める。
+    # 行ごとに「見込み P の帯（0.1 刻み）」と「後で聞かれたか」を数え、目印のある行が後で聞かれた割合を物差しにする。
+    # 目印なしの行は、その P の帯で後で聞かれた割合が、目印のある行の割合に届いていれば入れる（目印と同じくらい当たるなら入れる）。
+    def _outcome(self, c, hit):
+        if c.get("marked"):
+            self.out_mark[hit] += 1
+        elif c.get("p") is not None:
+            self.out_bin[min(int(c["p"] * 10), 9)][hit] += 1
+
+    def insert_ok(self, p):
+        """目印なしの行を、見込み p で大事な板に入れてよいか。経験が無い帯では入れない。"""
+        if p is None:
+            return False
+        nm = sum(self.out_mark.values())
+        b = self.out_bin[min(int(p * 10), 9)]
+        nb = sum(b.values())
+        if not nm or not nb:
+            return False
+        rm = self.out_mark[1] / nm
+        return b[1] / nb >= rm
+
+    def line_stats(self):
+        return dict(目印あり={"聞かれた": self.out_mark[1], "聞かれず": self.out_mark[0]},
+                    帯={f"{k / 10:.1f}": {"聞かれた": v[1], "聞かれず": v[0]} for k, v in sorted(self.out_bin.items())})
+
+    def see(self, text, toks, conv, turn, marked=False):
         sy, nouns = self.symbols(text, toks)
         # I41h: 答え合わせの受け（「正解！よく覚えてくれたね」）と、問い・聞き返しだけの行は、経験にも見込みにもしない
         sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
@@ -387,7 +414,7 @@ class ImportanceLearner:
         if not fact:
             return None, sy
         p = self.p_imp(sy)
-        self.pending.append(dict(text=text, sy=sy, nouns=nouns, conv=conv, turn=turn, p=p))
+        self.pending.append(dict(text=text, sy=sy, nouns=nouns, conv=conv, turn=turn, p=p, marked=marked))
         self.seen.update(nouns)
         return p, sy
 
@@ -402,6 +429,7 @@ class ImportanceLearner:
                 for _ in range(self.W_IMP):                 # I41d: 聞かれた 1 回が、ふつうの経験に埋もれないように重く
                     self.grain.add(c["sy"], "大事")
                 self.pending.remove(c)
+                self._outcome(c, 1)
                 hit.append(c)
                 self.log.append(("大事", c["text"], c["p"]))
         return hit
@@ -411,6 +439,7 @@ class ImportanceLearner:
             if conv - c["conv"] >= self.AGE:
                 self.grain.add(c["sy"], "ふつう")
                 self.pending.remove(c)
+                self._outcome(c, 0)
                 self.log.append(("ふつう", c["text"], c["p"]))
 
 
