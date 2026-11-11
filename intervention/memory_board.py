@@ -242,7 +242,9 @@ class Important:
                 out.append(("名前" + (f"（{whose}）" if whose else ""), nm[0]))
         tw = [t["text"] for t in toks if t["text"] in TIME_W or (t["pos"] == "NUM" and any(
             k["text"] in ("時", "日", "月") for k in toks if k["i"] == t["i"] + 1))]
-        if tw and any(t["pos"] in ("VERB", "NOUN") for t in toks if t["text"] not in TIME_W):
+        content = [t for t in toks if t["pos"] in NOUN and t["text"] not in TIME_W and t["lemma"] not in ("こと", "時", "日", "月", "予定", "私", "うち")
+                   and t["pos"] != "NUM"]
+        if tw and content:                                  # I40h: 時の語のほかに中身の名詞がある時だけ（「うん、明日のこと。」は入れない）
             out.append(("予定", text))
         if any(c in text for c in ASK_KEEP) and not text.rstrip("。！!…").endswith(("？", "?")):   # 「覚えてる？」は問い（頼みではない）
             out.append(("頼まれごと", text))
@@ -262,6 +264,12 @@ class Important:
                 if x["value"] == val:
                     return True
                 a, b = set(keys), set(x["keys"])
+                if kind == "予定":                          # I40h: 同じ時の語と同じ中身の名詞があれば同じ予定（言い方が違っても）
+                    ta = {w for w in TIME_W if w in val}
+                    tb = {w for w in TIME_W if w in x["value"]}
+                    na = {k for k in a if k.startswith("名|") and k.split("|")[-1] not in TIME_W}
+                    if ta & tb and na & b:
+                        return True
                 return kind == "予定" and bool(a) and len(a & b) / len(a | b) >= 0.5
             hit = next((x for x in items if same(x)), None)
             if hit:

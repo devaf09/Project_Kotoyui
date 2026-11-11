@@ -421,6 +421,10 @@ class Bot3(C2.Bot2):
         return out
 
     def _reply(self, text):
+        r = self.recall_answer(text)                        # I40h: 覚えているかの問いは、前の返事への指摘の扱いより先に見る
+        if r is not None:
+            self.trial = []
+            return self._end_turn(self._name(r))
         bots = [ln for ln in self.conv["lines"] if ln["who"] == "ボット"]
         hums = [ln for ln in self.conv["lines"] if ln["who"] == "人"]
         if bots and self.negx is not None:
@@ -491,7 +495,15 @@ class Bot3(C2.Bot2):
         segs = [x for x in v.replace("。", "、").split("、") if x]
         tseg = [x for x in segs if any(w in x for w in self.imp_time) or any(ch.isdigit() for ch in x)]
         if tseg:                                            # I40e: 予定は、時の語のある所だけ返す（「ううん、特にないよ。」の前置きを付けない）
-            v = "、".join(segs[segs.index(tseg[0]):])
+            acc = ""                                        # I40h: 時の語のある句から、中身の語が出るところまで（後ろの「仕事の合間に…」は付けない）
+            for seg in segs[segs.index(tseg[0]):]:
+                acc += ("、" if acc else "") + seg
+                rest = acc
+                for w in self.imp_time + ("、",):
+                    rest = rest.replace(w, "")
+                if len([ch for ch in rest if not ch.isdigit()]) >= 3:
+                    break
+            v = acc.lstrip("はもがを、 ")
         for _ in range(3):
             for e in self.ENDS:
                 if v.endswith(e) and len(v) > len(e) + 1:
@@ -501,7 +513,12 @@ class Bot3(C2.Bot2):
         return v
 
     def recall_answer(self, text):
-        if self.imp is None or self._plain or not any(c in text for c in self.RECALL_CUE) or not text.rstrip("。…").endswith(("？", "?")):
+        if self.imp is None or self._plain or not any(c in text for c in self.RECALL_CUE):
+            return None
+        import re as _re
+        qs = [x for x in _re.split(r"(?<=[。！!？?])", text) if x.strip()]
+        # I40h: 目印のある文が「？」で終わる問いの時だけ（「覚えてくれたね」「覚えてるね」は問いでない）
+        if not any(any(c in x for c in self.RECALL_CUE) and x.rstrip("。…」 ").endswith(("？", "?")) and "覚えてくれ" not in x for x in qs):
             return None
         toks = CB.to_toks(self.nlp(text))
         import re
