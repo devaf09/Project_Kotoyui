@@ -199,13 +199,14 @@ class Important:
         out = []
         # I40f: 問いの文（「覚えてる？」「〜って？」）は外し、同じ行の事実の文（「来週海に行くんだ。一緒に行く？」の前）だけを見る
         sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
-        keep = [x for x in sents if not x.rstrip("。！!…」 ").endswith(("？", "?"))]
+        keep = [x for x in sents if not x.rstrip("。！!…」 ").endswith(("？", "?"))
+                and not x.lstrip("うんええそう、 ").startswith(("正解", "当たり", "覚えてくれ"))]   # I40i: 答え合わせの文だけ外す
         if not keep:
             return out
         if len(keep) < len(sents):
             text = "".join(keep)
             toks = [t for t in toks if t["text"] in text]
-        if text.lstrip("うんええそう、 ").startswith(("正解", "そうそう", "当たり", "覚えてくれ")):   # 答え合わせの受けは、大事なことではない
+        if not text.strip("。！!、 あそういえば"):   # 答え合わせの受けは、大事なことではない
             return out
         nouns = [t for t in toks if t["pos"] in NOUN]
         if any(c in text for c in NAME_CUE):
@@ -231,8 +232,8 @@ class Important:
                                 own = [t for t in toks if t["pos"] in NOUN and aft.startswith(t["text"])]
                                 if own and not whose:
                                     whose = own[0]["lemma"]
-                        if not whose and "飼" in text:
-                            own = [t for t in toks if t["pos"] in NOUN and t["i"] < w[-1]["i"] and any(
+                        if not whose and "飼" in text:      # I40i: 「モモっていうの。かわいい猫を飼ってるんだ」のように後ろの文でも
+                            own = [t for t in toks if t["pos"] in NOUN and t["i"] != w[-1]["i"] and any(
                                 k["head"] == t["i"] and k["text"] == "を" for k in toks)]
                             if own:
                                 whose = own[-1]["lemma"]
@@ -246,7 +247,7 @@ class Important:
                    and t["pos"] != "NUM"]
         if tw and content:                                  # I40h: 時の語のほかに中身の名詞がある時だけ（「うん、明日のこと。」は入れない）
             out.append(("予定", text))
-        if any(c in text for c in ASK_KEEP) and not text.rstrip("。！!…").endswith(("？", "?")):   # 「覚えてる？」は問い（頼みではない）
+        if any(c in re.sub(r"覚えて(る|くれ)", "", text) for c in ASK_KEEP) and not text.rstrip("。！!…").endswith(("？", "?")):   # 「覚えてる？」は問い（頼みではない）
             out.append(("頼まれごと", text))
         if not out and any(t["lemma"] in ("私", "僕", "俺", "あたし", "うち") for t in toks) and any(t["lemma"] not in ("私", "僕", "俺", "あたし", "うち") for t in toks if t["pos"] in NOUN + ("PRON",)):
             out.append(("相手のこと", text))
@@ -297,6 +298,85 @@ class Important:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.people, f, ensure_ascii=False, indent=1)
+
+
+# ---- I41a: 大事かどうかを会話から学ぶ（大事さのグレイン） ----
+def _bin(v, cuts):
+    for i, c in enumerate(cuts):
+        if v < c:
+            return str(i)
+    return str(len(cuts))
+
+
+class ImportanceLearner:
+    """人の行を記号にし、後で相手がその中身を「覚えてる？」と聞いたら 大事、聞かれないまま AGE 会話たったら ふつう、の経験にする。
+    記号は目印そのもの（時の語・名前の言い方・頼み）に加えて、名詞の珍しさ・新しさ・自分のことか・行の長さ。
+    どの記号が大事さとつながるかは手で決めず、経験の器（I33 の CountGrain）が数える。"""
+    AGE = 3                                                 # この会話の数だけ聞かれなければ ふつう
+
+    def __init__(self, works=None):
+        import i33_predicate_grain as G
+        self.grain = G.CountGrain("事後")
+        self.pending = []                                   # まだ結果の分からない人の行
+        self.df, self.n_lines = Counter(), 0
+        for wk in works or []:
+            for ln in wk["lines"]:
+                self.n_lines += 1
+                self.df.update({t["lemma"] for t in ln["toks"] if t["pos"] in NOUN})
+        self.seen = Counter()                               # この相手との会話に出た名詞
+        self.log = []
+
+    def symbols(self, text, toks):
+        nouns = [t["lemma"] for t in toks if t["pos"] in NOUN]
+        sy = []
+        sy.append("時:" + ("あり" if any(w in text for w in TIME_W) else "なし"))
+        sy.append("数:" + ("あり" if any(t["pos"] == "NUM" for t in toks) else "なし"))
+        sy.append("名の言い方:" + ("あり" if any(c in text for c in ("っていう", "って言う", "名前は", "呼んで")) else "なし"))
+        sy.append("頼み:" + ("あり" if any(c in text for c in ASK_KEEP) else "なし"))
+        sy.append("自分:" + ("あり" if any(t["lemma"] in ("私", "僕", "俺", "あたし", "うち") for t in toks) else "なし"))
+        sy.append("固有:" + ("あり" if any(t["pos"] == "PROPN" for t in toks) else "なし"))
+        sy.append("問い:" + ("あり" if any(x in text for x in ("？", "?")) else "なし"))
+        rare = max((math.log((self.n_lines + 1) / (self.df.get(n, 0) + 1)) for n in nouns), default=0.0)
+        sy.append("珍しさ:" + _bin(rare, (4.0, 6.0, 8.0)))
+        new = sum(1 for n in nouns if not self.seen.get(n)) / len(nouns) if nouns else 0.0
+        sy.append("新しさ:" + _bin(new, (0.34, 0.67, 1.0)))
+        sy.append("長さ:" + _bin(len(text), (12, 25, 40)))
+        return sy, nouns
+
+    def p_imp(self, sy):
+        if not self.grain.n.get("大事") or not self.grain.n.get("ふつう"):
+            return None
+        sc = self.grain.scores(sy)
+        m = max(sc.values())
+        z = sum(math.exp(v - m) for v in sc.values())
+        return math.exp(sc.get("大事", -1e9) - m) / z
+
+    def see(self, text, toks, conv, turn):
+        sy, nouns = self.symbols(text, toks)
+        p = self.p_imp(sy)
+        self.pending.append(dict(text=text, sy=sy, nouns=nouns, conv=conv, turn=turn, p=p))
+        self.seen.update(nouns)
+        return p, sy
+
+    def asked(self, words, value, conv, turn):
+        """「覚えてる？」の問い: 前の人の行のうち、問いの語か、思い出した答えの中身を含む行を 大事 の経験にする。"""
+        hit = []
+        for c in list(self.pending):
+            if (c["conv"], c["turn"]) >= (conv, turn):
+                continue
+            if (words and set(words) & set(c["nouns"])) or (value and value in c["text"]):
+                self.grain.add(c["sy"], "大事")
+                self.pending.remove(c)
+                hit.append(c)
+                self.log.append(("大事", c["text"], c["p"]))
+        return hit
+
+    def end_conv(self, conv):
+        for c in list(self.pending):
+            if conv - c["conv"] >= self.AGE:
+                self.grain.add(c["sy"], "ふつう")
+                self.pending.remove(c)
+                self.log.append(("ふつう", c["text"], c["p"]))
 
 
 def replay(path, works, pieces, forget=True, day=None):

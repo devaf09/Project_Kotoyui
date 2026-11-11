@@ -65,7 +65,7 @@ PERSONA = (                                                  # I40c: --persona�
     "\n\nあなた自身のこと（会話をまたいで同じ人として話す）:\n"
     "- 名前は「みさき」。会社員。猫を飼っていて、猫の名前は「モモ」。\n"
     "- 予定: 明日は 10 時から歯医者。来週の土曜日に友だちと海に行く。\n"
-    "- 覚えておいてほしいこと: 誕生日は 3 月 5 日。辛いものが苦手。\n"
+    "- 覚えておいてほしいこと: 誕生日は 3 月 5 日（1 回は必ず「誕生日 3 月 5 日だから覚えといて」と言う）。辛いものが苦手。\n"
     "決まりの追加:\n"
     "6. 3〜4 往復に 1 回ほど、上のどれか 1 つを自然に言う。毎回同じものにせず、名前・猫・予定・誕生日・苦手なもの を順に回す（「私、みさきっていうの」「明日 10 時から歯医者なんだ」「誕生日 3 月 5 日だから覚えといて」）。\n"
     "7. ときどき（4〜5 往復に 1 回ほど）、上のどれかを相手が覚えているか聞く。名前ばかりでなく、予定・猫の名前・誕生日も順に聞く（「私の名前、覚えてる？」「明日の予定、何だったっけ？」「うちの猫の名前、覚えてる？」）。"
@@ -165,6 +165,7 @@ def main():
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
+    ap.add_argument("--learn_imp", action="store_true", help="I41a: 大事かどうかを、後で「覚えてる？」と聞かれたかから学び、目印に当たらない行も P(大事) が高ければ大事な板に入れる")
     ap.add_argument("--recall", action="store_true", help="I40d: 「覚えてる？」に大事な板・記憶板で答える（--important が要る）")
     ap.add_argument("--persona", action="store_true", help="I40c: 話し相手を、名前・予定・頼みごとを持つ同じ人にし、ときどきそれを言わせ、覚えているか聞かせる")
     ap.add_argument("--important", help="I40c: 大事な板の置き場（JSON、非公開）。人の行から名前・予定・頼まれごと・相手のことを目印で入れる")
@@ -224,6 +225,10 @@ def main():
         import memory_board as MB
         imp = MB.Important(a.important)
     system = PARTNER + (PERSONA if a.persona else "")
+    learner = None
+    if a.learn_imp:
+        import memory_board as MB
+        learner = MB.ImportanceLearner(works)
     if a.recall:
         bot.imp, bot.mem = imp, mem
     openers = [x.strip() for x in open(a.openers, encoding="utf-8") if x.strip()]
@@ -270,7 +275,7 @@ def main():
             c["往復"] += 1
             if imp is not None:                             # I40c: 人の行の大事なこと／覚えているかの問いに、大事な板で答えられたか
                 hl = next(ln for ln in reversed(bot.conv["lines"]) if ln["who"] == "人")
-                if "覚えて" in human and ("？" in human or "?" in human):
+                if r.get("recall"):                         # I40i: 思い出しが動いた問いを数える（思い出しの条件にそろえる）
                     ws = [t["lemma"] for t in hl["toks"] if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in ("私", "名前")]
                     ws = ws or (["名前"] if "名前" in human else [])
                     found = imp.find("相手", ws) if ws else []
@@ -280,6 +285,28 @@ def main():
                     c["大事な板にあった"] = c.get("大事な板にあった", 0) + (1 if found else 0)
                     log.append(f"  - 覚えてるかの問い: 大事な板に {'・'.join(x['kind'] + ':' + x['value'][:20] for x in found[:3]) or '無し'}")
                 got = imp.add("相手", human, hl["toks"], bot.pb.pieces(hl["toks"]), ci + 1)
+                if learner is not None:                     # I41a: 大事さの経験と、学んだ見込みでの出し入れ
+                    if r.get("recall"):
+                        qs = human.split("ねえ、")[-1]
+                        ws = [t["lemma"] for t in B3.CB.to_toks(nlp(qs)) if t["pos"] in ("NOUN", "PROPN")
+                              and t["lemma"] not in ("私", "名前", "こと", "何", "予定", "うち")]
+                        val = r.get("recall_value", "")
+                        hit = learner.asked(ws, val, ci + 1, ti)
+                        c["大事の経験"] = c.get("大事の経験", 0) + len(hit)
+                        log.append(f"  - 大事さ: 問い「{qs[:30]}」→ 大事の経験 {len(hit)}（" + "・".join(h["text"][:20] for h in hit[:3]) + "）")
+                    else:
+                        p_, sy_ = learner.see(human, hl["toks"], ci + 1, ti)
+                        mk = bool(got)
+                        if p_ is not None:
+                            lab = "学んだ見込みで大事" if p_ > 0.5 else "学んだ見込みでふつう"
+                            c.setdefault("大事さ", {})
+                            k = ("目印あり・" if mk else "目印なし・") + lab
+                            c["大事さ"][k] = c["大事さ"].get(k, 0) + 1
+                            log.append(f"  - 大事さ: P(大事) {p_:.2f}（目印 {'あり' if mk else 'なし'}）")
+                            if p_ > 0.5 and not mk:         # 目印に当たらないが、学んだ見込みでは大事: 相手のこととして入れる
+                                imp.people.setdefault("相手", []).append(dict(kind="相手のこと", value=human, keys=sorted(
+                                    {f"名|{t['lemma']}" for t in hl["toks"] if t["pos"] in ("NOUN", "PROPN")}), convs=[ci + 1],
+                                    t=time.time(), mentions=1, done=False, learned=True))
                 for kind, val in got:
                     c.setdefault("大事な板に入れた", {})
                     c["大事な板に入れた"][kind] = c["大事な板に入れた"].get(kind, 0) + 1
@@ -336,6 +363,9 @@ def main():
         if pending is not None:                             # 会話の終わり: 相手の指摘が無かったので褒めを入れる
             stage, streak = praise(pending, stage, streak)
         c["新規性"] = round(c["新規性"] / max(1, c["往復"]), 3)
+        if learner is not None:
+            learner.end_conv(ci + 1)
+            c["大事さの経験"] = dict(learner.grain.n)
         if imp is not None:
             imp.save()
         if mem is not None:

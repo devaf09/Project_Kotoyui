@@ -564,7 +564,7 @@ class Bot3(C2.Bot2):
                 why = "大事な板にも記憶板にも、問いの語が無い"
         lt = CB.to_toks(self.nlp(line))
         self.conv["lines"].append(dict(text=line, toks=lt, who="ボット"))
-        return dict(line=line, tries=0, breaks=[], sim=0, why=why, recall=True)
+        return dict(line=line, tries=0, breaks=[], sim=0, why=why, recall=True, recall_value=items[0]["value"] if items else "")
 
     # ---- I39a: 自分の板（プロフィールの「自分のこと」）で、自分への問いに答える ----
     sb = None                                               # self_board.SelfBoard（--profile）
