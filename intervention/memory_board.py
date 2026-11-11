@@ -316,6 +316,7 @@ class ImportanceLearner:
     記号は目印そのもの（時の語・名前の言い方・頼み）に加えて、名詞の珍しさ・新しさ・自分のことか・行の長さ。
     どの記号が大事さとつながるかは手で決めず、経験の器（I33 の CountGrain）が数える。"""
     AGE = 3                                                 # この会話の数だけ聞かれなければ ふつう
+    W_IMP = 3                                               # I41d: 大事の経験 1 つを何回ぶんに数えるか
 
     def __init__(self, works=None):
         import i33_predicate_grain as G
@@ -383,7 +384,8 @@ class ImportanceLearner:
             if (c["conv"], c["turn"]) >= (conv, turn):
                 continue
             if (words and set(words) & set(c["nouns"])) or (value and value in c["text"]):
-                self.grain.add(c["sy"], "大事")
+                for _ in range(self.W_IMP):                 # I41d: 聞かれた 1 回が、ふつうの経験に埋もれないように重く
+                    self.grain.add(c["sy"], "大事")
                 self.pending.remove(c)
                 hit.append(c)
                 self.log.append(("大事", c["text"], c["p"]))

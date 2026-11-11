@@ -510,6 +510,7 @@ class Bot3(C2.Bot2):
                     v = v[: -len(e)].rstrip("、 ")
                     break
         v = v.replace("私", "").replace("うちの", "").lstrip("、 ")
+        v = v.lstrip("のはもがをに、 ")                         # I41d: 「私の誕生日」から 私 を外した時に残る「の」
         return v
 
     def recall_answer(self, text):
@@ -532,6 +533,11 @@ class Bot3(C2.Bot2):
         ws = [t["lemma"] for t in qt if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in ("私", "名前", "こと", "何")]
         items = self.imp.find("相手", ws) if ws else []
         # I40e: 問いの種類（名前・誰の名前・予定）に合う項目だけを選ぶ（合う項目が無ければ、別の項目を答えずに「覚えてない」）
+        # I41d: 「私のこと、みさきって覚えてる？」: 問いの語が名前の項目の名前そのものなら、名前の問い
+        names = {x["value"] for x in self.imp.people.get("相手", []) if x["kind"] == "名前"}
+        if "名前" not in text and ("私のこと" in text or any(w in names for w in ws)):
+            text = text + "（名前）"
+            ws = [w for w in ws if w not in names]
         wh_plan = any(w in text for w in ("どこ", "いつ", "何時", "何曜", "何日"))   # I41c: 「どこに行くか覚えてる？」は予定の問い
         if wh_plan and "名前" not in text and "誕生日" not in text:
             items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] in ("予定", "頼まれごと")

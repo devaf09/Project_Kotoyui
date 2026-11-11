@@ -318,7 +318,10 @@ class Bot2(CB.Bot):
     def rev_form(self, lemma, want):
         if getattr(self, "rev", None) is None:
             return None
-        pos = self.lpos.get(lemma, "VERB")
+        pos = self.lpos.get(lemma)
+        if pos not in ("VERB", "ADJ") or not self.rev.lem_n.get(lemma):
+            self.rev_log["述語でない"] += 1                    # I42g: 本で述語として出ていない語（名詞の「中」）は作らない
+            return None
         m = tuple(sorted(self.REV_MEAN[k] for k in L.MARKS if want.get(k) and not (k == "相" and pos != "VERB")))
         sy = ["位置:文末", "後ろ:。", "時:無し", "前の行:無し", "台詞:はい", "品詞:" + pos, "係り:ROOT", "語:" + lemma]
         if self._ff.wclass(lemma, pos) == "形な" and ("否定" in m or ("過去" in m and "丁寧" not in m)):
