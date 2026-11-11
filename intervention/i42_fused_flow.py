@@ -367,6 +367,14 @@ def run(works, hold=10, seed=0):
             per[lem][fl] += 1
     flat, fused, surf, fsurf = Flat(train), Fused(train), Surface(train), FlowSurface(train)
     rev = Reverse(train, fused)
+    # I42d: 二段。文脈 → 意味の組（経験の器）→ 逆引き（表+融合）。文脈から流れを直に当てるのと比べる
+    mc = Counter(meaning(fl, fs, _pos(sy)) for t in train for sy, _, fl, _, fs in t)
+    mkeep = {k for k, _ in mc.most_common(80)}
+    mg = G.CountGrain("全体")
+    for t in train:
+        for sy, _, fl, _, fs in t:
+            m_ = meaning(fl, fs, _pos(sy))
+            mg.add(sy, "・".join(m_) if m_ in mkeep else "他")
     res = Counter()
     ex = []
     for sy, lem, fl, s0, fs in test:
@@ -396,6 +404,12 @@ def run(works, hold=10, seed=0):
         if not seen:
             res["見ていない組・数"] += 1
             res["見ていない組・融合"] += pr == fl
+        sc_ = mg.scores(sy)
+        sc_.pop("他", None)
+        mp = tuple(x for x in max(sc_, key=sc_.get).split("・") if x)
+        res["二段・意味"] += mp == m
+        p2 = rev.table(lem, mp) if mp in rev.tab else rev.search(sy, mp)
+        res["二段・流れ"] += p2 == fl
         f0 = surf.form(lem, fl, _pos(sy))                             # 形を戻す（正しい流れを渡した時の、語幹の表記）
         res["形を戻す・語幹"] += f0 == s0
         res["形を戻す・語幹+流れ"] += (f0 + fsurf.form(fl, sy)) == s0 + "".join(fs)
