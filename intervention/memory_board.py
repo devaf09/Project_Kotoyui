@@ -161,6 +161,38 @@ class Memory:
             self.rehearsed += len(ks)
         return out
 
+    def topics(self, when, skip=(), n=2):
+        """I45a（設計の 7 の 4）: 「この前・さっき・今日・昨日 何話した？」に答える話題の名詞。
+        さっき = 今の会話（閉じていない 分・時）、今日 = 最後に日を閉じてから、昨日 = 最後に閉じた日の板、この前 = 1 つ前の会話（最後に閉じた時の板）。
+        名詞の鍵を、明るさ × 珍しさ（ふだんの会話で出にくい語ほど大きい）で並べる。段が無ければ、近い段に下がる。"""
+        def merge(*bs):
+            c = Counter()
+            for b in bs:
+                c.update(b)
+            return c
+        now = merge(self.open["分"], self.open["時"])
+        prev = self.boards["時"][-1]["keys"] if self.boards["時"] else {}
+        today = merge(self.open["日"], now)
+        yday = self.boards["日"][-1]["keys"] if self.boards["日"] else {}
+        order = {"さっき": [("さっき", now)], "今日": [("今日", today)],
+                 "昨日": [("昨日", yday), ("この前", prev), ("今日", today)],
+                 "この前": [("この前", prev), ("昨日", yday), ("今日", today)]}[when]
+        said = {n for lb in self.lines if lb["who"] == "人" for n in lb["nouns"]}   # 話題は、相手が口にした名詞から（自分の作った行の語は外す）
+        for name, keys in order:
+            sc = []
+            for k, v in keys.items():
+                if not k.startswith("名|"):
+                    continue
+                w = k.split("|", 1)[1]
+                if w in skip or w in LIGHT_N or w not in said or len(w) < 2 and not ("\u4e00" <= w <= "\u9fff"):
+                    continue
+                r = (self.base.get(k, 0) + self.seen.get(k, 0) + 0.5) / (self.base_n + self.seen_n + 1.0)
+                sc.append((v * -math.log(min(r, 0.999)), w, v))
+            sc.sort(reverse=True)
+            if sc:
+                return name, [(w, v) for _, w, v in sc[:n]]
+        return when, []
+
     def summary(self):
         return {lv: dict(枚=len(self.boards[lv]), 鍵=sum(len(b["keys"]) for b in self.boards[lv]),
                          薄れた=sum(b.get("faded", 0) for b in self.boards[lv])) for lv in LEVELS} | dict(行=len(self.lines), 再記憶=self.rehearsed)
@@ -265,6 +297,8 @@ class Important:
         content = [t for t in toks if t["pos"] in NOUN and t["text"] not in TIME_W and t["lemma"] not in ("こと", "時", "日", "月", "予定", "私", "うち")
                    and t["pos"] != "NUM"]
         hearsay = re.search(r"(らしい|みたい|そうだ|そうよ|予報|天気|雨|雪|晴れ|曇)", text)   # I41h: 「明日は雨が降るらしい」は予定でない
+        if "誕生日" in text or "記念日" in text:            # I45a: 誕生日の行は予定でなく頼まれごと・相手のこと
+            tw = []
         if tw and content and not hearsay:                  # I40h: 時の語のほかに中身の名詞がある時だけ（「うん、明日のこと。」は入れない）
             # I44e: 予定の値は、時の語のある文だけ（「いい靴だったから…。あ、そういえば私、みさきっていうの。」の後ろを付けない）
             ss = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip() and any(w in x for w in tw)]

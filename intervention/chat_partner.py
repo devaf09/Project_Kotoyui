@@ -140,6 +140,29 @@ def _post(host, body):
         return json.loads(r.read().decode("utf-8"))
 
 
+# I45a: 覚えているかの確かめの台本（話し相手への指示では聞いてくれないので、行を差し込む）。言う行 → 後の会話で聞く行。
+SCRIPT = {
+    "1:3": "あ、私、みさきっていうの。明日は10時から歯医者なんだ。",
+    "2:6": "ねえ、私の名前、覚えてる？",
+    "3:3": "そうだ、私の誕生日、3月5日だから覚えといて。",
+    "4:3": "うちの猫、モモっていうんだ。",
+    "4:8": "さっき何の話してたっけ？",
+    "5:6": "ねえ、私の誕生日、知ってる？",
+    "6:3": "来週の土曜日、友達と海に行くんだ。",
+    "7:6": "ラーメンって知ってる？",
+    "8:6": "うちの猫の名前、覚えてる？",
+    "9:4": "この前、何の話したか覚えてる？",
+    "10:6": "私の名前、みさきって覚えてる？",
+    "12:6": "海に行くの、覚えてる？",
+    "13:4": "この前、何話したっけ？",
+    "14:6": "私の誕生日はいつか知ってる？",
+    "16:6": "うちの猫の名前、何だった？",
+    "17:4": "今日、何の話したか覚えてる？",
+    "18:6": "明日の予定、何だったっけ？",
+    "20:6": "私のこと、覚えてる？",
+}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", required=True)
@@ -166,6 +189,7 @@ def main():
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
+    ap.add_argument("--script", help="I45a: 話し相手の行を、決まった会話・往復で差し替える台本（JSON {\"会話:往復\": \"行\"}、または default）")
     ap.add_argument("--rehearse", action="store_true", help="I44a: 思い出しで読み出した項目・記憶板で引っかかった鍵を再記憶する（残りやすくする）")
     ap.add_argument("--learn_w", action="store_true", help="I43a: 自分の板の掛け目（軽い語 0.3・項目 0.8・時 0.5）と近さの下限（0.15・6 割）を手で置かず、言って指摘された数から")
     ap.add_argument("--learn_marks", action="store_true", help="I41k: 大事な板の目印を見込みの記号にし、種類ごとに後で聞かれた割合で入れるか決める")
@@ -242,6 +266,10 @@ def main():
         learner = MB.ImportanceLearner(works)
     if a.recall:
         bot.imp, bot.mem = imp, mem
+    script = {}
+    if a.script:                                            # I45a: {"会話:往復": "行"}（往復は 1 から。1 は始めの行なので 2 から使う）
+        src = SCRIPT if a.script == "default" else json.load(open(a.script, encoding="utf-8"))
+        script = {tuple(int(x) for x in k.split(":")): v for k, v in src.items()}
     openers = [x.strip() for x in open(a.openers, encoding="utf-8") if x.strip()]
     rng = random.Random(a.seed)
     log = [f"# 話し相手との会話（非公開）", "", f"- 話し相手: {a.model}、先生: {a.teacher or 'なし'}、会話 {a.convs} × {a.turns} 往復", ""]
@@ -252,9 +280,9 @@ def main():
         bot.asked, bot.trial, bot._asked_attr = None, [], None
         human = rng.choice(openers)
         sys_c = system
-        if a.persona and ci % 5 == 2:                       # I41b: 誕生日を 3 回続けて言わなかったので、5 会話に 1 回は必ず言わせる
+        if a.persona and not script and ci % 5 == 2:                       # I41b: 誕生日を 3 回続けて言わなかったので、5 会話に 1 回は必ず言わせる
             sys_c += "\n今回の会話のどこかで（3 往復目までに）、必ず「私の誕生日、3 月 5 日だから覚えといて」と言う。"
-        if a.persona and ci % 5 == 4:                       # I41c: 誕生日・猫の名前を一度も聞かなかったので、5 会話に 1 回は聞かせる
+        if a.persona and not script and ci % 5 == 4:                       # I41c: 誕生日・猫の名前を一度も聞かなかったので、5 会話に 1 回は聞かせる
             ask = {4: "私の誕生日、知ってる？", 9: "うちの猫の名前、覚えてる？", 14: "私の名前、みさきって覚えてる？"}.get(ci, "私の誕生日、覚えてる？")   # I44e
             sys_c += "\n今回の会話のどこかで、必ず「" + ask + "」と聞く。"
         msgs = [dict(role="system", content=sys_c), dict(role="assistant", content=human)]
@@ -293,6 +321,9 @@ def main():
             c["往復"] += 1
             if imp is not None:                             # I40c: 人の行の大事なこと／覚えているかの問いに、大事な板で答えられたか
                 hl = next(ln for ln in reversed(bot.conv["lines"]) if ln["who"] == "人")
+                if r.get("topic"):                          # I45a: 話題の問い（記憶板から）
+                    c["話題の問い"] = c.get("話題の問い", 0) + 1
+                    log.append(f"  - 話題の問い: {r['why']}")
                 if r.get("recall"):                         # I40i: 思い出しが動いた問いを数える（思い出しの条件にそろえる）
                     ws = [t["lemma"] for t in hl["toks"] if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in ("私", "名前")]
                     ws = ws or (["名前"] if "名前" in human else [])
@@ -385,6 +416,9 @@ def main():
             hist.append(f"ボット: {line}")
             msgs.append(dict(role="user", content=line))
             human = ollama_chat(a.host, a.model, msgs) if a.model != "echo" else "うん、そうなんだ。"   # echo: 試し用
+            if script.get((ci + 1, ti + 2)):                # I45a: 台本。この会話のこの往復だけ、話し相手の行を決まった行に差し替える
+                human = script[(ci + 1, ti + 2)]
+                c["台本"] = c.get("台本", 0) + 1
             if not human:                                   # 話し相手の本文が空（数に残し、会話はここで切る）
                 c["相手の空"] += 1
                 break

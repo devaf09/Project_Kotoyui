@@ -529,7 +529,39 @@ class Bot3(C2.Bot2):
                 v = v[len(pre):].lstrip("、 ")                         # I41d: 「私の誕生日」から 私 を外した時に残る「の」
         return v
 
+    TOPIC_CUE = ("何話し", "何を話し", "何の話", "どんな話", "何について話", "なに話し", "何をしゃべ", "何しゃべ")
+
+    def topic_recall(self, text):
+        """I45a: 「この前、何の話したか覚えてる？」「さっき何話してたっけ？」に、記憶板の段から話題の名詞で答える。"""
+        if getattr(self, "mem", None) is None or self._plain:
+            return None
+        sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
+        q = next((x for x in reversed(sents) if any(c in x for c in self.TOPIC_CUE) and x.rstrip("。…」 ").endswith(("？", "?"))), None)
+        if q is None:
+            return None
+        when = "さっき" if any(w in q for w in ("さっき", "今まで", "ここまで")) else "今日" if "今日" in q else \
+            "昨日" if any(w in q for w in ("昨日", "きのう")) else "この前"
+        toks = CB.to_toks(self.nlp(text))
+        skip = {t["lemma"] for t in toks if t["pos"] in ("NOUN", "PROPN")} | {"話", "さっき", "この前", "前", "昨日", "今日", "前回"}
+        if self.imp is not None:
+            skip |= {x["value"] for x in self.imp.people.get("相手", []) if x["kind"] == "名前"}
+        name, tp = self.mem.topics(when, skip=skip)
+        self.conv["lines"].append(dict(text=text, toks=toks, who="人"))
+        if tp:
+            head = {"さっき": "さっきは", "今日": "今日は", "昨日": "昨日は", "この前": "この前は"}[name]
+            line = head + "と".join(w for w, _ in tp) + "の話をした、だよね。"
+            why = f"記憶板の「{name}」の段の明るい名詞（{'・'.join(f'{w}×{v:.2g}' for w, v in tp)}）から答える"
+            if getattr(self.mem, "rehearse", False):
+                self.mem.recall([w for w, _ in tp])
+        else:
+            line, why = "ごめん、覚えてない。", f"記憶板の「{name}」の段に話題の名詞が無い"
+        self.conv["lines"].append(dict(text=line, toks=CB.to_toks(self.nlp(line)), who="ボット"))
+        return dict(line=line, tries=0, breaks=[], sim=0, why=why, recall=True, topic=True, recall_value=tp[0][0] if tp else "")
+
     def recall_answer(self, text):
+        r = self.topic_recall(text)
+        if r is not None:
+            return r
         # I44d: 「私の誕生日はいつか知ってる？」「うちの猫の名前、何だった？」も思い出しの問い（私の・うちの がある時だけ。「〇〇って知ってる？」は物知りの問い）
         if any(x in text for x in ("私の", "うちの")) and any(c in text for c in ("知ってる", "何だった", "なんだった")):
             for c in ("知ってる", "何だった", "なんだった"):
