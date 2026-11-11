@@ -164,23 +164,50 @@ class SelfBoard:
         return self.__dict__.setdefault("_src_xp", defaultdict(Counter))
 
     def wt(self, label):
-        """I43a: 近さの出どころ（同じ語・軽い語・本で一緒に出る・語板で近い）と、当たった所の部分（所・項目・時）の掛け目。
-        (言った − 指摘 + 1) / (言った + 1)。まだ言っていないものは 1（手の掛け目を置かない）。"""
-        c = self.src_xp.get(label)
-        if not c:
+        """I43a・I43b: 近さの出どころ（同じ語・軽い語・本で一緒に出る・語板で近い）と、当たった部分（項目・時）の掛け目。
+        I43b: 掛け目は「その出どころで言って指摘されなかった割合」を、全部の自分の板の返事の割合に 1 回ぶん寄せ、全部の割合で割った比。
+        どの出どころも同じくらいなら 1、悪い出どころほど 1 より小さい（全部が下がって 0 になり、何も選べなくなることがない）。
+        「部:所」は物差しなので 1 のまま。"""
+        if label == "部:所":
             return 1.0
-        return max(0.0, (c["言った"] - c["指摘"] + 1.0) / (c["言った"] + 1.0))
+        tot = Counter()
+        for k, c in self.src_xp.items():
+            if k.startswith("源:"):
+                tot.update(c)
+        if not tot["言った"]:
+            return 1.0
+        r0 = max(0.05, (tot["言った"] - tot["指摘"]) / tot["言った"])
+        c = self.src_xp.get(label) or Counter()
+        r = (max(0, c["言った"] - c["指摘"]) + r0) / (c["言った"] + 1.0)
+        return r / r0
 
     def note_src(self, labels, lab):
+        """I43b: 1 つの返事への指摘は 1 回だけ数える（先生と相手の聞き返しが両方あっても）。"""
+        if lab == "言った":
+            self._src_open = True
+        elif lab == "指摘":
+            if not getattr(self, "_src_open", False):
+                return
+            self._src_open = False
         for x in labels or ():
             self.src_xp[x][lab] += 1
+
+    def same_v(self, q):
+        """I43b: 同じ語で当たった時の近さを、本での珍しさから（軽い語 0.3 を置かない）。
+        log(N / その語が出た行) を、自分の板の語の珍しさの真ん中で割る（1 で止める）。「する」「ある」のような語は小さくなる。"""
+        if "_ref_idf" not in self.__dict__:
+            ws = sorted(math.log(self.N / max(1, self.df.get(w, 0))) for pc in self.pcs for w, _, _ in pc["words"] if self.df.get(w))
+            self._ref_idf = ws[len(ws) // 2] if ws else 1.0
+        if not self.df.get(q) or not self.N:
+            return 1.0
+        return min(1.0, math.log(self.N / self.df[q]) / max(1e-6, self._ref_idf))
 
     def _close1(self, q, pc):
         best, how = 0.0, None
         for w, k, part in pc["words"]:
             if q == w:
                 src = "同じ軽い語" if q in LIGHT else "同じ語"
-                v = (self.wt("源:" + src) if self.learn_w else (0.3 if q in LIGHT else 1.0))
+                v = (self.same_v(q) * self.wt("源:" + src) if self.learn_w else (0.3 if q in LIGHT else 1.0))
             else:                                           # 軽い語どうしは、本で一緒に出ても近さにしない（何とでも一緒に出る）
                 v1 = 0.0 if (q in LIGHT or w in LIGHT) else self.npmi(q, w)
                 v2 = 0.0 if (q in LIGHT or w in LIGHT) else self.board(q, w)
