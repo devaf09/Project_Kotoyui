@@ -1053,7 +1053,26 @@ class Bot3(C2.Bot2):
                 ctx = ctx[1] + "の" if ctx[2] in cases else ctx[1] + ctx[2] + "、"
             else:
                 ctx = ""
+        for tail in ("だけど、君は", "けど、君は", "。君は", "、君は"):   # 自分の板の問い返しの形（「…だけど、君は？」）の後ろは、聞き返された所でない
+            if body.endswith(tail) and len(body) > len(tail) + 1:
+                body, sent = body[: -len(tail)], body[: -len(tail)] + "。"
+                st = CB.to_toks(self.nlp(sent))
+                break
         head = self.restate_head()
+        sb = getattr(self, "sb", None)
+        mine = [pc for pc in (sb.pcs if sb is not None else []) if sb.surf(pc) in body]
+        if mine and not sent.rstrip().endswith(("？", "?")):
+            # I46e: 自分の板の所（「食べ物は電気」）を聞き返された: 自分の板のほかの所で、近いもの（本で一緒に出る・語板で近い・同じ語）を理由にして言い直す
+            pc = max(mine, key=lambda x: len(sb.surf(x)))
+            cs_ = [x for x in sb.near(CB.to_toks(self.nlp(sb.surf(pc)))) if x[3] is not pc and sb.surf(x[3]) not in body]
+            if cs_:
+                e = max(cs_, key=lambda x: x[0])[3]
+                es, ene = sb._plain(e)
+                line = (head + "、" if head else "") + es + ("なので" if ene else "ので") + "、" + sb.surf(pc) + "ってこと。"
+                if not self.dark_line(line):
+                    self.mark_line(own)
+                    return dict(line=line, tries=0, breaks=[], sim=0,
+                                why=f"自分の板の所「{sb.surf(pc)}」を、近い所「{sb.surf(e)}」（{e['item']}）を理由にして言い直す")
         if not any(t["pos"] in ("VERB", "ADJ", "AUX") for t in st) and sent.rstrip().endswith(("？", "?")):
             # I46d: 語だけの聞き返し（「猫？」）を返された（「猫って？」）: 何を聞いたかを言う（「猫のかなって」にしない）
             line = (head + "、" if head else "") + body + "って、何のことかなって。"
