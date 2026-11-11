@@ -55,6 +55,9 @@ class Memory:
         self.forget = False
         self.base, self.base_n = Counter(), 0               # 本の台詞での鍵の数と行の数（--forget のふだん）
         self.seen, self.seen_n = Counter(), 0               # これまでの行の板での鍵の数と行の数
+        self.learn_fade = False                             # I45b: 薄れ（FADE）を手で置かず、後で使われたかの経験から
+        self.fade_xp = {"残す": [0, 0], "薄れ": [0, 0]}      # 組ごとの [後で使われた数, 鍵の数]
+        self._fstate = {}                                   # 鍵 → [組, 閉じた会話, 使われたか]
         if path and os.path.exists(path):
             self.load(path)
 
@@ -66,6 +69,9 @@ class Memory:
             self.close("分")
         if who == "人" and nouns:
             self._topic = nouns if not (nouns & self._topic) else (self._topic | nouns)
+        if who == "人" and self.learn_fade:                # I45b: 前の会話で上の段に上がった鍵を、相手がまた口にした = 使われた
+            for k in lb["keys"]:
+                self._used(k, conv)
         self.lines.append(lb)
         self.seen.update(lb["keys"].keys())
         self.seen_n += 1
@@ -95,7 +101,7 @@ class Memory:
         self.boards[lv].append(b)
         i = LEVELS.index(lv)
         if i + 1 < len(LEVELS):
-            up = self.kept(b["keys"], b["n"], 2.0 ** i) if self.forget else b["keys"]
+            up = self.kept(b["keys"], b["n"], 2.0 ** i, track=(lv == "時")) if self.forget else b["keys"]
             b["faded"] = self.__dict__.pop("_faded", 0)
             self._push(LEVELS[i + 1], up, b["end"], b["n"])
         self.open[lv] = Counter()
@@ -119,15 +125,49 @@ class Memory:
     rehearsed = 0
     FADE = 0.5                                              # 残す方に入らなかった鍵を、上の段に足す時の重さ（薄れる）
 
-    def kept(self, keys, n, sat=1.0):
+    def fade(self):
+        """I45b（持ち主 2026-11-11「手で置く部分は減らしたい」、やること 2）: 薄れの重さを経験から。
+        1 会話（時の段）を閉じる時に、残す方に入った鍵と薄れた鍵を覚えておき、後の会話で相手がまた口にしたか、
+        話題の問いの答えに使って直されなかったかを「使われた」と数える。
+        薄れ = 薄れた鍵の使われた割合 ÷ 残した鍵の使われた割合（どちらも全体の割合に 2 個ぶん寄せる。上は 1、下は 0.05）。
+        使われ方が同じなら薄れない（1）、薄れた鍵がほとんど使われないなら小さくなる。"""
+        if not self.learn_fade:
+            return self.FADE
+        (uk, nk), (uf, nf) = self.fade_xp["残す"], self.fade_xp["薄れ"]
+        if nk + nf == 0:
+            return 1.0
+        r = (uk + uf + 0.5) / (nk + nf + 1.0)
+        rk, rf = (uk + 2 * r) / (nk + 2), (uf + 2 * r) / (nf + 2)
+        return max(0.05, min(1.0, rf / rk))
+
+    def _used(self, k, conv, ok=True):
+        st = self._fstate.get(k)
+        if st is None or conv <= st[1]:
+            return
+        if not ok:                                          # 話題の答えに使って直された: 使われなかった数を 1 つ足す
+            self.fade_xp[st[0]][1] += 1
+        elif not st[2]:
+            st[2] = True
+            self.fade_xp[st[0]][0] += 1
+
+    def topic_result(self, words, ok):
+        """I45b: 話題の問いに答えた名詞が、直されなかった（ok）か直されたか。"""
+        if not self.learn_fade:
+            return
+        for w in words:
+            self._used(f"名|{w}", self.n_conv + 1, ok)
+
+    def kept(self, keys, n, sat=1.0, track=False):
         out, faded = {}, 0
+        fd = self.fade()
         for k, v in keys.items():
             d, kind = react(self.expect(k, n), 1.0 - math.exp(-v / sat))
-            if kind == "発見" and abs(1.0 - d) < abs(0.0 - d):
-                out[k] = v
-            else:
-                out[k] = v * self.FADE
-                faded += 1
+            g = "残す" if kind == "発見" and abs(1.0 - d) < abs(0.0 - d) else "薄れ"
+            out[k] = v if g == "残す" else v * fd
+            faded += g == "薄れ"
+            if track and self.learn_fade and (k not in self._fstate or self._fstate[k][2]):   # 前に使われた鍵は、新しく数え直す
+                self._fstate[k] = [g, self.n_conv + 1, False]
+                self.fade_xp[g][1] += 1
         self._faded = faded
         return out
 
@@ -195,7 +235,8 @@ class Memory:
 
     def summary(self):
         return {lv: dict(枚=len(self.boards[lv]), 鍵=sum(len(b["keys"]) for b in self.boards[lv]),
-                         薄れた=sum(b.get("faded", 0) for b in self.boards[lv])) for lv in LEVELS} | dict(行=len(self.lines), 再記憶=self.rehearsed)
+                         薄れた=sum(b.get("faded", 0) for b in self.boards[lv])) for lv in LEVELS} | dict(行=len(self.lines), 再記憶=self.rehearsed) | \
+            (dict(薄れ=round(self.fade(), 3), 薄れの経験={k: list(v) for k, v in self.fade_xp.items()}) if self.learn_fade else {})
 
     # ---- 置き場（非公開。PC のフォルダに JSON） ----
     def save(self, path):

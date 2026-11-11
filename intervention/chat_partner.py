@@ -199,6 +199,7 @@ def main():
     ap.add_argument("--recall", action="store_true", help="I40d: 「覚えてる？」に大事な板・記憶板で答える（--important が要る）")
     ap.add_argument("--persona", action="store_true", help="I40c: 話し相手を、名前・予定・頼みごとを持つ同じ人にし、ときどきそれを言わせ、覚えているか聞かせる")
     ap.add_argument("--important", help="I40c: 大事な板の置き場（JSON、非公開）。人の行から名前・予定・頼まれごと・相手のことを目印で入れる")
+    ap.add_argument("--learn_fade", action="store_true", help="I45b: 記憶板の薄れ 0.5 を手で置かず、後で使われたか（相手がまた口にした・話題の答えが直されなかった）の経験から（--forget が要る）")
     ap.add_argument("--forget", action="store_true", help="I40b: 記憶板で、期待より明るい鍵だけを上の段に足す（--memory が要る）")
     ap.add_argument("--pair_xp", action="store_true", help="I39c: 近さの組（問いの語, 所の語）で答えて指摘された割合だけ、その組の近さを下げる")
     ap.add_argument("--near_min", type=float, default=0.15, help="I39b: 自分の板で、これより近さの小さい所は選ばない")
@@ -253,6 +254,7 @@ def main():
         mem.rehearse = a.rehearse
         if a.forget:                                        # I40b: 期待より明るい鍵だけを上の段に足す
             mem.forget = True
+            mem.learn_fade = a.learn_fade
             mem.set_base(works, bot.pb.pieces)
     imp = None
     if a.important:

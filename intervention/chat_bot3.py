@@ -293,16 +293,21 @@ class Bot3(C2.Bot2):
             self.sb.note(self._last_form, "良")
 
     _last_recall_item = None
+    _last_topic = None
 
     def reply(self, text):
         # I44b: 思い出しで答えたすぐ後に相手が「ううん・違う」と直したら、その項目を弱める（再記憶の逆）
         x = self._last_recall_item
         self._last_recall_item = None
         first = re.split(r"(?<=[。！!？?])", text.strip())[0]
-        if x is not None and (text.lstrip("「 ").startswith(("ううん", "違う", "ちがう", "いや", "え、違", "そうじゃなく"))
-                              or first.rstrip().endswith(("って？", "って?"))):   # I44e: 聞き返し（「履こうって？」）も直しの合図
+        fixed = text.lstrip("「 ").startswith(("ううん", "違う", "ちがう", "いや", "え、違", "そうじゃなく")) \
+            or first.rstrip().endswith(("って？", "って?"))  # I44e: 聞き返し（「履こうって？」）も直しの合図
+        if x is not None and fixed:
             x["mentions"] = max(1, x.get("mentions", 1) - 2)
             x["corrected"] = x.get("corrected", 0) + 1
+        tw, self._last_topic = self._last_topic, None
+        if tw and getattr(self, "mem", None) is not None and hasattr(self.mem, "topic_result"):   # I45b: 話題の答えの当たり外れ
+            self.mem.topic_result(tw, not fixed)
         if not self.conv["lines"]:                          # 新しい会話: この会話で指摘された行は空にする
             self.conv_dark = set()
             self.conv_asked = set()
@@ -553,6 +558,7 @@ class Bot3(C2.Bot2):
             why = f"記憶板の「{name}」の段の明るい名詞（{'・'.join(f'{w}×{v:.2g}' for w, v in tp)}）から答える"
             if getattr(self.mem, "rehearse", False):
                 self.mem.recall([w for w, _ in tp])
+            self._last_topic = [w for w, _ in tp]           # I45b: 次の相手の行で直されたかを見る
         else:
             line, why = "ごめん、覚えてない。", f"記憶板の「{name}」の段に話題の名詞が無い"
         self.conv["lines"].append(dict(text=line, toks=CB.to_toks(self.nlp(line)), who="ボット"))
