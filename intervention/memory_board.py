@@ -209,6 +209,12 @@ class Important:
         if not text.strip("。！!、 あそういえば"):   # 答え合わせの受けは、大事なことではない
             return out
         nouns = [t for t in toks if t["pos"] in NOUN]
+        # I41f: 飼っている物を覚えておく（「猫を飼ってるよ」→ 次の行の「モモっていう名前なの」を猫の名前にする）
+        if "飼" in text:
+            pet = [t["lemma"] for t in nouns if any(k["head"] == t["i"] and k["text"] == "を" for k in toks)
+                   or text.split("飼ってる", 1)[-1].startswith(t["text"])]
+            if pet:
+                self.last_pet = pet[0]
         if any(c in text for c in NAME_CUE):
             nm, whose = [], ""
             if "名前は" in text:
@@ -237,6 +243,8 @@ class Important:
                                 k["head"] == t["i"] and k["text"] == "を" for k in toks)]
                             if own:
                                 whose = own[-1]["lemma"]
+                        if not whose and "飼" in text and getattr(self, "last_pet", None) and self.last_pet != w[-1]["lemma"]:
+                            whose = self.last_pet                # I41f: 前の行で飼っていると言った物
             if not nm and any(c in text for c in NAME_CUE):
                 nm = [_span(toks, t["i"]) for t in toks if t["pos"] == "PROPN"]
             if nm and nm[0]:
