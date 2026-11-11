@@ -399,6 +399,7 @@ def view_norm(B, r, v, L):
 
 LAST_B = None
 VERB_RULE = True                                                    # T1: 動詞が変える観点の規則（塗る = 色）を外すときは False
+VERB_VIEWS = None                                                   # I18: 動詞が変える観点を学んだ規則で決める関数 f(q, B, r0, L) → 観点の集合（None = VERB_RULE に従う）
 DIST = None                                                         # I14: 観点ごとの差の測り方を差し替える（None = 明るさを観点ごとに正規化した差、デジタル）
 
 
@@ -508,7 +509,10 @@ def answer(B, q, eff):
         else:
             dv = {u: 0.5 * np.abs(view_norm(B, r0, u, L) - view_norm(B, r1, u, L)).sum() if B.known(r0, u, L) and B.known(r1, u, L) else 0.0
                   for u in CAUSE_VIEWS}
-            if VERB_RULE:
+            if VERB_VIEWS is not None:                              # I18: 操作の文の差分から学んだ「動詞が変える観点」
+                vs = [u for u in VERB_VIEWS(q, B, r0, L) if u in CAUSE_VIEWS]
+                c = min(1.0, max([eff[u] * dv[u] for u in vs], default=0.0))
+            elif VERB_RULE:
                 c = min(1.0, eff[v] * dv[v])                        # 動詞が変える観点だけ（手で与えた規則）
             else:                                                   # T1: 規則なし = 動詞がどの観点を変えるか知らないので、元と変えた後で違う観点は全部変わるとみなす
                 c = min(1.0, max(eff[u] * dv[u] for u in CAUSE_VIEWS))
