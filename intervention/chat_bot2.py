@@ -349,7 +349,13 @@ class Bot2(CB.Bot):
         return out
 
     def yes_no_me(self, toks):
-        root = next((t for t in toks if t["dep"] == "ROOT" and t["pos"] in L.PRED), None)
+        # I42h: 文が 2 つ以上ある行（「うん、乗るんだね。仕事、大変じゃない？」）は、問いの文（？の前の文）の述語に答える
+        roots = [t for t in toks if t["dep"] == "ROOT" and t["pos"] in L.PRED]
+        qend = [t["i"] for t in toks if t["text"] in ("？", "?")]
+        if len(roots) > 1 and qend:
+            start = max([t["i"] for t in toks if t["text"] in ("。", "！", "!") and t["i"] < qend[-1]], default=-1)
+            roots = [t for t in roots if start < t["i"] < qend[-1]] or roots[-1:]
+        root = roots[0] if roots else None
         if root is None:
             return None
         kids = L.kids_of(toks)

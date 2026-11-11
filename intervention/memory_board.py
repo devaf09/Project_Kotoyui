@@ -253,7 +253,8 @@ class Important:
             k["text"] in ("時", "日", "月") for k in toks if k["i"] == t["i"] + 1))]
         content = [t for t in toks if t["pos"] in NOUN and t["text"] not in TIME_W and t["lemma"] not in ("こと", "時", "日", "月", "予定", "私", "うち")
                    and t["pos"] != "NUM"]
-        if tw and content:                                  # I40h: 時の語のほかに中身の名詞がある時だけ（「うん、明日のこと。」は入れない）
+        hearsay = re.search(r"(らしい|みたい|そうだ|そうよ|予報|天気|雨|雪|晴れ|曇)", text)   # I41h: 「明日は雨が降るらしい」は予定でない
+        if tw and content and not hearsay:                  # I40h: 時の語のほかに中身の名詞がある時だけ（「うん、明日のこと。」は入れない）
             out.append(("予定", text))
         if any(c in re.sub(r"覚えて(る|くれ|た|い)", "", text) for c in ASK_KEEP) and not text.rstrip("。！!…").endswith(("？", "?")):   # 「覚えてる？」は問い（頼みではない）
             out.append(("頼まれごと", text))
@@ -324,6 +325,7 @@ class ImportanceLearner:
     記号は目印そのもの（時の語・名前の言い方・頼み）に加えて、名詞の珍しさ・新しさ・自分のことか・行の長さ。
     どの記号が大事さとつながるかは手で決めず、経験の器（I33 の CountGrain）が数える。"""
     AGE = 3                                                 # この会話の数だけ聞かれなければ ふつう
+    MAX_HIT = 2                                             # I41h: 同じ名前を何度も名乗った行が、1 つの問いで全部 大事 にならないように
     W_IMP = 3                                               # I41d: 大事の経験 1 つを何回ぶんに数えるか
 
     def __init__(self, works=None):
@@ -378,6 +380,12 @@ class ImportanceLearner:
 
     def see(self, text, toks, conv, turn):
         sy, nouns = self.symbols(text, toks)
+        # I41h: 答え合わせの受け（「正解！よく覚えてくれたね」）と、問い・聞き返しだけの行は、経験にも見込みにもしない
+        sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
+        fact = [x for x in sents if not x.rstrip().endswith(("？", "?"))
+                and not x.lstrip("うんええそう、！! ").startswith(("正解", "当たり", "覚えてくれ", "よく覚えて"))]
+        if not fact:
+            return None, sy
         p = self.p_imp(sy)
         self.pending.append(dict(text=text, sy=sy, nouns=nouns, conv=conv, turn=turn, p=p))
         self.seen.update(nouns)
@@ -387,10 +395,10 @@ class ImportanceLearner:
         """「覚えてる？」の問い: 前の人の行のうち、問いの語か、思い出した答えの中身を含む行を 大事 の経験にする。"""
         hit = []
         self.asked_n.update(w for w in (words or []) if w not in LIGHT_N)
-        for c in list(self.pending):
-            if (c["conv"], c["turn"]) >= (conv, turn):
-                continue
-            if (words and set(words) & set(c["nouns"])) or (value and value in c["text"]):
+        cand = [c for c in self.pending if (c["conv"], c["turn"]) < (conv, turn)
+                and ((words and set(words) & set(c["nouns"])) or (value and value in c["text"]))]
+        for c in cand[-self.MAX_HIT:]:                      # I41h: 1 つの問いで大事にするのは、いちばん近い行から MAX_HIT 行まで
+            if True:
                 for _ in range(self.W_IMP):                 # I41d: 聞かれた 1 回が、ふつうの経験に埋もれないように重く
                     self.grain.add(c["sy"], "大事")
                 self.pending.remove(c)

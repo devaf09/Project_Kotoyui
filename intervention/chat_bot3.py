@@ -510,7 +510,10 @@ class Bot3(C2.Bot2):
                     v = v[: -len(e)].rstrip("、 ")
                     break
         v = v.replace("私", "").replace("うちの", "").lstrip("、 ")
-        v = v.lstrip("のはもがをに、 ")                         # I41d: 「私の誕生日」から 私 を外した時に残る「の」
+        v = v.lstrip("のはもがをに、 ")
+        for pre in ("そういえば", "そうそう", "ところで", "あ、", "ねえ"):   # I41h: 頭の前置き
+            if v.startswith(pre):
+                v = v[len(pre):].lstrip("、 ")                         # I41d: 「私の誕生日」から 私 を外した時に残る「の」
         return v
 
     def recall_answer(self, text):
