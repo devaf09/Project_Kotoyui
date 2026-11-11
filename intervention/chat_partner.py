@@ -199,6 +199,7 @@ def main():
     ap.add_argument("--recall", action="store_true", help="I40d: 「覚えてる？」に大事な板・記憶板で答える（--important が要る）")
     ap.add_argument("--persona", action="store_true", help="I40c: 話し相手を、名前・予定・頼みごとを持つ同じ人にし、ときどきそれを言わせ、覚えているか聞かせる")
     ap.add_argument("--important", help="I40c: 大事な板の置き場（JSON、非公開）。人の行から名前・予定・頼まれごと・相手のことを目印で入れる")
+    ap.add_argument("--topic_check", action="store_true", help="I46b: 思い出しで答えた直後の相手の行（答え合わせ）の名詞を、記憶板の話題に入れない")
     ap.add_argument("--restate", action="store_true", help="I46a: 相手の聞き返し（「〜って？」）に、前の人の行に戻らず、聞き返された自分の行を言い直す")
     ap.add_argument("--learn_fade", action="store_true", help="I45b: 記憶板の薄れ 0.5 を手で置かず、後で使われたか（相手がまた口にした・話題の答えが直されなかった）の経験から（--forget が要る）")
     ap.add_argument("--forget", action="store_true", help="I40b: 記憶板で、期待より明るい鍵だけを上の段に足す（--memory が要る）")
@@ -296,6 +297,7 @@ def main():
         hist = [f"相手: {human}"]
         log += [f"## 会話 {ci + 1}", ""]
         prev_bot = None
+        prev_recall = False                                 # I46b: 前のボットの返事が思い出しの答えだったか
         pending = None
         for ti in range(a.turns):
             if prev_bot is not None:                        # 話し相手の行が、前の返事への指摘か・受けか（ボットの見分けと同じ物差し）
@@ -379,9 +381,10 @@ def main():
                     log.append(f"  - 大事な板: {kind}「{val[:30]}」")
             if mem is not None:                             # I40a: 行の板（人の行とボットの行）
                 hl = next(ln for ln in reversed(bot.conv["lines"]) if ln["who"] == "人")
-                mem.add(hl["toks"], bot.pb.pieces(hl["toks"]), "人", ci + 1)
+                mem.add(hl["toks"], bot.pb.pieces(hl["toks"]), "人", ci + 1, check=a.topic_check and ti > 0 and prev_recall)
                 bl = bot.conv["lines"][-1]
                 mem.add(bl["toks"], bot.pb.pieces(bl["toks"]), "ボット", ci + 1)
+            prev_recall = bool(r.get("recall"))
             if r["why"].startswith("自分の板"):
                 c["自分の板"] += 1
             if not bot.pb.pieces(bot.conv["lines"][-1]["toks"]):

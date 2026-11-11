@@ -62,8 +62,11 @@ class Memory:
             self.load(path)
 
     # ---- 書く ----
-    def add(self, toks, pieces, who, conv, lb=None):
+    def add(self, toks, pieces, who, conv, lb=None, check=False):
         lb = lb or line_board(toks, pieces, who, conv)
+        if check:                                           # I46b: 思い出しの答えへの答え合わせ（「正解！モモだよ」）: 話題の名詞にしない（話の中身でなく、記憶の確かめ）
+            lb["keys"] = {k: v for k, v in lb["keys"].items() if not k.startswith("名|")}
+            lb["nouns"], lb["check"] = [], True
         nouns = set(lb["nouns"])
         if who == "人" and nouns and self._topic and not (nouns & self._topic):   # 話題の名詞が替わった: 分の段を閉じる
             self.close("分")
@@ -134,7 +137,7 @@ class Memory:
         if not self.learn_fade:
             return self.FADE
         (uk, nk), (uf, nf) = self.fade_xp["残す"], self.fade_xp["薄れ"]
-        if nk + nf == 0:
+        if uk + uf == 0:                                    # まだどの鍵も使われていない: 比べられないので薄れさせない
             return 1.0
         r = (uk + uf + 0.5) / (nk + nf + 1.0)
         rk, rf = (uk + 2 * r) / (nk + 2), (uf + 2 * r) / (nf + 2)
