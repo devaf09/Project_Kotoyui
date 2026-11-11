@@ -175,7 +175,7 @@ class Memory:
 TIME_W = ("明日", "明後日", "あさって", "来週", "再来週", "今週末", "週末", "来月", "今度", "今夜", "今晩", "午前", "午後",
           "月曜", "火曜", "水曜", "木曜", "金曜", "土曜", "日曜", "誕生日")
 ASK_KEEP = ("覚えて", "覚えと", "お願い", "忘れないで", "してほしい", "して欲しい", "教えて")
-NAME_CUE = ("名前は", "って呼んで", "と呼んで", "っていう", "って言う", "です。私", "私は")
+NAME_CUE = ("名前は", "って呼んで", "と呼んで", "っていう", "って言う", "って名前", "という名前", "です。私", "私は")
 
 
 def _span(toks, i):
@@ -224,7 +224,7 @@ class Important:
                 own = [t for t in toks if t["pos"] in NOUN and pre.endswith(t["text"])]
                 if own and own[-1]["lemma"] not in ("私", "僕", "俺", "うち", "あたし"):
                     whose = own[-1]["lemma"]
-            for cue in ("っていう", "って言う", "って呼んで", "と呼んで"):
+            for cue in ("っていう", "って言う", "って名前", "という名前", "って呼んで", "と呼んで"):
                 if not nm and cue in text and not text.split(cue, 1)[1].startswith(("意味", "こと", "感じ", "話")):   # 「脱ぐっていう意味」は名前でない
                     pre = text.split(cue, 1)[0]
                     w = [t for t in toks if t["pos"] in NOUN + ("PRON",) and pre.endswith(t["text"])]
@@ -354,20 +354,19 @@ class ImportanceLearner:
         sy.append("聞かれた名詞:" + ("あり" if any(self.asked_n.get(n) for n in fn) else "なし"))
         sy.append("時:" + ("あり" if any(w in text for w in TIME_W) else "なし"))
         sy.append("数:" + ("あり" if any(t["pos"] == "NUM" for t in toks) else "なし"))
-        sy.append("名の言い方:" + ("あり" if any(c in text for c in ("っていう", "って言う", "名前は", "呼んで")) else "なし"))
         sy.append("頼み:" + ("あり" if any(c in text for c in ASK_KEEP) else "なし"))
-        sy.append("自分:" + ("あり" if any(t["lemma"] in ("私", "僕", "俺", "あたし", "うち") for t in toks) else "なし"))
         sy.append("固有:" + ("あり" if any(t["pos"] == "PROPN" for t in toks) else "なし"))
         sy.append("問い:" + ("あり" if qa else "なし"))
         rare = max((math.log((self.n_lines + 1) / (self.df.get(n, 0) + 1)) for n in nouns), default=0.0)
         sy.append("珍しさ:" + _bin(rare, (4.0, 6.0, 8.0)))
         new = sum(1 for n in nouns if not self.seen.get(n)) / len(nouns) if nouns else 0.0
         sy.append("新しさ:" + _bin(new, (0.34, 0.67, 1.0)))
-        sy.append("長さ:" + _bin(len(text), (12, 25, 40)))
         return sy, nouns
 
+    MIN_IMP = 8                                             # I41g: 大事の経験がこの数（重みを外した数）たまるまでは見込みを出さない
+
     def p_imp(self, sy):
-        if not self.grain.n.get("大事") or not self.grain.n.get("ふつう"):
+        if self.grain.n.get("大事", 0) < self.MIN_IMP * self.W_IMP or not self.grain.n.get("ふつう"):
             return None
         sc = self.grain.scores(sy)
         # I41b: 大事 20 対 ふつう 175 のように偏るので、全体の割合（前の見込み）を外して、記号の比だけで比べる
