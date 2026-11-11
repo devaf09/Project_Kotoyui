@@ -382,7 +382,7 @@ class Bot3(C2.Bot2):
 
     def _reply_dark(self, text):
         out = self._reply_once(text)
-        if self.dark_line(out["line"]) and len(self.conv["lines"]) >= 2:   # 前に指摘された行をまた言いそう: 行づくりで言い直し、直らなければ見込みの小さい行を言ってみる
+        if self.dark_line(out["line"]) and len(self.conv["lines"]) >= 2 and not out.get("recall"):   # 前に指摘された行（I40e: 思い出した中身は、言い方の指摘で捨てない）をまた言いそう: 行づくりで言い直し、直らなければ見込みの小さい行を言ってみる
             first = out
             del self.conv["lines"][-2:]
             self._plain, ex = True, self.explore
@@ -484,8 +484,14 @@ class Bot3(C2.Bot2):
     ENDS = ("なんだよね", "なんだよ", "なんだ", "なの", "だよね", "だよ", "だから覚えといて", "だから覚えておいて", "覚えといて",
             "覚えておいて", "よ", "ね", "の", "だ", "です")
 
+    imp_time = ("明日", "明後日", "来週", "週末", "土曜", "日曜", "誕生日")
+
     def _restate(self, v):
         v = v.strip("。！!…「」 ")
+        segs = [x for x in v.replace("。", "、").split("、") if x]
+        tseg = [x for x in segs if any(w in x for w in self.imp_time) or any(ch.isdigit() for ch in x)]
+        if tseg:                                            # I40e: 予定は、時の語のある所だけ返す（「ううん、特にないよ。」の前置きを付けない）
+            v = "、".join(segs[segs.index(tseg[0]):])
         for _ in range(3):
             for e in self.ENDS:
                 if v.endswith(e) and len(v) > len(e) + 1:
@@ -500,13 +506,16 @@ class Bot3(C2.Bot2):
         toks = CB.to_toks(self.nlp(text))
         ws = [t["lemma"] for t in toks if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in ("私", "名前", "こと", "何")]
         items = self.imp.find("相手", ws) if ws else []
-        if "名前" in text:                                  # 名前の問い: 誰の名前か（「猫の名前」）で分ける
+        # I40e: 問いの種類（名前・誰の名前・予定）に合う項目だけを選ぶ（合う項目が無ければ、別の項目を答えずに「覚えてない」）
+        if "名前" in text:
             whose = next((w for w in ws if w not in ("私",)), None)
-            nm = [x for x in self.imp.people.get("相手", []) if x["kind"].startswith("名前")
-                  and ((f"（{whose}）" in x["kind"]) if whose else x["kind"] == "名前")]
-            items = nm or items
-        if not items and ("予定" in text or "予定" in ws):
-            items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "予定"]
+            items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"].startswith("名前")
+                     and ((f"（{whose}）" in x["kind"]) if whose else x["kind"] == "名前")]
+            if not items and whose:                         # 「猫の名前」を「うちの猫はモモ」のような行で言っていた
+                items = [x for x in self.imp.find("相手", [whose]) if x["kind"] in ("相手のこと", "名前（" + whose + "）")]
+        elif "予定" in text or any(w in self.imp_time for w in ws):
+            items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "予定"
+                     and (not [w for w in ws if w != "予定"] or any(w in x["value"] for w in ws if w != "予定"))]
         self.conv["lines"].append(dict(text=text, toks=toks, who="人"))
         if items:
             x = items[0]

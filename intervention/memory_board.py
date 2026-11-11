@@ -174,7 +174,7 @@ class Memory:
 TIME_W = ("明日", "明後日", "あさって", "来週", "再来週", "今週末", "週末", "来月", "今度", "今夜", "今晩", "午前", "午後",
           "月曜", "火曜", "水曜", "木曜", "金曜", "土曜", "日曜", "誕生日")
 ASK_KEEP = ("覚えて", "覚えと", "お願い", "忘れないで", "してほしい", "して欲しい", "教えて")
-NAME_CUE = ("名前は", "って呼んで", "と呼んで", "っていうの", "って言うの", "です。私", "私は")
+NAME_CUE = ("名前は", "って呼んで", "と呼んで", "っていう", "って言う", "です。私", "私は")
 
 
 def _span(toks, i):
@@ -196,10 +196,10 @@ class Important:
 
     def kinds(self, text, toks):
         out = []
-        if "覚えて" in text and text.rstrip("。！!…").endswith(("？", "?")):   # 覚えているかの問いは、大事なことそのものではない
+        if text.rstrip("。！!…").endswith(("？", "?")):      # I40e: 問い（「覚えてる？」「何だったっけ？」「〜って？」）は大事なことそのものではない
             return out
         nouns = [t for t in toks if t["pos"] in NOUN]
-        if any(c in text for c in NAME_CUE + ("って",)):
+        if any(c in text for c in NAME_CUE):
             nm, whose = [], ""
             if "名前は" in text:
                 k = text.index("名前は")
@@ -209,11 +209,15 @@ class Important:
                 if own and own[-1]["lemma"] not in ("私", "僕", "俺", "うち", "あたし"):
                     whose = own[-1]["lemma"]
             for cue in ("っていう", "って言う", "って呼んで", "と呼んで"):
-                if not nm and cue in text:
+                if not nm and cue in text and not text.split(cue, 1)[1].startswith(("意味", "こと", "感じ", "話")):   # 「脱ぐっていう意味」は名前でない
                     pre = text.split(cue, 1)[0]
                     w = [t for t in toks if t["pos"] in NOUN + ("PRON",) and pre.endswith(t["text"])]
                     if w and w[-1]["lemma"] not in ("私", "名前", "こと"):
                         nm = [w[-1]["text"]]
+                        own = [t for t in toks if t["pos"] in NOUN and t["i"] < w[-1]["i"] and t["lemma"] not in ("私", "僕", "俺", "うち", "あたし", "名前")
+                               and any(k["head"] == t["i"] and k["text"] in ("は", "の") for k in toks)]
+                        if own and not whose:               # 「うちの猫はモモっていうの」: 猫の名前
+                            whose = own[-1]["lemma"]
             if not nm and any(c in text for c in NAME_CUE):
                 nm = [_span(toks, t["i"]) for t in toks if t["pos"] == "PROPN"]
             if nm and nm[0]:
