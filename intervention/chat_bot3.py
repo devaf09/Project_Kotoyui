@@ -544,7 +544,7 @@ class Bot3(C2.Bot2):
             return None
         sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
         q = next((x for x in reversed(sents) if any(c in x for c in self.TOPIC_CUE) and x.rstrip("。…」 ").endswith(("？", "?"))), None)
-        if q is None or not re.search(r"(した|してた|だった|った|たっけ)", q):   # I46f: 「次は何の話する？」「どんな話がしたい？」は思い出しでない（過去の形のある問いだけ）
+        if q is None or not re.search(r"(した|してた|だった|った|たっけ)(?![いくがろ])", q):   # I46f: 「次は何の話する？」「どんな話がしたい？」は思い出しでない（過去の形のある問いだけ）
             return None
         when = "さっき" if any(w in q for w in ("さっき", "今まで", "ここまで")) else "今日" if "今日" in q else \
             "昨日" if any(w in q for w in ("昨日", "きのう")) else "この前"
@@ -1038,7 +1038,8 @@ class Bot3(C2.Bot2):
         if sent is None:
             return None
         st = CB.to_toks(self.nlp(sent))
-        while st and (st[0]["pos"] in ("INTJ", "PUNCT") or st[0]["text"] in ("、",)):   # 頭の「はい、」を外す
+        while st and (st[0]["pos"] == "PUNCT" or st[0]["text"] in ("、",) or
+                      st[0]["pos"] == "INTJ" and len(st) > 1 and st[1]["text"] in ("、", "。", "！", "…")):   # 頭の「はい、」を外す（I46h: 「あっという間」の あっ は外さない）
             st = st[1:]
         body = "".join(t["text"] for t in st).rstrip("。！!？?…")
         if body.endswith(("ってこと", "のかなって", "何のことかなって")):   # I46f: 言い直しの行をまた聞き返された: 重ねて言い直さず、作り直す
@@ -1077,6 +1078,32 @@ class Bot3(C2.Bot2):
                 break
         head = self.restate_head()
         sb = getattr(self, "sb", None)
+        q_own = sent.rstrip().endswith(("？", "?"))
+        if not q_own and not any(t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in ("私", "こと", "もの", "の") for t in st) \
+                and any(t["lemma"] in ("私", "僕", "俺") for t in st):
+            return None                                     # I46h: 中身の名詞の無い行（「私はいう」）は言い直さず、作り直す
+        att = getattr(self, "attrs", None) or (sb.attrs if sb is not None else None) or {}
+        k0 = keys[0] if keys else ""
+        qx = getattr(self, "_qtext", "")
+        q0 = re.split(r"[、。！？!?「」『』\s]", qx.split("って")[0])[-1] if "って" in qx else ""
+        wt = next((t for t in st if t["pos"] == "NOUN" and t["text"] in (k0, q0)), None)
+        if not q_own and wt is not None and wt["lemma"] in att:
+            # I46h: 自分の行の一語（「電気って？」）を聞き返された: 語板の属性（よく受ける動き・クラス）でその語を説明する
+            e = att[wt["lemma"]]["attrs"]
+            mv = max(e.get("C", {}).items(), key=lambda x: x[1], default=(None, 0))[0]
+            cl = max(e.get("D", {}).items(), key=lambda x: x[1], default=(None, 0))[0]
+            parts = []
+            if mv and "/" in mv:
+                v, ro = mv.split("/", 1)
+                v = v if v.endswith(tuple("るうくすつぬぶむぐい")) else v + "する"   # 「供給」→「供給する」
+                parts.append(v + ("所" if ro in ("に", "で") else "もの"))
+            if cl:
+                parts.append(cl.split(":", 1)[-1].split("(")[0] + "のこと")
+            if parts:
+                line = (head + "、" if head else "") + wt["text"] + "って、" + "、".join(parts) + "。"
+                if not self.dark_line(line):
+                    self.mark_line(own)
+                    return dict(line=line, tries=0, breaks=[], sim=0, why=f"自分の行の語「{wt['text']}」を、語板の属性（{mv}・{cl}）で説明する")
         mine = [pc for pc in (sb.pcs if sb is not None else []) if sb.surf(pc) in body and any(k and k in sb.surf(pc) for k in keys[:1])] or \
             [pc for pc in (sb.pcs if sb is not None else []) if sb.surf(pc) in body]
         if mine and not sent.rstrip().endswith(("？", "?")):
@@ -1109,6 +1136,10 @@ class Bot3(C2.Bot2):
             for pc in tgt[:1]:                              # 主語が前の節にある時（「理沙は…、半額になる」）は、主語を前に付ける
                 if pc["ns"] and pc["ns"] not in cl and pc["ps"] and pc["ps"] in cl:
                     cl = pc["ns"] + pc["c"] + cl
+            for tail in ("なので", "ので", "だけど", "けど", "から"):   # I46h: 節の終わりのつなぎ（「…の中なので」）を外す
+                if cl.endswith(tail) and len(cl) > len(tail) + 1:
+                    cl = cl[: -len(tail)]
+                    break
             body = cl if len(cl) >= 2 else body
             line = (head + "、" if head else "") + ctx + body + "ってこと。"
             why = "自分の行「" + sent.strip() + "」を言い直す"
@@ -1137,6 +1168,7 @@ class Bot3(C2.Bot2):
             for k in (("補語", pc["n"]), ("目的語", pc["n"])):
                 self.aware_keys[k] += 1.0
         if self.use_restate and any(k == "聞き返し" for k, _ in cs):   # I46a: 「〜って？」は、聞き返された自分の行を言い直す
+            self._qtext = text
             out = self.restate(a, tgt, prev_human, sure=pre_p <= 0.5 and not any(pc["ns"] + pc["c"] + pc["ps"] in getattr(self, "_prev_trial", ()) for pc in tgt))
             if out is not None:
                 out["why"] = f"相手の聞き返し → 所「{'・'.join(pc['ns'] + pc['c'] + pc['ps'] for pc in tgt) or 'なし'}」を経験に足し、" + out["why"]
