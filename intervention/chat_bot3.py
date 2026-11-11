@@ -348,9 +348,11 @@ class Bot3(C2.Bot2):
         if self.sb is not None:                             # I39a: 形の経験（言った数）。結果は相手の次の行・先生の見立てで足す
             self._last_form = out.get("form")
             self._last_pair = out.get("pair")
+            self._last_src = out.get("src")
             if self._last_form:
                 self.sb.note(self._last_form, "言った")
                 self.sb.note_pair(self._last_pair, "言った")
+                self.sb.note_src(self._last_src, "言った")
         self.__dict__.setdefault("line_said", Counter())[self._line_key(out["line"])] += 1
         if self.nov is not None and getattr(self, "_asked_attr", None):   # I38a: この会話で聞いた属性（読み手が問いの行の所を取れなくても、同じ属性をまた聞かない）
             self.__dict__.setdefault("conv_asked", set()).add(self._asked_attr)
@@ -590,6 +592,7 @@ class Bot3(C2.Bot2):
     # ---- I39a: 自分の板（プロフィールの「自分のこと」）で、自分への問いに答える ----
     sb = None                                               # self_board.SelfBoard（--profile）
     _last_form = None                                       # 前の返事の形（自分の板で答えた時だけ）
+    _last_src = None
     _last_pair = None                                       # I39c: 前の返事で使った近さの組（問いの語, 所の語）
 
     def self_answer(self, text):
@@ -636,7 +639,7 @@ class Bot3(C2.Bot2):
         self.conv["lines"].append(dict(text=line, toks=lt, who="ボット"))
         why = (f"自分の板: 「{self.sb.surf(pc)}」（{pc['item']}・{pc['time']}、重み {pc['w']:.1f}、近さ {v:.2f}: "
                f"「{how[0]}」と「{how[1]}」が{how[2]}）、形 {f}（{'・'.join(tried)}）")
-        return dict(line=line, tries=0, breaks=[], sim=0, why=why, form=f, pair=how[:2])
+        return dict(line=line, tries=0, breaks=[], sim=0, why=why, form=f, pair=how[:2], src=["源:" + how[2], "部:" + how[3]])
 
     def _end_turn(self, out):
         if out.pop("explored", False):                      # I35t: 言ってみた行の所は全部、確かめ中にする
@@ -741,6 +744,8 @@ class Bot3(C2.Bot2):
             if self.sb is not None and self._last_form:
                 self.sb.note(self._last_form, "指摘")
                 self.sb.note_pair(self._last_pair, "指摘")
+                self.sb.note_src(self._last_src, "指摘")
+            self.sb.note_src(self._last_src, "指摘")
             self.mark_line(bots[-1]["text"])
             out.append(("行", bots[-1]["text"]))
             tgt = [pc for pc in pcs if odd and ((pc["ns"] + pc["c"] + pc["ps"]) in odd or (len(pc["ns"]) >= 2 and pc["ns"] in odd))]
@@ -938,6 +943,7 @@ class Bot3(C2.Bot2):
         if self.sb is not None and self._last_form:          # I39a: 自分の板で答えた形が指摘された
             self.sb.note(self._last_form, "指摘")
             self.sb.note_pair(self._last_pair, "指摘")
+            self.sb.note_src(self._last_src, "指摘")
         self.mark_line(a["text"].strip("「」"))              # I37a: 行のまるごとも、指摘された行として残す
         for pc in tgt:                                      # 1. 経験を足す
             self.grain.add(self.sym(pc, qa), "指摘")

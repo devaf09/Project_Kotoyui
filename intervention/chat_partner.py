@@ -166,6 +166,7 @@ def main():
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
+    ap.add_argument("--learn_w", action="store_true", help="I43a: 自分の板の掛け目（軽い語 0.3・項目 0.8・時 0.5）と近さの下限（0.15・6 割）を手で置かず、言って指摘された数から")
     ap.add_argument("--learn_marks", action="store_true", help="I41k: 大事な板の目印を見込みの記号にし、種類ごとに後で聞かれた割合で入れるか決める")
     ap.add_argument("--imp_p", type=float, default=0.9, help="I41e: 目印なしの行を、学んだ見込みで大事な板に入れる P の下限。負なら I41i: 経験から（目印のある行と同じくらい後で聞かれる帯だけ）")
     ap.add_argument("--rev", action="store_true", help="I42e: 述語の形を、本で見ていない印の組は逆引き（意味の組 → 繋ぎの語と並び、i42_fused_flow）で作る")
@@ -216,6 +217,7 @@ def main():
         bot.sb = SB.SelfBoard(nlp, works, a.profile, attrs=SB.load_attrs(a.self_attrs) if a.self_attrs else bot.attrs)
         bot.sb.NEAR_MIN = a.near_min
         bot.sb.use_pair = a.pair_xp
+        bot.sb.learn_w = a.learn_w
     if a.attrs:
         bot.attr_field, bot.use_book, bot.conv_share = True, False, 0.2
     bot.use_chain = a.no_one_clause
@@ -391,6 +393,8 @@ def main():
             learner.end_conv(ci + 1)
             c["大事さの経験"] = dict(learner.grain.n)
             c["入れる線の経験"] = learner.line_stats()
+        if getattr(bot, "sb", None) is not None and bot.sb.learn_w:
+            c["掛け目の経験"] = {k: dict(v) for k, v in bot.sb.src_xp.items()}
         if getattr(bot, "rev_log", None) is not None:
             c["逆引き"] = {k: v for k, v in bot.rev_log.items() if not k.startswith("作った:")}
             c["逆引きの形"] = sorted((k[4:] for k in bot.rev_log if k.startswith("作った:")))[:30]

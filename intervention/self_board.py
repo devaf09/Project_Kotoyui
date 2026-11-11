@@ -65,10 +65,10 @@ class SelfBoard:
         # 「…けど」「…ので」の前に だ・な が要る述語（動詞・い形容詞・た の形で終わらないもの: 「好き」「コンピュータの中」「good」）
         self.noun_end = {pc["p"]: not pc["p"].endswith(tuple("いうくぐすつぬぶむるた")) for pc in self.pcs}
         for pc in self.pcs:
-            pc["words"] = [(w, 1.0) for w in lem[pc["n"]] + lem[pc["p"]]] + [(w, W_ITEM) for w in lem[pc["item"]]] + \
-                [(w, W_TIME) for w in lem[pc["time"]]]
+            pc["words"] = [(w, 1.0, "所") for w in lem[pc["n"]] + lem[pc["p"]]] + [(w, W_ITEM, "項目") for w in lem[pc["item"]]] + \
+                [(w, W_TIME, "時") for w in lem[pc["time"]]]
         # 本の行で一緒に出る度合い（所の語についてだけ数える）
-        W = {w for pc in self.pcs for w, _ in pc["words"]}
+        W = {w for pc in self.pcs for w, _, _ in pc["words"]}
         self.preds = {t["lemma"] for wk in works for ln in wk["lines"] for t in ln["toks"] if t["pos"] in ("VERB", "ADJ")}
         self.df, self.co, self.N = Counter(), defaultdict(Counter), 0
         for wk in works:
@@ -157,18 +157,39 @@ class SelfBoard:
         per.sort(key=lambda x: -x[0])
         return per[0][0] + self.MORE * sum(x[0] for x in per[1:]), per[0][1]
 
+    learn_w = False                                        # I43a: 掛け目（軽い語 0.3・項目 0.8・時 0.5）を手で置かず、言って指摘された数から
+
+    @property
+    def src_xp(self):
+        return self.__dict__.setdefault("_src_xp", defaultdict(Counter))
+
+    def wt(self, label):
+        """I43a: 近さの出どころ（同じ語・軽い語・本で一緒に出る・語板で近い）と、当たった所の部分（所・項目・時）の掛け目。
+        (言った − 指摘 + 1) / (言った + 1)。まだ言っていないものは 1（手の掛け目を置かない）。"""
+        c = self.src_xp.get(label)
+        if not c:
+            return 1.0
+        return max(0.0, (c["言った"] - c["指摘"] + 1.0) / (c["言った"] + 1.0))
+
+    def note_src(self, labels, lab):
+        for x in labels or ():
+            self.src_xp[x][lab] += 1
+
     def _close1(self, q, pc):
         best, how = 0.0, None
-        for w, k in pc["words"]:
+        for w, k, part in pc["words"]:
             if q == w:
-                v = 0.3 if q in LIGHT else 1.0
+                src = "同じ軽い語" if q in LIGHT else "同じ語"
+                v = (self.wt("源:" + src) if self.learn_w else (0.3 if q in LIGHT else 1.0))
             else:                                           # 軽い語どうしは、本で一緒に出ても近さにしない（何とでも一緒に出る）
                 v1 = 0.0 if (q in LIGHT or w in LIGHT) else self.npmi(q, w)
                 v2 = 0.0 if (q in LIGHT or w in LIGHT) else self.board(q, w)
                 v, src = (v1, "本で一緒に出る") if v1 >= v2 else (v2, "語板で近い")
-            v *= k * self.pair_ok(q, w)
+                if self.learn_w:
+                    v *= self.wt("源:" + src)
+            v *= (self.wt("部:" + part) if self.learn_w else k) * self.pair_ok(q, w)
             if v > best:
-                best, how = v, (q, w, "同じ語" if q == w else src)
+                best, how = v, (q, w, src, part)
         return best, how
 
     def near(self, toks):
@@ -185,7 +206,11 @@ class SelfBoard:
     def pick(self, toks):
         cs = self.near(toks)
         top = max((x[1] for x in cs), default=0.0)
-        cs = [x for x in cs if x[1] >= max(self.NEAR_MIN, self.NEAR_SHARE * top)]
+        if self.learn_w:                                    # I43a: 下限 0.15・6 割 を置かず、この問いで近さのあった所の平均より近い所だけ
+            avg = sum(x[1] for x in cs) / len(cs) if cs else 0.0
+            cs = [x for x in cs if x[1] >= avg]
+        else:
+            cs = [x for x in cs if x[1] >= max(self.NEAR_MIN, self.NEAR_SHARE * top)]
         if not cs:
             return None
         s = self.rng.choices(cs, weights=[x[0] for x in cs])[0]
