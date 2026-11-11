@@ -64,6 +64,18 @@ class Memory:
     # ---- 書く ----
     def add(self, toks, pieces, who, conv, lb=None, check=False):
         lb = lb or line_board(toks, pieces, who, conv)
+        if who == "人":                                    # I46f: 相手の聞き返しの文（「正解って？」）の名詞は、ボットの語を返しているだけなので話題にしない
+            sent, back = [], set()
+            for t in toks:
+                sent.append(t)
+                if t["text"] in ("。", "！", "!", "？", "?"):
+                    tx = "".join(x["text"] for x in sent)
+                    if tx.rstrip("？?」 ").endswith("って") and tx.rstrip().endswith(("？", "?")):
+                        back |= {x["lemma"] for x in sent if x["pos"] in NOUN}
+                    sent = []
+            if back:
+                lb["keys"] = {k: v for k, v in lb["keys"].items() if not (k.startswith("名|") and k[2:] in back)}
+                lb["nouns"] = [n for n in lb["nouns"] if n not in back]
         if check:                                           # I46b: 思い出しの答えへの答え合わせ（「正解！モモだよ」）: 話題の名詞にしない（話の中身でなく、記憶の確かめ）
             lb["keys"] = {k: v for k, v in lb["keys"].items() if not k.startswith("名|")}
             lb["nouns"], lb["check"] = [], True
@@ -386,7 +398,7 @@ class Important:
             hit = next((x for x in items if same(x)), None)
             if hit:
                 hit["mentions"] += 1
-                if kind == "予定":
+                if kind == "予定" or set(keys) - set(hit["keys"]):   # I46f: 重ねる時は、後の行の鍵も足す（「3月5日だから覚えといて」に後の「誕生日、3月5日」の 誕生日 を）
                     hit["value"], hit["keys"] = val, sorted(set(hit["keys"]) | set(keys))
                 hit["convs"] = sorted(set(hit["convs"]) | {conv})
             else:

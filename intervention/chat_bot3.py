@@ -544,7 +544,7 @@ class Bot3(C2.Bot2):
             return None
         sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
         q = next((x for x in reversed(sents) if any(c in x for c in self.TOPIC_CUE) and x.rstrip("。…」 ").endswith(("？", "?"))), None)
-        if q is None:
+        if q is None or not re.search(r"(した|してた|だった|った|たっけ)", q):   # I46f: 「次は何の話する？」「どんな話がしたい？」は思い出しでない（過去の形のある問いだけ）
             return None
         when = "さっき" if any(w in q for w in ("さっき", "今まで", "ここまで")) else "今日" if "今日" in q else \
             "昨日" if any(w in q for w in ("昨日", "きのう")) else "この前"
@@ -1038,13 +1038,18 @@ class Bot3(C2.Bot2):
         while st and (st[0]["pos"] in ("INTJ", "PUNCT") or st[0]["text"] in ("、",)):   # 頭の「はい、」を外す
             st = st[1:]
         body = "".join(t["text"] for t in st).rstrip("。！!？?…")
+        if body.endswith(("ってこと", "のかなって", "何のことかなって")):   # I46f: 言い直しの行をまた聞き返された: 重ねて言い直さず、作り直す
+            return None
         if not body or len(body) < 2 and any(t["pos"] in ("VERB", "ADJ", "AUX") for t in st):
             return None
         ctx = ""
         if prev_human:
             ht = CB.to_toks(self.nlp(prev_human))
             for i, t in enumerate(ht):                      # 前の人の行の、いちばん珍しい名詞とその助詞（猫と・海に）
-                if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in C2.YOU and t["lemma"] not in body and i + 1 < len(ht) \
+                names = {x["value"] for x in self.imp.people.get("相手", []) if x["kind"] == "名前"} if getattr(self, "imp", None) is not None else set()
+                if t["pos"] == "NOUN" and t["lemma"] not in C2.YOU and t["lemma"] not in body and i + 1 < len(ht) \
+                        and t["lemma"] not in names and t["lemma"] not in self.imp_time and t["lemma"] not in ("時", "分", "日", "月", "年") \
+                        and not any(ch.isdigit() for ch in t["text"]) \
                         and ht[i + 1]["pos"] == "ADP" and ht[i + 1]["text"] not in ("の", "は"):
                     if not ctx or self.idf.get(t["lemma"], 0.0) > ctx[0]:
                         ctx = (self.idf.get(t["lemma"], 0.0), t["text"], ht[i + 1]["text"])
