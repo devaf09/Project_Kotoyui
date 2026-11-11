@@ -116,6 +116,7 @@ class Memory:
         r = (self.base.get(k, 0) + self.seen.get(k, 0) + 0.5) / (self.base_n + self.seen_n + 1.0)
         return 1.0 - math.exp(-r * n)
 
+    rehearsed = 0
     FADE = 0.5                                              # 残す方に入らなかった鍵を、上の段に足す時の重さ（薄れる）
 
     def kept(self, keys, n, sat=1.0):
@@ -142,19 +143,27 @@ class Memory:
             self.save(self.path)
 
     # ---- 読む（I40d で返事に使う。今は数えるだけ） ----
+    rehearse = False                                        # I44a: 読み出した鍵を、今の段にもう一度入れる（再記憶）
+
     def recall(self, words):
-        """新しい段から順に、語のある鍵を探す: [(段, 何番目, 鍵, 数)]。"""
+        """新しい段から順に、語のある鍵を探す: [(段, 何番目, 鍵, 数)]。
+        I44a（持ち主 2026-11-11「記憶から読み出された内容や走査で引っかかるものは、再記憶で残りやすく」）:
+        rehearse の時、引っかかった鍵を今の分の段に 1 回ぶん足す。次に畳む時に、その鍵は今の段でも出たことになり、薄れにくい。"""
         out = []
         for lv in LEVELS:
             for i in range(len(self.boards[lv]) - 1, -1, -1):
                 for k, v in self.boards[lv][i]["keys"].items():
                     if any(f"|{w}|" in k + "|" for w in words):
                         out.append((lv, i, k, v))
+        if self.rehearse and out:
+            ks = {k for _, _, k, _ in out}
+            self.open["分"].update({k: 1 for k in ks})
+            self.rehearsed += len(ks)
         return out
 
     def summary(self):
         return {lv: dict(枚=len(self.boards[lv]), 鍵=sum(len(b["keys"]) for b in self.boards[lv]),
-                         薄れた=sum(b.get("faded", 0) for b in self.boards[lv])) for lv in LEVELS} | dict(行=len(self.lines))
+                         薄れた=sum(b.get("faded", 0) for b in self.boards[lv])) for lv in LEVELS} | dict(行=len(self.lines), 再記憶=self.rehearsed)
 
     # ---- 置き場（非公開。PC のフォルダに JSON） ----
     def save(self, path):
@@ -293,6 +302,14 @@ class Important:
                 items.append(dict(kind=kind, value=val, keys=keys, convs=[conv], t=time.time(), mentions=1, done=False))
             got.append((kind, val))
         return got
+
+    def touch(self, item, conv):
+        """I44a: 思い出しで読み出した項目は、もう一度言われたのと同じに数える（再記憶）。"""
+        item["mentions"] = item.get("mentions", 1) + 1
+        item["recalled"] = item.get("recalled", 0) + 1
+        if conv not in item["convs"]:
+            item["convs"].append(conv)
+        item["t"] = time.time()
 
     def find(self, who, words):
         """相手の大事な板で、語を鍵に持つ項目（新しい順）。"""

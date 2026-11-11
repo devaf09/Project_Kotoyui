@@ -166,6 +166,7 @@ def main():
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
+    ap.add_argument("--rehearse", action="store_true", help="I44a: 思い出しで読み出した項目・記憶板で引っかかった鍵を再記憶する（残りやすくする）")
     ap.add_argument("--learn_w", action="store_true", help="I43a: 自分の板の掛け目（軽い語 0.3・項目 0.8・時 0.5）と近さの下限（0.15・6 割）を手で置かず、言って指摘された数から")
     ap.add_argument("--learn_marks", action="store_true", help="I41k: 大事な板の目印を見込みの記号にし、種類ごとに後で聞かれた割合で入れるか決める")
     ap.add_argument("--imp_p", type=float, default=0.9, help="I41e: 目印なしの行を、学んだ見込みで大事な板に入れる P の下限。負なら I41i: 経験から（目印のある行と同じくらい後で聞かれる帯だけ）")
@@ -225,6 +226,7 @@ def main():
     if a.memory:
         import memory_board as MB
         mem = MB.Memory(a.memory)
+        mem.rehearse = a.rehearse
         if a.forget:                                        # I40b: 期待より明るい鍵だけを上の段に足す
             mem.forget = True
             mem.set_base(works, bot.pb.pieces)
@@ -232,6 +234,7 @@ def main():
     if a.important:
         import memory_board as MB
         imp = MB.Important(a.important)
+        imp.rehearse = a.rehearse
     system = PARTNER + (PERSONA if a.persona else "")
     learner = None
     if a.learn_imp:
@@ -244,6 +247,7 @@ def main():
     log = [f"# 話し相手との会話（非公開）", "", f"- 話し相手: {a.model}、先生: {a.teacher or 'なし'}、会話 {a.convs} × {a.turns} 往復", ""]
     stage, streak = 1, 0
     for ci in range(a.convs):
+        bot.conv_no = ci + 1
         bot.conv["lines"] = []                              # 会話の行は会話ごとに空にする（経験・自覚・自分の板は持ち越す）
         bot.asked, bot.trial, bot._asked_attr = None, [], None
         human = rng.choice(openers)

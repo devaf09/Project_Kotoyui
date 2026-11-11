@@ -570,8 +570,12 @@ class Bot3(C2.Bot2):
             items = [x for x in items if not x["kind"].startswith("名前")] if ws else \
                 [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "名前"]   # 「私のこと覚えてる？」: 名前で答える
         self.conv["lines"].append(dict(text=sents and "".join(sents) or text, toks=toks, who="人"))
+        if getattr(self, "mem", None) is not None and ws:  # I44a: 問いの語で記憶板を走査（引っかかった鍵は rehearse の時 再記憶）
+            self.mem.recall(ws)
         if items:
             x = items[0]
+            if getattr(self.imp, "rehearse", False):
+                self.imp.touch(x, getattr(self, "conv_no", 0))
             line = (x["value"] if x["kind"].startswith("名前") else self._restate(x["value"])) + "、だよね。"
             why = f"大事な板: {x['kind']}「{x['value'][:30]}」（会話 {'・'.join(map(str, x['convs']))}、{x['mentions']} 回）から答える"
         else:
