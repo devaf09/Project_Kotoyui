@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import time
 import math
@@ -196,7 +197,15 @@ class Important:
 
     def kinds(self, text, toks):
         out = []
-        if text.rstrip("。！!…").endswith(("？", "?")):      # I40e: 問い（「覚えてる？」「何だったっけ？」「〜って？」）は大事なことそのものではない
+        # I40f: 問いの文（「覚えてる？」「〜って？」）は外し、同じ行の事実の文（「来週海に行くんだ。一緒に行く？」の前）だけを見る
+        sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
+        keep = [x for x in sents if not x.rstrip("。！!…」 ").endswith(("？", "?"))]
+        if not keep:
+            return out
+        if len(keep) < len(sents):
+            text = "".join(keep)
+            toks = [t for t in toks if t["text"] in text]
+        if text.startswith(("正解", "そうそう", "当たり")):   # 答え合わせの受けは、大事なことではない
             return out
         nouns = [t for t in toks if t["pos"] in NOUN]
         if any(c in text for c in NAME_CUE):
@@ -214,8 +223,7 @@ class Important:
                     w = [t for t in toks if t["pos"] in NOUN + ("PRON",) and pre.endswith(t["text"])]
                     if w and w[-1]["lemma"] not in ("私", "名前", "こと"):
                         nm = [w[-1]["text"]]
-                        own = [t for t in toks if t["pos"] in NOUN and t["i"] < w[-1]["i"] and t["lemma"] not in ("私", "僕", "俺", "うち", "あたし", "名前")
-                               and any(k["head"] == t["i"] and k["text"] in ("は", "の") for k in toks)]
+                        own = [t for t in toks if t["pos"] in NOUN and t["i"] < w[-1]["i"] and t["lemma"] not in ("私", "僕", "俺", "うち", "あたし", "名前")]
                         if own and not whose:               # 「うちの猫はモモっていうの」: 猫の名前
                             whose = own[-1]["lemma"]
             if not nm and any(c in text for c in NAME_CUE):
@@ -238,9 +246,18 @@ class Important:
         got = []
         for kind, val in ks:
             keys = sorted({f"組|{pc['n']}|{pc['c']}:{pc['p']}" for pc in pieces} | {f"名|{t['lemma']}" for t in toks if t["pos"] in NOUN})
-            hit = next((x for x in items if x["kind"] == kind and (x["value"] == val or (keys and set(keys) == set(x["keys"])))), None)
+            def same(x):                                    # I40f: 同じ予定（鍵の半分以上が同じ）は 1 項目にまとめる
+                if x["kind"] != kind:
+                    return False
+                if x["value"] == val:
+                    return True
+                a, b = set(keys), set(x["keys"])
+                return kind == "予定" and bool(a) and len(a & b) / len(a | b) >= 0.5
+            hit = next((x for x in items if same(x)), None)
             if hit:
                 hit["mentions"] += 1
+                if kind == "予定":
+                    hit["value"], hit["keys"] = val, sorted(set(hit["keys"]) | set(keys))
                 hit["convs"] = sorted(set(hit["convs"]) | {conv})
             else:
                 items.append(dict(kind=kind, value=val, keys=keys, convs=[conv], t=time.time(), mentions=1, done=False))

@@ -481,7 +481,7 @@ class Bot3(C2.Bot2):
     imp = None                                              # memory_board.Important（--recall）
     mem = None                                              # memory_board.Memory
     RECALL_CUE = ("覚えて", "何だったっけ", "なんだったっけ", "だっけ", "言ったっけ")
-    ENDS = ("なんだよね", "なんだよ", "なんだ", "なの", "だよね", "だよ", "だから覚えといて", "だから覚えておいて", "覚えといて",
+    ENDS = ("なんだよね", "なんだよ", "なんだ", "んだよね", "んだよ", "んだ", "なの", "だよね", "だよ", "だから覚えといて", "だから覚えておいて", "覚えといて",
             "覚えておいて", "よ", "ね", "の", "だ", "です")
 
     imp_time = ("明日", "明後日", "来週", "週末", "土曜", "日曜", "誕生日")
@@ -504,11 +504,18 @@ class Bot3(C2.Bot2):
         if self.imp is None or self._plain or not any(c in text for c in self.RECALL_CUE) or not text.rstrip("。…").endswith(("？", "?")):
             return None
         toks = CB.to_toks(self.nlp(text))
-        ws = [t["lemma"] for t in toks if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in ("私", "名前", "こと", "何")]
+        import re
+        # I40f: 問いの種類と語は、思い出す目印（覚えて・だっけ）のある文だけから取る（「楽しみにするよ。ねえ、私の名前覚えてる？」の前置きを見ない）
+        sents = [x for x in re.split(r"(?<=[。！!？?])", text) if x.strip()]
+        q = next((x for x in reversed(sents) if any(c in x for c in self.RECALL_CUE)), text)
+        q = q.split("ねえ、")[-1]
+        text = q
+        qt = CB.to_toks(self.nlp(q))
+        ws = [t["lemma"] for t in qt if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in ("私", "名前", "こと", "何")]
         items = self.imp.find("相手", ws) if ws else []
         # I40e: 問いの種類（名前・誰の名前・予定）に合う項目だけを選ぶ（合う項目が無ければ、別の項目を答えずに「覚えてない」）
         if "名前" in text:
-            whose = next((w for w in ws if w not in ("私",)), None)
+            whose = next((w for w in ws if w not in ("私", "うち", "僕", "俺", "あたし")), None)
             items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"].startswith("名前")
                      and ((f"（{whose}）" in x["kind"]) if whose else x["kind"] == "名前")]
             if not items and whose:                         # 「猫の名前」を「うちの猫はモモ」のような行で言っていた
@@ -516,13 +523,17 @@ class Bot3(C2.Bot2):
         elif "予定" in text or any(w in self.imp_time for w in ws):
             items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "予定"
                      and (not [w for w in ws if w != "予定"] or any(w in x["value"] for w in ws if w != "予定"))]
-        self.conv["lines"].append(dict(text=text, toks=toks, who="人"))
+        if "名前" not in text and "予定" not in text and not any(w in self.imp_time for w in ws):
+            items = [x for x in items if not x["kind"].startswith("名前")] if ws else \
+                [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "名前"]   # 「私のこと覚えてる？」: 名前で答える
+        self.conv["lines"].append(dict(text=sents and "".join(sents) or text, toks=toks, who="人"))
         if items:
             x = items[0]
             line = (x["value"] if x["kind"].startswith("名前") else self._restate(x["value"])) + "、だよね。"
             why = f"大事な板: {x['kind']}「{x['value'][:30]}」（会話 {'・'.join(map(str, x['convs']))}、{x['mentions']} 回）から答える"
         else:
-            hits = self.mem.recall(ws) if (self.mem is not None and ws) else []
+            # I40f: 記憶板からの「〜の話は覚えてる」は、前置きの語に当たって外れが多かった（I40e の 4 回とも外れ）ので、使わない
+            hits = []
             if hits:
                 lv, i, k, v = hits[0]
                 w = k.split("|")[1]
