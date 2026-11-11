@@ -470,9 +470,11 @@ class Bot3(C2.Bot2):
                 else:
                     continue
                 break
+            self._chunk = chunk
             if chunk and not cs:                            # I37a: 所の無い行の一続き（「ならん」って？）を返された: 行への聞き返し
                 cs = [("聞き返し", None)]
             trial, self.trial = self.trial, []
+            self._prev_trial = {pc["ns"] + pc["c"] + pc["ps"] for pc, _ in trial}
             if cs:
                 out = self.pointed(text, toks, a, cs, hums[-1]["text"] if hums else None)
                 return self._end_turn(out)
@@ -999,6 +1001,77 @@ class Bot3(C2.Bot2):
             out["why"] = out["why"].replace("自分の行に出る割合", "P(指摘)").replace("> 本", "> P(そのまま)")
         return out
 
+    # ---- I46a: 聞き返し（「〜って？」）に、前の人の行に戻らず、聞き返された自分の行を言い直す ----
+    use_restate = False
+    _restate_head = None
+
+    def restate_head(self):
+        """本の台詞で「Xって？」（X は前の行にある）の次の行の始めの語（感動詞・副詞）。多いものから。手で置かない。"""
+        if self._restate_head is None:
+            c = Counter()
+            for wk in self.works:
+                L = wk["lines"]
+                for i in range(1, len(L) - 1):
+                    t = L[i]["text"].strip("「」")
+                    m = re.search(r"([^、。「」！？\s]{1,12}?)って", t)
+                    if not (m and t.endswith(("？", "?")) and m.group(1) in L[i - 1]["text"] and L[i + 1]["text"].startswith("「")):
+                        continue
+                    tk = L[i + 1]["toks"]
+                    if len(tk) > 2 and tk[0]["text"] == "「" and tk[1]["pos"] in ("INTJ", "ADV") and tk[2]["text"] in ("、", "。", "…", "……"):
+                        c[tk[1]["text"]] += 1
+            self._restate_head = c
+        return self._restate_head.most_common(1)[0][0] if self._restate_head and self._restate_head.most_common(1)[0][1] >= 2 else ""
+
+    def restate(self, a, tgt, prev_human, sure=True):
+        """自分の行のうち、聞き返された所を含む文を言い直す。
+        問いだった時: 前の人の行の名詞（と助詞）を前に置き、「〜のかなって。」と、何を聞いたかを言う。
+        言い切りだった時: 聞き返された所を含む文を、前の人の行の名詞で始めて「〜ってこと。」と言い直す。"""
+        own = a["text"].strip("「」")
+        sents = [x for x in re.split(r"(?<=[。！!？?])", own) if x.strip()]
+        keys = [pc["ps"] for pc in tgt if pc["ps"]] + [pc["ns"] for pc in tgt if pc["ns"]] or \
+            ([self._chunk] if getattr(self, "_chunk", "") else [])   # 所の無い行（「行くって？」）は、返された一続き
+        sent = next((x for x in sents if any(k and k in x for k in keys)), None)
+        if sent is None:
+            return None
+        st = CB.to_toks(self.nlp(sent))
+        while st and (st[0]["pos"] in ("INTJ", "PUNCT") or st[0]["text"] in ("、",)):   # 頭の「はい、」を外す
+            st = st[1:]
+        body = "".join(t["text"] for t in st).rstrip("。！!？?…")
+        if len(body) < 2:
+            return None
+        ctx = ""
+        if prev_human:
+            ht = CB.to_toks(self.nlp(prev_human))
+            for i, t in enumerate(ht):                      # 前の人の行の、いちばん珍しい名詞とその助詞（猫と・海に）
+                if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in C2.YOU and t["lemma"] not in body and i + 1 < len(ht) \
+                        and ht[i + 1]["pos"] == "ADP" and ht[i + 1]["text"] not in ("の", "は"):
+                    if not ctx or self.idf.get(t["lemma"], 0.0) > ctx[0]:
+                        ctx = (self.idf.get(t["lemma"], 0.0), t["text"], ht[i + 1]["text"])
+            if ctx:                                         # 同じ助詞が言い直す文にもある（「映画を、内容を見る」）: 名詞を「の」でつなぐ
+                cases = {x["text"] for x in st if x["pos"] == "ADP"}
+                ctx = ctx[1] + "の" if ctx[2] in cases else ctx[1] + ctx[2] + "、"
+            else:
+                ctx = ""
+        head = self.restate_head()
+        if self._is_q(st) or sent.rstrip().endswith(("？", "?")):
+            b = body[:-1] if body.endswith("の") else body
+            line = (head + "、" if head else "") + ctx + b + "のかなって。"
+            why = "自分の問い「" + sent.strip() + "」を、相手の話（" + (ctx or "なし") + "）を前に置いて言い直す"
+        else:
+            if not sure:                                    # 言い切りの所が、言ってみた形・指摘の見込みの大きい形: 言い直さず、作り直す（介入）
+                return None
+            cl = next((x for k in keys for x in body.split("、") if k and k in x), body)   # 聞き返された所（述語を先に）を含む節だけ
+            for pc in tgt[:1]:                              # 主語が前の節にある時（「理沙は…、半額になる」）は、主語を前に付ける
+                if pc["ns"] and pc["ns"] not in cl and pc["ps"] and pc["ps"] in cl:
+                    cl = pc["ns"] + pc["c"] + cl
+            body = cl if len(cl) >= 2 else body
+            line = (head + "、" if head else "") + ctx + body + "ってこと。"
+            why = "自分の行「" + sent.strip() + "」を言い直す"
+        if self.dark_line(line):
+            return None
+        self.mark_line(own)
+        return dict(line=line, tries=0, breaks=[], sim=0, why=why + (f"（始めの語「{head}」は本の聞き返しの次の行から）" if head else ""))
+
     def pointed(self, text, toks, a, cs, prev_human):
         pcs = self.pb.pieces(a["toks"])
         hit = {w for _, w in cs if w}
@@ -1006,6 +1079,7 @@ class Bot3(C2.Bot2):
         if not tgt and pcs:                                 # 指摘された語が分からない（「え？」）: 自分でいちばん怪しいと見る所
             tgt = [max(pcs, key=self.p_point)]
         qa = self._is_q(a["toks"])
+        pre_p = max((self.p_point(pc, qa) for pc in tgt), default=0.0)   # I46a: 経験を足す前の P(指摘)
         if self.sb is not None and self._last_form:          # I39a: 自分の板で答えた形が指摘された
             self.sb.note(self._last_form, "指摘")
             self.sb.note_pair(self._last_pair, "指摘")
@@ -1017,10 +1091,17 @@ class Bot3(C2.Bot2):
             self.aware[("指摘された", pc["ns"] + pc["c"] + pc["ps"])] += 1.0
             for k in (("補語", pc["n"]), ("目的語", pc["n"])):
                 self.aware_keys[k] += 1.0
+        if self.use_restate and any(k == "聞き返し" for k, _ in cs):   # I46a: 「〜って？」は、聞き返された自分の行を言い直す
+            out = self.restate(a, tgt, prev_human, sure=pre_p <= 0.5 and not any(pc["ns"] + pc["c"] + pc["ps"] in getattr(self, "_prev_trial", ()) for pc in tgt))
+            if out is not None:
+                out["why"] = f"相手の聞き返し → 所「{'・'.join(pc['ns'] + pc['c'] + pc['ps'] for pc in tgt) or 'なし'}」を経験に足し、" + out["why"]
+                return self._log(text, toks, out)
         r = self.pick_route([k for k, _ in cs])
         kinds = "・".join(dict.fromkeys(k for k, _ in cs))
         where = "・".join(pc["ns"] + pc["c"] + pc["ps"] for pc in tgt) or "（所なし、行「" + a["text"].strip("「」") + "」）"
         route = r[1] if r else "そのまま"
+        if self.use_restate and any(k == "聞き返し" for k, _ in cs) and route == "そのまま" and prev_human:
+            route = "介入"                                   # I46a: 聞き返しの行そのものに、はい/いいえで返さない（言い直せない時は作り直す）
         head = f"相手の指摘（{kinds}）→ 所「{where}」を経験に足し、自覚の板に残す。回し先 {route}"
         if route == "介入" and prev_human:
             out = self._name(self.checked_reply(prev_human))
