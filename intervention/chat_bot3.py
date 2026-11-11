@@ -459,7 +459,7 @@ class Bot3(C2.Bot2):
             for mk in ("って", "？", "?"):
                 if mk in text:
                     c0 = text.split(mk, 1)[0].strip("「」『』 　")   # 「天気がなるの」って？ の閉じかっこも外す
-                    if len(c0) >= 2 and c0 in bots[-1]["text"]:
+                    if (len(c0) >= 2 or c0 and c0 == bots[-1]["text"].strip("「」？?。 ")) and c0 in bots[-1]["text"]:   # I46d: 1 字の語だけの行（「海？」）も
                         chunk = c0
                         break
             for pc in self.pb.pieces(a["toks"]):
@@ -1038,7 +1038,7 @@ class Bot3(C2.Bot2):
         while st and (st[0]["pos"] in ("INTJ", "PUNCT") or st[0]["text"] in ("、",)):   # 頭の「はい、」を外す
             st = st[1:]
         body = "".join(t["text"] for t in st).rstrip("。！!？?…")
-        if len(body) < 2:
+        if not body or len(body) < 2 and any(t["pos"] in ("VERB", "ADJ", "AUX") for t in st):
             return None
         ctx = ""
         if prev_human:
@@ -1054,7 +1054,11 @@ class Bot3(C2.Bot2):
             else:
                 ctx = ""
         head = self.restate_head()
-        if self._is_q(st) or sent.rstrip().endswith(("？", "?")):
+        if not any(t["pos"] in ("VERB", "ADJ", "AUX") for t in st) and sent.rstrip().endswith(("？", "?")):
+            # I46d: 語だけの聞き返し（「猫？」）を返された（「猫って？」）: 何を聞いたかを言う（「猫のかなって」にしない）
+            line = (head + "、" if head else "") + body + "って、何のことかなって。"
+            why = "自分の語だけの聞き返し「" + sent.strip() + "」を、何を聞いたかで言い直す"
+        elif self._is_q(st) or sent.rstrip().endswith(("？", "?")):
             b = body[:-1] if body.endswith("の") else body
             line = (head + "、" if head else "") + ctx + b + "のかなって。"
             why = "自分の問い「" + sent.strip() + "」を、相手の話（" + (ctx or "なし") + "）を前に置いて言い直す"
