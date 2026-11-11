@@ -628,6 +628,9 @@ class Bot3(C2.Bot2):
         if not wh_plan and "名前" not in text and "予定" not in text and not any(w in self.imp_time for w in ws):
             items = [x for x in items if not x["kind"].startswith("名前")] if ws else \
                 [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "名前"]   # 「私のこと覚えてる？」: 名前で答える
+        qv = [t["lemma"] for t in qt if t["pos"] == "VERB" and t["lemma"] not in ("覚える", "する", "いる", "ある", "知る")]
+        if qv and not wh_plan and "名前" not in text:      # I46g: 「海に行くの、覚えてる？」（動詞のある問い）: 同じ動詞のある予定を『相手のこと』より先に
+            items = sorted(items, key=lambda x: (not (x["kind"] == "予定" and any(v[:1] in x["value"] for v in qv)), x["kind"] != "予定"))
         self.conv["lines"].append(dict(text=sents and "".join(sents) or text, toks=toks, who="人"))
         if items:
             x = items[0]
@@ -1029,8 +1032,8 @@ class Bot3(C2.Bot2):
         言い切りだった時: 聞き返された所を含む文を、前の人の行の名詞で始めて「〜ってこと。」と言い直す。"""
         own = a["text"].strip("「」")
         sents = [x for x in re.split(r"(?<=[。！!？?])", own) if x.strip()]
-        keys = [pc["ps"] for pc in tgt if pc["ps"]] + [pc["ns"] for pc in tgt if pc["ns"]] or \
-            ([self._chunk] if getattr(self, "_chunk", "") else [])   # 所の無い行（「行くって？」）は、返された一続き
+        keys = ([self._chunk] if getattr(self, "_chunk", "") else []) + \
+            [pc["ps"] for pc in tgt if pc["ps"]] + [pc["ns"] for pc in tgt if pc["ns"]]   # I46g: 返された一続き（「コンピュータの中」）を先に   # 所の無い行（「行くって？」）は、返された一続き
         sent = next((x for x in sents if any(k and k in x for k in keys)), None)
         if sent is None:
             return None
@@ -1055,7 +1058,16 @@ class Bot3(C2.Bot2):
                         ctx = (self.idf.get(t["lemma"], 0.0), t["text"], ht[i + 1]["text"])
             if ctx:                                         # 同じ助詞が言い直す文にもある（「映画を、内容を見る」）: 名詞を「の」でつなぐ
                 cases = {x["text"] for x in st if x["pos"] == "ADP"}
-                ctx = ctx[1] + "の" if ctx[2] in cases else ctx[1] + ctx[2] + "、"
+                if ctx[2] in cases:
+                    ctx = ctx[1] + "の"
+                else:                                       # I46g: その助詞の枠を、言い直す述語が本でふつうに取る時だけ前に置く（「猫を、正解は見つかった」にしない）
+                    root = next((x for x in st if x["dep"] == "ROOT"), None)
+                    ro = {"を": "される", "で": "で・に", "に": "で・に", "へ": "で・に"}.get(ctx[2])
+                    ok = False
+                    if root is not None and root["pos"] in L.PRED and ro:
+                        e = C2.S.ratio(self.G, C2.Board(), ("有", ro, root["lemma"]), ("出", root["lemma"]))
+                        ok = react(e, 1.0)[0] < react(e, 0.0)[0]
+                    ctx = ctx[1] + ctx[2] + "、" if ok else ""
             else:
                 ctx = ""
         for tail in ("だけど、君は", "けど、君は", "。君は", "、君は"):   # 自分の板の問い返しの形（「…だけど、君は？」）の後ろは、聞き返された所でない
@@ -1065,11 +1077,13 @@ class Bot3(C2.Bot2):
                 break
         head = self.restate_head()
         sb = getattr(self, "sb", None)
-        mine = [pc for pc in (sb.pcs if sb is not None else []) if sb.surf(pc) in body]
+        mine = [pc for pc in (sb.pcs if sb is not None else []) if sb.surf(pc) in body and any(k and k in sb.surf(pc) for k in keys[:1])] or \
+            [pc for pc in (sb.pcs if sb is not None else []) if sb.surf(pc) in body]
         if mine and not sent.rstrip().endswith(("？", "?")):
             # I46e: 自分の板の所（「食べ物は電気」）を聞き返された: 自分の板のほかの所で、近いもの（本で一緒に出る・語板で近い・同じ語）を理由にして言い直す
-            pc = max(mine, key=lambda x: len(sb.surf(x)))
-            cs_ = [x for x in sb.near(CB.to_toks(self.nlp(sb.surf(pc)))) if x[3] is not pc and sb.surf(x[3]) not in body]
+            pc = mine[0] if len(mine) == 1 else max(mine, key=lambda x: len(sb.surf(x)))
+            cs_ = [x for x in sb.near(CB.to_toks(self.nlp(sb.surf(pc)))) if x[3] is not pc and sb.surf(x[3]) not in body
+                   and x[3]["item"] == pc["item"]]          # I46g: 理由は同じ項目（食べ物・家）からだけ（「予定は無いので、食べ物は電気」にしない）
             if cs_:
                 e = max(cs_, key=lambda x: x[0])[3]
                 es, ene = sb._plain(e)
@@ -1078,6 +1092,8 @@ class Bot3(C2.Bot2):
                     self.mark_line(own)
                     return dict(line=line, tries=0, breaks=[], sim=0,
                                 why=f"自分の板の所「{sb.surf(pc)}」を、近い所「{sb.surf(e)}」（{e['item']}）を理由にして言い直す")
+        if mine:                                            # I46g: 自分の板の所はプロフィールにある言い方なので、理由が無くてもそのまま言い直してよい
+            sure = True
         if not any(t["pos"] in ("VERB", "ADJ", "AUX") for t in st) and sent.rstrip().endswith(("？", "?")):
             # I46d: 語だけの聞き返し（「猫？」）を返された（「猫って？」）: 何を聞いたかを言う（「猫のかなって」にしない）
             line = (head + "、" if head else "") + body + "って、何のことかなって。"
@@ -1129,7 +1145,7 @@ class Bot3(C2.Bot2):
         kinds = "・".join(dict.fromkeys(k for k, _ in cs))
         where = "・".join(pc["ns"] + pc["c"] + pc["ps"] for pc in tgt) or "（所なし、行「" + a["text"].strip("「」") + "」）"
         route = r[1] if r else "そのまま"
-        if self.use_restate and any(k == "聞き返し" for k, _ in cs) and route == "そのまま" and prev_human:
+        if self.use_restate and any(k == "聞き返し" for k, _ in cs) and route not in ("介入", "聞き返す") and prev_human:
             route = "介入"                                   # I46a: 聞き返しの行そのものに、はい/いいえで返さない（言い直せない時は作り直す）
         head = f"相手の指摘（{kinds}）→ 所「{where}」を経験に足し、自覚の板に残す。回し先 {route}"
         if route == "介入" and prev_human:

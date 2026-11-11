@@ -233,7 +233,16 @@ class Memory:
                  "昨日": [("昨日", yday), ("この前", prev), ("今日", today)],
                  "この前": [("この前", prev), ("昨日", yday), ("今日", today)]}[when]
         said = {n for lb in self.lines if lb["who"] == "人" for n in lb["nouns"]}   # 話題は、相手が口にした名詞から（自分の作った行の語は外す）
+        cur, d0 = self.n_conv + 1, (self.n_conv // self.DAY) * self.DAY
+        rng = {"さっき": (cur, cur), "この前": (self.n_conv, self.n_conv), "今日": (d0 + 1, cur), "昨日": (d0 - self.DAY + 1, d0)}
         for name, keys in order:
+            lo, hi = rng[name]                              # I46g: その段の行のうち、相手の行で出た割合（ボット自身の行で何度も言った語を話題にしない）
+            hum, allc = Counter(), Counter()
+            for lb in self.lines:
+                if lo <= lb["conv"] <= hi:
+                    for n_ in lb["nouns"]:
+                        allc[n_] += 1
+                        hum[n_] += lb["who"] == "人"
             sc = []
             for k, v in keys.items():
                 if not k.startswith("名|"):
@@ -242,7 +251,8 @@ class Memory:
                 if w in skip or w in LIGHT_N or w not in said or len(w) < 2 and not ("\u4e00" <= w <= "\u9fff"):
                     continue
                 r = (self.base.get(k, 0) + self.seen.get(k, 0) + 0.5) / (self.base_n + self.seen_n + 1.0)
-                sc.append((v * -math.log(min(r, 0.999)), w, v))
+                share = hum[w] / allc[w] if allc[w] else 1.0
+                sc.append((v * share * -math.log(min(r, 0.999)), w, v))
             sc.sort(reverse=True)
             if sc:
                 return name, [(w, v) for _, w, v in sc[:n]]
