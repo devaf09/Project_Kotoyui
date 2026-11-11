@@ -298,8 +298,47 @@ class Bot2(CB.Bot):
         ok = [(-len(s), v, s) for s, v in c.items() if all(self.pmarks[s][k] == want[k] for k in L.MARKS)]
         if ok:
             return max(ok)[2]
+        rv = self.rev_form(lemma, want)                     # I42e: 本で見ていない印の組は、逆引き（意味の組 → 繋ぎの語と並び）で作る
+        if rv:
+            return rv
         ok = [(-len(s), v, s) for s, v in c.items() if self.pmarks[s]["否定"] == want["否定"] and self.pmarks[s]["た"] == want["た"]]
         return max(ok)[2] if ok else None
+
+    REV_MEAN = {"た": "過去", "丁寧": "丁寧", "否定": "否定", "相": "進行"}
+
+    def enable_rev(self, works):
+        """I42e: 逆引きの板（i42_fused_flow の 表+融合の板・形を戻す表）を本から作る。"""
+        import i42_fused_flow as FF
+        tr = FF.items(works)
+        self._ff = FF
+        self.rev = FF.Reverse(tr, FF.Fused(tr))
+        self.rev_surf, self.rev_fsurf = FF.Surface(tr), FF.FlowSurface(tr)
+        self.rev_log = Counter()
+
+    def rev_form(self, lemma, want):
+        if getattr(self, "rev", None) is None:
+            return None
+        pos = self.lpos.get(lemma, "VERB")
+        m = tuple(sorted(self.REV_MEAN[k] for k in L.MARKS if want.get(k) and not (k == "相" and pos != "VERB")))
+        sy = ["位置:文末", "後ろ:。", "時:無し", "前の行:無し", "台詞:はい", "品詞:" + pos, "係り:ROOT", "語:" + lemma]
+        if self._ff.wclass(lemma, pos) == "形な" and ("否定" in m or ("過去" in m and "丁寧" not in m)):
+            m = tuple(sorted(m + ("断定",)))               # 好き → 好きじゃない・好きだった（な形容詞は だ を通して付く）
+        fl = None
+        for drop in ((), ("進行",), ("丁寧",)):           # 本に無い組（歩いていませんでした）は、少ない印を落として表で引く
+            mm = tuple(x for x in m if x not in drop)
+            if mm and (drop == () or mm != m):
+                fl = self.rev.table(lemma, mm, pos)
+                if fl is not None:
+                    break
+        if fl is None:
+            fl = self.rev.search(sy, m)
+        if fl is None:
+            self.rev_log["作れず"] += 1
+            return None
+        out = self.rev_surf.form(lemma, fl, pos) + self.rev_fsurf.form(fl, sy)
+        self.rev_log["作った"] += 1
+        self.rev_log["作った:" + out] += 1
+        return out
 
     def yes_no_me(self, toks):
         root = next((t for t in toks if t["dep"] == "ROOT" and t["pos"] in L.PRED), None)

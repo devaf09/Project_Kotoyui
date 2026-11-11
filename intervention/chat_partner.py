@@ -165,6 +165,7 @@ def main():
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
+    ap.add_argument("--rev", action="store_true", help="I42e: 述語の形を、本で見ていない印の組は逆引き（意味の組 → 繋ぎの語と並び、i42_fused_flow）で作る")
     ap.add_argument("--learn_imp", action="store_true", help="I41a: 大事かどうかを、後で「覚えてる？」と聞かれたかから学び、目印に当たらない行も P(大事) が高ければ大事な板に入れる")
     ap.add_argument("--recall", action="store_true", help="I40d: 「覚えてる？」に大事な板・記憶板で答える（--important が要る）")
     ap.add_argument("--persona", action="store_true", help="I40c: 話し相手を、名前・予定・頼みごとを持つ同じ人にし、ときどきそれを言わせ、覚えているか聞かせる")
@@ -195,6 +196,8 @@ def main():
     B3.Bot3.use_variants = a.reader == "own"
     bot = B3.Bot3(nlp, works, pointing=a.pointing, route=a.route, dialogue=a.dialogue, smooth="事後", attrs=a.attrs, use_at=bool(a.attrs))
     bot.trial_mode, bot.use_you = "unseen", True
+    if a.rev:
+        bot.enable_rev(works)
     bot.use_good = a.good
     bot.use_flow = a.flow
     bot.use_base = a.base
@@ -369,6 +372,9 @@ def main():
         if learner is not None:
             learner.end_conv(ci + 1)
             c["大事さの経験"] = dict(learner.grain.n)
+        if getattr(bot, "rev_log", None) is not None:
+            c["逆引き"] = {k: v for k, v in bot.rev_log.items() if not k.startswith("作った:")}
+            c["逆引きの形"] = sorted((k[4:] for k in bot.rev_log if k.startswith("作った:")))[:30]
         if imp is not None:
             imp.save()
         if mem is not None:

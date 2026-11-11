@@ -240,7 +240,7 @@ class Surface:
 
 # I42b: 逆引き。言いたい意味（過去・進行・否定・丁寧 …）を順なしの組で渡し、繋ぎの語（て・で）と並びを融合の板で戻す。
 MEAN = {"た": "過去", "だ": "断定", "いる": "進行", "てる": "進行", "おる": "進行", "ない": "否定", "ん": "説明", "ず": "否定",
-        "ぬ": "否定", "ます": "丁寧", "です": "丁寧", "くださる": "丁寧", "いたす": "丁寧", "なさる": "丁寧", "れる": "受身・可能",
+        "ぬ": "否定", "ます": "丁寧", "です": "丁寧", "くださる": "頼み・敬い", "いたす": "へりくだり", "なさる": "頼み・敬い", "れる": "受身・可能",
         "られる": "受身・可能", "せる": "使役", "させる": "使役", "たい": "希望", "ほしい": "希望", "よう": "意志・推量", "う": "意志・推量",
         "だろう": "意志・推量", "そう": "様子", "らしい": "様子", "みたい": "様子", "しまう": "済んでしまう", "ちゃう": "済んでしまう",
         "みる": "試し", "おく": "備え", "とく": "備え", "くる": "向き", "いく": "向き", "くれる": "やりもらい", "もらう": "やりもらい",
@@ -278,6 +278,12 @@ def _logp(s):
     return {k: v - z for k, v in s.items()}
 
 
+def wclass(lem, pos):
+    if pos == "ADJ":
+        return "形い" if lem.endswith("い") else "形な"
+    return pos
+
+
 def _pos(sy):
     return next((x[3:] for x in sy if x.startswith("品詞:")), "VERB")
 
@@ -295,14 +301,22 @@ class Reverse:
         self.tab = defaultdict(Counter)
         self.stem = defaultdict(Counter)
         self.by = defaultdict(Counter)        # 意味 → それを満たす語
+        self.first = defaultdict(Counter)     # 語の類ごとの、流れの始めの語
+        self.ctab = defaultdict(Counter)      # I42e: 語の類（動詞・い形容詞・な形容詞）ごとの表
         for its in train:
             for sy, lem, fl, _, fs in its:
                 m = meaning(fl, fs, _pos(sy))
                 self.tab[m][fl] += 1
                 self.stem[(lem, m)][fl] += 1
+                self.ctab[(wclass(lem, _pos(sy)), m)][fl] += 1
+                if fl:
+                    self.first[wclass(lem, _pos(sy))][fl[0]] += 1
                 for x, t in zip(fl, tags(fl, fs, _pos(sy))):
                     if t and x not in GLUE:
                         self.by[t][x] += 1
+        for k, c in list(self.by.items()):    # I42e: 意味を満たす語は、その意味の 5% 以上を占めるものだけ（ください・なさい を 丁寧 にしない）
+            n = sum(c.values())
+            self.by[k] = Counter({x: v for x, v in c.items() if v >= 0.05 * n})
         self.by["て形"] = Counter({"て": 1, "で": 1})
         self.prec = Counter()                 # 意味 a が b より前に来た数（並びの決まりを本から）
         for its in train:
@@ -312,9 +326,18 @@ class Reverse:
                     for j in range(i + 1, len(ms)):
                         self.prec[(ms[i], ms[j])] += 1
 
-    def table(self, lem, m):
-        c = self.stem.get((lem, m)) or self.tab.get(m)
-        return c.most_common(1)[0][0] if c else None
+    def table(self, lem, m, pos="VERB"):
+        k = wclass(lem, pos)
+        c = self.stem.get((lem, m)) or self.ctab.get((k, m))
+        if c:
+            return c.most_common(1)[0][0]
+        if k == "形な":
+            return None
+        # 全部の表から引く時は、その語の類で本に出た始めの語で始まる流れだけ（い形容詞に ます を付けない）
+        for fl, _ in (self.tab.get(m) or Counter()).most_common():
+            if not fl or self.first[k].get(fl[0]):
+                return fl
+        return None
 
     def search(self, sy, m):
         """beam の 1 つ = (点, 流れ, 各語が満たした意味（繋ぎは None）, 残りの意味)。"""
@@ -388,7 +411,7 @@ def run(works, hold=10, seed=0):
         res["融合の板・始めの 1 つ"] += (pz[:1] == fl[:1])
         m = meaning(fl, fs, _pos(sy))
         seen = m in rev.tab
-        pt = rev.table(lem, m)
+        pt = rev.table(lem, m, _pos(sy))
         pr = rev.search(sy, m)
         res["逆引き・数"] += 1
         res["逆引き・表"] += pt == fl
@@ -408,7 +431,7 @@ def run(works, hold=10, seed=0):
         sc_.pop("他", None)
         mp = tuple(x for x in max(sc_, key=sc_.get).split("・") if x)
         res["二段・意味"] += mp == m
-        p2 = rev.table(lem, mp) if mp in rev.tab else rev.search(sy, mp)
+        p2 = rev.table(lem, mp, _pos(sy)) if mp in rev.tab else rev.search(sy, mp)
         res["二段・流れ"] += p2 == fl
         f0 = surf.form(lem, fl, _pos(sy))                             # 形を戻す（正しい流れを渡した時の、語幹の表記）
         res["形を戻す・語幹"] += f0 == s0
