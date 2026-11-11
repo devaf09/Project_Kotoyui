@@ -323,11 +323,16 @@ class Bot2(CB.Bot):
         sy = ["位置:文末", "後ろ:。", "時:無し", "前の行:無し", "台詞:はい", "品詞:" + pos, "係り:ROOT", "語:" + lemma]
         if self._ff.wclass(lemma, pos) == "形な" and ("否定" in m or ("過去" in m and "丁寧" not in m)):
             m = tuple(sorted(m + ("断定",)))               # 好き → 好きじゃない・好きだった（な形容詞は だ を通して付く）
+        if not m:
+            return lemma
+        if "否定" in m and self._ff.wclass(lemma, pos) == "形な" and self.rev.never(lemma, "否定", n=3):
+            self.rev_log["その語に付かない"] += 1             # I42f: 本で一度も付かなかった印（いかがじゃない）は作らない
+            return None
         fl = None
         for drop in ((), ("進行",), ("丁寧",)):           # 本に無い組（歩いていませんでした）は、少ない印を落として表で引く
             mm = tuple(x for x in m if x not in drop)
             if mm and (drop == () or mm != m):
-                fl = self.rev.table(lemma, mm, pos)
+                fl = self.rev.table(lemma, mm, pos, quote=True)
                 if fl is not None:
                     break
         if fl is None:

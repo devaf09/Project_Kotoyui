@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 import random
 import sys
@@ -309,8 +310,10 @@ def main():
                             k = ("目印あり・" if mk else "目印なし・") + lab
                             c["大事さ"][k] = c["大事さ"].get(k, 0) + 1
                             log.append(f"  - 大事さ: P(大事) {p_:.2f}（目印 {'あり' if mk else 'なし'}）")
-                            if p_ > 0.5 and not mk:         # 目印に当たらないが、学んだ見込みでは大事: 相手のこととして入れる
-                                imp.people.setdefault("相手", []).append(dict(kind="相手のこと", value=human, keys=sorted(
+                            # I41c: 問いの文と聞き返し（「〜って？」）は入れない。言った事実の文だけを入れる
+                            fact = "".join(x for x in re.split(r"(?<=[。！!？?])", human) if x.strip() and not x.rstrip().endswith(("？", "?")))
+                            if p_ > 0.5 and not mk and fact.strip():   # 目印に当たらないが、学んだ見込みでは大事: 相手のこととして入れる
+                                imp.people.setdefault("相手", []).append(dict(kind="相手のこと", value=fact.strip(), keys=sorted(
                                     {f"名|{t['lemma']}" for t in hl["toks"] if t["pos"] in ("NOUN", "PROPN")}), convs=[ci + 1],
                                     t=time.time(), mentions=1, done=False, learned=True))
                 for kind, val in got:

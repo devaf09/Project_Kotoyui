@@ -303,12 +303,19 @@ class Reverse:
         self.by = defaultdict(Counter)        # 意味 → それを満たす語
         self.first = defaultdict(Counter)     # 語の類ごとの、流れの始めの語
         self.ctab = defaultdict(Counter)      # I42e: 語の類（動詞・い形容詞・な形容詞）ごとの表
+        self.dstem, self.dctab = defaultdict(Counter), defaultdict(Counter)
+        self.lem_n, self.lem_m = Counter(), defaultdict(Counter)   # 語幹ごとの数と、付いた意味の数
         for its in train:
             for sy, lem, fl, _, fs in its:
                 m = meaning(fl, fs, _pos(sy))
                 self.tab[m][fl] += 1
                 self.stem[(lem, m)][fl] += 1
                 self.ctab[(wclass(lem, _pos(sy)), m)][fl] += 1
+                self.lem_n[lem] += 1
+                self.lem_m[lem].update(m)
+                if "台詞:はい" in sy:                 # I42f: 台詞だけの表（話し言葉の形: 空いてない・してる）
+                    self.dstem[(lem, m)][fl] += 1
+                    self.dctab[(wclass(lem, _pos(sy)), m)][fl] += 1
                 if fl:
                     self.first[wclass(lem, _pos(sy))][fl[0]] += 1
                 for x, t in zip(fl, tags(fl, fs, _pos(sy))):
@@ -326,9 +333,17 @@ class Reverse:
                     for j in range(i + 1, len(ms)):
                         self.prec[(ms[i], ms[j])] += 1
 
-    def table(self, lem, m, pos="VERB"):
+    def never(self, lem, need, n=20):
+        """I42f: 本で n 回以上出たのに、一度もその意味が付かなかった語（「いかが」に否定）。"""
+        return self.lem_n[lem] >= n and not self.lem_m[lem].get(need)
+
+    def table(self, lem, m, pos="VERB", quote=False):
         k = wclass(lem, pos)
-        c = self.stem.get((lem, m)) or self.ctab.get((k, m))
+        c = None
+        if quote:
+            d = self.dstem.get((lem, m))
+            c = d if d and sum(d.values()) >= 3 else self.dctab.get((k, m))
+        c = c or self.stem.get((lem, m)) or self.ctab.get((k, m))
         if c:
             return c.most_common(1)[0][0]
         if k == "形な":

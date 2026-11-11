@@ -532,11 +532,20 @@ class Bot3(C2.Bot2):
         ws = [t["lemma"] for t in qt if t["pos"] in ("NOUN", "PROPN") and t["lemma"] not in ("私", "名前", "こと", "何")]
         items = self.imp.find("相手", ws) if ws else []
         # I40e: 問いの種類（名前・誰の名前・予定）に合う項目だけを選ぶ（合う項目が無ければ、別の項目を答えずに「覚えてない」）
-        if "名前" in text:
+        wh_plan = any(w in text for w in ("どこ", "いつ", "何時", "何曜", "何日"))   # I41c: 「どこに行くか覚えてる？」は予定の問い
+        if wh_plan and "名前" not in text and "誕生日" not in text:
+            items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] in ("予定", "頼まれごと")
+                     and (not ws or any(w in x["value"] for w in ws))] or \
+                [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "予定"]
+        elif "名前" in text:
             whose = next((w for w in ws if w not in ("私", "うち", "僕", "俺", "あたし")), None)
             items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"].startswith("名前")
                      and ((f"（{whose}）" in x["kind"]) if whose else x["kind"] == "名前")]
             if not whose:                                   # I40g: 「私の名前」は、誰のでもない名前のうち、いちばん多く言われたもの
+                # I41c: 猫・犬などの名前として言われた語（「モモっていう名前の猫」）は外す
+                pet = ("猫", "犬", "ペット", "うさぎ", "鳥", "ハムスター")
+                others = [y["kind"] + y["value"] for y in self.imp.people.get("相手", []) if y["kind"] != "名前"]
+                items = [x for x in items if not any(x["value"] in v and any(p_ in v for p_ in pet) for v in others)] or items
                 items.sort(key=lambda x: -x["mentions"])
             if not items and whose:                         # 「猫の名前」を「うちの猫はモモ」のような行で言っていた
                 # I41b: 「猫を飼ってる」のように名前の無い行で答えない（「猫は〇〇」「猫の名前は〇〇」の形がある時だけ）
@@ -546,7 +555,7 @@ class Bot3(C2.Bot2):
         elif "予定" in text or any(w in self.imp_time for w in ws):
             items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] in ("予定", "頼まれごと")
                      and (not [w for w in ws if w != "予定"] or any(w in x["value"] for w in ws if w != "予定"))]
-        if "名前" not in text and "予定" not in text and not any(w in self.imp_time for w in ws):
+        if not wh_plan and "名前" not in text and "予定" not in text and not any(w in self.imp_time for w in ws):
             items = [x for x in items if not x["kind"].startswith("名前")] if ws else \
                 [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "名前"]   # 「私のこと覚えてる？」: 名前で答える
         self.conv["lines"].append(dict(text=sents and "".join(sents) or text, toks=toks, who="人"))
