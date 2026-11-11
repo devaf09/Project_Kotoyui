@@ -541,7 +541,7 @@ class Bot3(C2.Bot2):
             if not items and whose:                         # 「猫の名前」を「うちの猫はモモ」のような行で言っていた
                 items = [x for x in self.imp.find("相手", [whose]) if x["kind"] in ("相手のこと", "名前（" + whose + "）")]
         elif "予定" in text or any(w in self.imp_time for w in ws):
-            items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "予定"
+            items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] in ("予定", "頼まれごと")
                      and (not [w for w in ws if w != "予定"] or any(w in x["value"] for w in ws if w != "予定"))]
         if "名前" not in text and "予定" not in text and not any(w in self.imp_time for w in ws):
             items = [x for x in items if not x["kind"].startswith("名前")] if ws else \
