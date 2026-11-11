@@ -168,51 +168,78 @@ class Fused:
 
 
 class FlowSurface:
-    """流れの 1 つずつの表記: (その語, 次に付く語) → 本で出た表記（「いる」の次が「た」なら「い」、「ない」の次が「た」なら「なかっ」）。"""
+    """流れの 1 つずつの表記: (その語, 次に付く語, 位置) → 本で出た表記（「いる」の次が「た」なら「い」、「ない」の次が「た」なら「なかっ」、
+    終わりの「だ」が名詞へなら「な」・文中なら「に」）。位置の無い表、次の語の無い表の順に下がる。"""
 
     def __init__(self, train):
         self.t = defaultdict(Counter)
         for its in train:
-            for _, _, fl, _, fs in its:
+            for sy, _, fl, _, fs in its:
+                pz = sy[0]
                 for i, (l, x) in enumerate(zip(fl, fs)):
-                    self.t[(l, fl[i + 1] if i + 1 < len(fl) else END)][x] += 1
+                    n = fl[i + 1] if i + 1 < len(fl) else END
+                    self.t[(l, n, pz)][x] += 1
+                    self.t[(l, n)][x] += 1
                     self.t[(l, "*")][x] += 1
 
-    def form(self, fl):
+    def form(self, fl, sy=None):
         out = []
         for i, l in enumerate(fl):
-            c = self.t.get((l, fl[i + 1] if i + 1 < len(fl) else END)) or self.t.get((l, "*"))
+            n = fl[i + 1] if i + 1 < len(fl) else END
+            c = (sy and self.t.get((l, n, sy[0]))) or self.t.get((l, n)) or self.t.get((l, "*"))
             out.append(c.most_common(1)[0][0] if c else l)
         return "".join(out)
 
 
 class Surface:
-    """語幹の形を戻す: (語幹, 流れの始め) → 表記。無ければ (語の終わりの字, 流れの始め) → 書き換え（終わりの字を何に替えるか）。"""
+    """語幹の形を戻す: (語幹, 流れの始め) → 表記。無ければ書き換えの決まり（終わりの字を何に替えるか）を
+    I42c: 活用の種類（一段: 本で語幹から「る」を落とした形が出た／五段）と 終わりの 2 字・1 字 で引く（暖まる → 暖まっ）。"""
 
     def __init__(self, train):
         self.exact = defaultdict(Counter)
         self.rule = defaultdict(Counter)
+        self.forms = defaultdict(set)
         for its in train:
-            for _, lem, fl, surf, _ in its:
+            for sy, lem, fl, surf, _ in its:
+                self.forms[lem].add((surf, fl[0] if fl else END))
+        for its in train:
+            for sy, lem, fl, surf, _ in its:
                 f = fl[0] if fl else END
                 self.exact[(lem, f)][surf] += 1
                 cp = os.path.commonprefix([lem, surf])
-                self.rule[(lem[-1:], f)][(lem[len(cp):], surf[len(cp):])] += 1
+                r = (lem[len(cp):], surf[len(cp):])
+                k = self.kind(lem, _pos(sy))
+                for key in ((k, lem[-2:], f), (k, lem[-1:], f), (lem[-2:], f), (lem[-1:], f)):
+                    self.rule[key][r] += 1
 
-    def form(self, lem, fl):
+    def kind(self, lem, pos="VERB"):
+        if pos != "VERB" or not lem.endswith("る"):
+            return pos
+        fs = self.forms.get(lem)
+        if not fs:
+            return "?"
+        if any(s == lem[:-1] and f in ("て", "た", "ます", "ない", "られる", "よう") for s, f in fs):
+            return "一段"
+        if any(s.endswith(("っ", "ら", "り", "ろ")) and s[:-1] == lem[:-1] for s, f in fs):
+            return "五段"
+        return "?"
+
+    def form(self, lem, fl, pos="VERB"):
         f = fl[0] if fl else END
         if self.exact.get((lem, f)):
             return self.exact[(lem, f)].most_common(1)[0][0]
-        r = self.rule.get((lem[-1:], f))
-        if r:
-            a, b = r.most_common(1)[0][0]
-            if lem.endswith(a):
-                return lem[: len(lem) - len(a)] + b
+        k = self.kind(lem, pos)
+        for key in ((k, lem[-2:], f), (k, lem[-1:], f), (lem[-2:], f), (lem[-1:], f)):
+            r = self.rule.get(key)
+            if r:
+                a, b = r.most_common(1)[0][0]
+                if lem.endswith(a):
+                    return lem[: len(lem) - len(a)] + b
         return lem
 
 
 # I42b: 逆引き。言いたい意味（過去・進行・否定・丁寧 …）を順なしの組で渡し、繋ぎの語（て・で）と並びを融合の板で戻す。
-MEAN = {"た": "過去", "だ": "過去・断定", "いる": "進行", "てる": "進行", "おる": "進行", "ない": "否定", "ん": "否定・説明", "ず": "否定",
+MEAN = {"た": "過去", "だ": "断定", "いる": "進行", "てる": "進行", "おる": "進行", "ない": "否定", "ん": "説明", "ず": "否定",
         "ぬ": "否定", "ます": "丁寧", "です": "丁寧", "くださる": "丁寧", "いたす": "丁寧", "なさる": "丁寧", "れる": "受身・可能",
         "られる": "受身・可能", "せる": "使役", "させる": "使役", "たい": "希望", "ほしい": "希望", "よう": "意志・推量", "う": "意志・推量",
         "だろう": "意志・推量", "そう": "様子", "らしい": "様子", "みたい": "様子", "しまう": "済んでしまう", "ちゃう": "済んでしまう",
@@ -223,23 +250,36 @@ MEAN = {"た": "過去", "だ": "過去・断定", "いる": "進行", "てる":
 GLUE = ("て", "で")
 
 
-def meaning(fl):
-    """流れ → 言いたい意味の組（順なし）。繋ぎの て・で は、後ろにまだ何か付く時は意味に入れない（逆引きで戻すもの）。
-    終わりの て・で は「て形」（続ける）として意味に入れる。"""
+def tags(fl, fs=None, pos="VERB"):
+    """流れの 1 つずつの意味（繋ぎの て・で は None）。I42c: だ は表記で分ける（動詞のすぐ後ろの「だ」= 読んだ の過去、
+    「だろう」= 断定+推量）。繋ぎの て・で は、後ろにまだ何か付く時は意味に入れない（逆引きで戻すもの）。終わりの て・で は「て形」。"""
     out = []
     for i, x in enumerate(fl):
+        f = fs[i] if fs else x
         if x in GLUE:
-            if i == len(fl) - 1:
-                out.append("て形")
-            continue
-        out.append(MEAN.get(x, "他:" + x))
-    return tuple(sorted(out))
+            out.append("て形" if i == len(fl) - 1 else None)
+        elif x == "だ" and i == 0 and pos == "VERB" and f == "だ":
+            out.append("過去")
+        elif x == "だ" and f.startswith("だろ"):
+            out.append("断定+推量")
+        else:
+            out.append(MEAN.get(x, "他:" + x))
+    return out
+
+
+def meaning(fl, fs=None, pos="VERB"):
+    """流れ → 言いたい意味の組（順なし）。"""
+    return tuple(sorted(t for t in tags(fl, fs, pos) if t))
 
 
 def _logp(s):
     m = max(s.values())
     z = m + math.log(sum(math.exp(v - m) for v in s.values()))
     return {k: v - z for k, v in s.items()}
+
+
+def _pos(sy):
+    return next((x[3:] for x in sy if x.startswith("品詞:")), "VERB")
 
 
 class Reverse:
@@ -256,19 +296,18 @@ class Reverse:
         self.stem = defaultdict(Counter)
         self.by = defaultdict(Counter)        # 意味 → それを満たす語
         for its in train:
-            for _, lem, fl, _, _ in its:
-                m = meaning(fl)
+            for sy, lem, fl, _, fs in its:
+                m = meaning(fl, fs, _pos(sy))
                 self.tab[m][fl] += 1
                 self.stem[(lem, m)][fl] += 1
-                for i, x in enumerate(fl):
-                    if x not in GLUE:
-                        self.by[MEAN.get(x, "他:" + x)][x] += 1
+                for x, t in zip(fl, tags(fl, fs, _pos(sy))):
+                    if t and x not in GLUE:
+                        self.by[t][x] += 1
         self.by["て形"] = Counter({"て": 1, "で": 1})
         self.prec = Counter()                 # 意味 a が b より前に来た数（並びの決まりを本から）
         for its in train:
-            for _, _, fl, _, _ in its:
-                ms = [MEAN.get(x, "他:" + x) if x not in GLUE else ("て形" if i == len(fl) - 1 else None) for i, x in enumerate(fl)]
-                ms = [x for x in ms if x]
+            for sy, _, fl, _, fs in its:
+                ms = [x for x in tags(fl, fs, _pos(sy)) if x]
                 for i in range(len(ms)):
                     for j in range(i + 1, len(ms)):
                         self.prec[(ms[i], ms[j])] += 1
@@ -278,34 +317,38 @@ class Reverse:
         return c.most_common(1)[0][0] if c else None
 
     def search(self, sy, m):
-        beam = [(0.0, (), Counter(m))]
+        """beam の 1 つ = (点, 流れ, 各語が満たした意味（繋ぎは None）, 残りの意味)。"""
+        beam = [(0.0, (), (), Counter(m))]
         done = []
         for _ in range(Fused.MAX + 2):
             nb = []
-            for sc, pre, rest in beam:
+            for sc, pre, used, rest in beam:
                 lp = _logp(self.fused.board(pre).scores(sy))
-                ok = {}
+                if "て形" in used[:-1]:
+                    continue                           # 「て形」は終わりの て・で だけ
+                if not rest and not (pre and pre[-1] in GLUE and used[-1] is None):
+                    done.append((sc + lp.get(END, -20.0), pre))
                 for need in rest:
                     for x in self.by.get(need, ()):
-                        ok[x] = need
-                if not rest:
-                    done.append((sc + lp.get(END, -20.0), pre))
-                for x, need in ok.items():
-                    r2 = rest.copy()
-                    r2[need] -= 1
-                    if r2[need] <= 0:
-                        del r2[need]
-                    pen = sum(math.log((self.prec[(need, r)] + 1) / (self.prec[(need, r)] + self.prec[(r, need)] + 2))
-                              for r in r2)               # 残りの意味より前に来てよいか
-                    nb.append((sc + lp.get(x, lp.get("他", -20.0)) + pen, pre + (x,), r2))
+                        r2 = rest.copy()
+                        r2[need] -= 1
+                        if r2[need] <= 0:
+                            del r2[need]
+                        pen = sum(math.log((self.prec[(need, r)] + 1) / (self.prec[(need, r)] + self.prec[(r, need)] + 2))
+                                  for r in r2)           # 残りの意味より前に来てよいか
+                        nb.append((sc + lp.get(x, lp.get("他", -20.0)) + pen, pre + (x,), used + (need,), r2))
                 if rest and pre[-1:] not in (("て",), ("で",)):
                     for g in GLUE:                     # 繋ぎの語は意味を使わずに入れる
-                        nb.append((sc + lp.get(g, -20.0), pre + (g,), rest))
-            beam = sorted(nb, key=lambda z: -z[0])[: self.BEAM]
+                        nb.append((sc + lp.get(g, -20.0), pre + (g,), used + (None,), rest))
+            seen, beam = set(), []
+            for z in sorted(nb, key=lambda z: -z[0]):
+                if z[1] not in seen:
+                    seen.add(z[1])
+                    beam.append(z)
+                if len(beam) >= self.BEAM:
+                    break
             if not beam:
                 break
-        # 「て形」は終わりの て・で で満たす
-        done = [(s, p) for s, p in done if meaning(p) == m]
         return max(done)[1] if done else None
 
 
@@ -335,7 +378,7 @@ def run(works, hold=10, seed=0):
         pz = fused.predict(sy)
         res["融合の板"] += pz == fl
         res["融合の板・始めの 1 つ"] += (pz[:1] == fl[:1])
-        m = meaning(fl)
+        m = meaning(fl, fs, _pos(sy))
         seen = m in rev.tab
         pt = rev.table(lem, m)
         pr = rev.search(sy, m)
@@ -344,8 +387,8 @@ def run(works, hold=10, seed=0):
         res["逆引き・融合"] += pr == fl
         pc = pt if seen else pr
         res["逆引き・表+融合"] += pc == fl
-        res["逆引き・表+融合・形まで"] += pc is not None and surf.form(lem, pc) + fsurf.form(pc) == s0 + "".join(fs)
-        res["逆引き・融合・形まで"] += pr is not None and surf.form(lem, pr) + fsurf.form(pr) == s0 + "".join(fs)
+        res["逆引き・表+融合・形まで"] += pc is not None and surf.form(lem, pc, _pos(sy)) + fsurf.form(pc, sy) == s0 + "".join(fs)
+        res["逆引き・融合・形まで"] += pr is not None and surf.form(lem, pr, _pos(sy)) + fsurf.form(pr, sy) == s0 + "".join(fs)
         if len(fl) >= 2:
             res["2 つ以上・数"] += 1
             res["2 つ以上・表"] += pt == fl
@@ -353,24 +396,28 @@ def run(works, hold=10, seed=0):
         if not seen:
             res["見ていない組・数"] += 1
             res["見ていない組・融合"] += pr == fl
-        f0 = surf.form(lem, fl)                             # 形を戻す（正しい流れを渡した時の、語幹の表記）
+        f0 = surf.form(lem, fl, _pos(sy))                             # 形を戻す（正しい流れを渡した時の、語幹の表記）
         res["形を戻す・語幹"] += f0 == s0
-        res["形を戻す・語幹+流れ"] += (f0 + fsurf.form(fl)) == s0 + "".join(fs)
+        res["形を戻す・語幹+流れ"] += (f0 + fsurf.form(fl, sy)) == s0 + "".join(fs)
+        if not surf.exact.get((lem, fl[0] if fl else END)):
+            res["見ていない語幹と流れ・数"] += 1
+            res["見ていない語幹と流れ・形"] += f0 == s0
         if len(ex) < 40 and fl and rng.random() < 0.02:
             ex.append(dict(文脈=[x for x in sy if not x.startswith("語:")], 語幹=lem, 本=s0 + "".join(fs),
                            融合の板="+".join(pz) or "（無し）", 平らな板="+".join(pf) or "（無し）",
-                           戻した形=surf.form(lem, pz) + fsurf.form(pz), 意味="・".join(m),
+                           戻した形=surf.form(lem, pz, _pos(sy)) + fsurf.form(pz, sy), 意味="・".join(m),
                            逆引き="+".join(pr or ()) or "（無し）",
-                           逆引きの形=(surf.form(lem, pr) + fsurf.form(pr)) if pr else "（無し）"))
+                           逆引きの形=(surf.form(lem, pr, _pos(sy)) + fsurf.form(pr, sy)) if pr else "（無し）"))
     n = res["数"]
     acc = {}
     for k, v in res.items():
         if k.endswith("数"):
             continue
-        d = res[k.split("・")[0] + "・数"] if k.startswith(("2 つ以上", "見ていない組")) else n
+        d = res[k.split("・")[0] + "・数"] if k.startswith(("2 つ以上", "見ていない組", "見ていない語幹")) else n
         acc[k] = round(v / max(d, 1), 3)
     acc["2 つ以上の割合"] = round(res["2 つ以上・数"] / n, 3)
     acc["見ていない組の数"] = res["見ていない組・数"]
+    acc["見ていない語幹と流れの数"] = res["見ていない語幹と流れ・数"]
     return dict(数=n, 当たり=acc, 例=ex)
 
 
