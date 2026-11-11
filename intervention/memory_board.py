@@ -257,6 +257,8 @@ class Important:
             if not nm and any(c in text for c in NAME_CUE):
                 nm = [_span(toks, t["i"]) for t in toks if t["pos"] == "PROPN"]
             if nm and nm[0]:
+                if not whose and getattr(self, "expect_whose", None):   # I44c: 直前に「猫の名前覚えてる？」→「覚えてない」だった
+                    whose = self.expect_whose
                 out.append(("名前" + (f"（{whose}）" if whose else ""), nm[0]))
         tw = [t["text"] for t in toks if t["text"] in TIME_W or (t["pos"] == "NUM" and any(
             k["text"] in ("時", "日", "月") for k in toks if k["i"] == t["i"] + 1))]
@@ -273,6 +275,9 @@ class Important:
 
     def add(self, who, text, toks, pieces, conv, allow=None):
         ks = self.kinds(text, toks)
+        self.expect_left = getattr(self, "expect_left", 0) - 1   # I44c: 待つのは「覚えてない」のすぐ次の行まで
+        if self.expect_left <= 0:
+            self.expect_whose = None
         if allow is not None:                               # I41k: 目印の種類のうち、経験で入れてよいとされたものだけ
             ks = [(k, v) for k, v in ks if allow(k)]
         items = self.people.setdefault(who, [])

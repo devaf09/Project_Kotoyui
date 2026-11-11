@@ -551,6 +551,7 @@ class Bot3(C2.Bot2):
         if "名前" not in text and ("私のこと" in text or any(w in names for w in ws)):
             text = text + "（名前）"
             ws = [w for w in ws if w not in names]
+        whose = None
         wh_plan = any(w in text for w in ("どこ", "いつ", "何時", "何曜", "何日"))   # I41c: 「どこに行くか覚えてる？」は予定の問い
         if wh_plan and "名前" not in text and "誕生日" not in text:
             items = [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] in ("予定", "頼まれごと")
@@ -601,6 +602,8 @@ class Bot3(C2.Bot2):
             else:
                 line = "ごめん、覚えてない。"
                 why = "大事な板にも記憶板にも、問いの語が無い"
+                if "名前" in text and whose:                # I44c: 「覚えてない」のあとに教えてもらう名前は、聞いた人・物（猫）の名前として入れる
+                    self.imp.expect_whose, self.imp.expect_left = whose, 2   # 問いの行と、そのすぐ次の行
         lt = CB.to_toks(self.nlp(line))
         self.conv["lines"].append(dict(text=line, toks=lt, who="ボット"))
         return dict(line=line, tries=0, breaks=[], sim=0, why=why, recall=True, recall_value=items[0]["value"] if items else "")
