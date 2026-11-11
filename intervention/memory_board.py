@@ -291,6 +291,12 @@ class Important:
                     na = {k for k in a if k.startswith("名|") and k.split("|")[-1] not in TIME_W}
                     if ta & tb and na & b:
                         return True
+                if kind == "頼まれごと":                    # I44b: 「誕生日 3 月 5 日だから覚えといて」は、同じ数か同じ中身の名詞で 1 項目に
+                    da, db = set(re.findall(r"\d+", val)), set(re.findall(r"\d+", x["value"]))
+                    na = {k for k in a if k.startswith("名|") and k.split("|")[-1] not in LIGHT_N + TIME_W}
+                    nb = {k for k in b if k.startswith("名|") and k.split("|")[-1] not in LIGHT_N + TIME_W}
+                    if (da and da == db) or (na & nb):
+                        return True
                 return kind == "予定" and bool(a) and len(a & b) / len(a | b) >= 0.5
             hit = next((x for x in items if same(x)), None)
             if hit:

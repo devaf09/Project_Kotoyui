@@ -291,7 +291,15 @@ class Bot3(C2.Bot2):
         if self.sb is not None and self._last_form:
             self.sb.note(self._last_form, "良")
 
+    _last_recall_item = None
+
     def reply(self, text):
+        # I44b: 思い出しで答えたすぐ後に相手が「ううん・違う」と直したら、その項目を弱める（再記憶の逆）
+        x = self._last_recall_item
+        self._last_recall_item = None
+        if x is not None and text.lstrip("「 ").startswith(("ううん", "違う", "ちがう", "いや", "え、違", "そうじゃなく")):
+            x["mentions"] = max(1, x.get("mentions", 1) - 2)
+            x["corrected"] = x.get("corrected", 0) + 1
         if not self.conv["lines"]:                          # 新しい会話: この会話で指摘された行は空にする
             self.conv_dark = set()
             self.conv_asked = set()
@@ -570,12 +578,16 @@ class Bot3(C2.Bot2):
             items = [x for x in items if not x["kind"].startswith("名前")] if ws else \
                 [x for x in reversed(self.imp.people.get("相手", [])) if x["kind"] == "名前"]   # 「私のこと覚えてる？」: 名前で答える
         self.conv["lines"].append(dict(text=sents and "".join(sents) or text, toks=toks, who="人"))
-        if getattr(self, "mem", None) is not None and ws:  # I44a: 問いの語で記憶板を走査（引っかかった鍵は rehearse の時 再記憶）
-            self.mem.recall(ws)
         if items:
             x = items[0]
             if getattr(self.imp, "rehearse", False):
                 self.imp.touch(x, getattr(self, "conv_no", 0))
+                self._last_recall_item = x
+                # I44b: 記憶板は、問いの語でなく、読み出した中身の名詞（歯医者・みさき）で入れ直す
+                if getattr(self, "mem", None) is not None:
+                    cn = [t.lemma_ for t in self.nlp(x["value"]) if t.pos_ in ("NOUN", "PROPN") and t.lemma_ not in ("私", "こと", "名前")]
+                    if cn:
+                        self.mem.recall(cn)
             line = (x["value"] if x["kind"].startswith("名前") else self._restate(x["value"])) + "、だよね。"
             why = f"大事な板: {x['kind']}「{x['value'][:30]}」（会話 {'・'.join(map(str, x['convs']))}、{x['mentions']} 回）から答える"
         else:
