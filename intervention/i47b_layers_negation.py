@@ -31,6 +31,8 @@ from collections import Counter, defaultdict
 
 import numpy as np
 
+from i47_gpu import Scenes, flow_sums
+
 CONTENT = ("NOUN", "PROPN", "VERB", "ADJ")
 STOP = {"する", "いる", "ある", "なる", "言う", "思う", "こと", "もの", "よう", "それ", "これ", "の", "ん", "方", "人", "今", "何", "自分", "私", "俺", "僕", "君", "あなた"}
 NEG = "＋否"
@@ -63,20 +65,7 @@ class Waves:
 
     def learn(self, seq, mix=0.6, rounds=2):
         for _ in range(rounds):
-            src = self.W
-            acc = np.zeros_like(self.W)
-            n = np.zeros(len(self.ix))
-            for k, ws in enumerate(seq):
-                ctx = set(ws) | set(seq[k - 1] if k else []) | set(seq[k + 1] if k + 1 < len(seq) else [])
-                ids = [self.ix[w] for w in ctx if w in self.ix]
-                if len(ids) < 2:
-                    continue
-                s = src[ids].sum(0)
-                for w in set(ws):
-                    j = self.ix.get(w)
-                    if j is not None:
-                        acc[j] += s - src[j]
-                        n[j] += len(ids) - 1
+            acc, n = flow_sums(seq, self.ix, self.W)
             m = n > 0
             C = np.zeros_like(self.W)
             C[m] = acc[m] / n[m, None]
@@ -130,14 +119,14 @@ def part_layers(works, a):
     common = set(prior[:50])
     z = sum(freq.values())
     Z = np.zeros(a.D, complex)
-    K = [np.stack([wv.bag(c[l], idf) if wv.bag(c[l], idf) is not None else Z for c, _ in train]) for l in range(len(wins))]
+    K = [Scenes(np.stack([x if (x := wv.bag(c[l], idf)) is not None else Z for c, _ in train])) for l in range(len(wins))]
 
     def scoop(l, q):
-        r = np.abs(K[l] @ q.conj())
+        top, rt = K[l].top(q, a.top)
         c = Counter()
-        for j in np.argsort(-r)[: a.top]:
+        for j, rj in zip(top, rt):
             for w in set(train[j][1]):
-                c[w] += r[j] ** 2
+                c[w] += rj ** 2
         return c
 
     def rank(c):

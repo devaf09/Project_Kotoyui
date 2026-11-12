@@ -34,6 +34,7 @@ from collections import Counter
 
 import numpy as np
 
+from i47_gpu import Scenes
 from i47b_layers_negation import NEG, Waves, content, som
 
 PRED = ("VERB", "ADJ")
@@ -153,19 +154,18 @@ def part_scoop(works, wv, bd, idf, a, res):
     Z = np.zeros(2 * wv.D, complex)
     for name, mode, beta in (("意味の帯だけ（I47a）", "none", 0.0), ("鍵の帯 重さ 0.5", "band", 0.5), ("鍵の帯 重さ 1（I47d）", "band", 1.0),
                              ("鍵の帯 重さ 2", "band", 2.0), ("逆位相 重さ 1", "pi", 1.0)):
-        K = np.stack([x if (x := bd.line(q, idf, mode, beta)) is not None else Z for q, _ in train])
+        K = Scenes(np.stack([x if (x := bd.line(q, idf, mode, beta)) is not None else Z for q, _ in train]))
         hit = n = 0
         keep = pol = base = nq = 0.0
         for q, b in test:
             v = bd.line(q, idf, mode, beta)
             if v is None:
                 continue
-            r = np.abs(K @ v.conj())
-            top = np.argsort(-r)[: a.top]
+            top, rt = K.top(v, a.top)
             c = Counter()
-            for j in top:
+            for j, rj in zip(top, rt):
                 for w, _ in set(train[j][1]):
-                    c[w] += r[j] ** 2
+                    c[w] += rj ** 2
             s = sum(c.values()) or 1.0
             sc = Counter({w: (1 - a.lam) * x / s for w, x in c.items()})
             for w in prior:
