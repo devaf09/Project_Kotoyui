@@ -101,6 +101,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", required=True)
     ap.add_argument("--test_works", type=int, default=10)
+    ap.add_argument("--train_works", type=int, default=0, help="学ぶ作品の数（0 = 残り全部）。試しの作品は変わらない")
     ap.add_argument("--D", type=int, default=512)
     ap.add_argument("--top", type=int, default=30, help="すくい上げる場面の数")
     ap.add_argument("--flow", type=float, default=0.3, help="前の行の波を重ねる重さ")
@@ -113,6 +114,8 @@ def main():
     works = json.load(open(a.cache, encoding="utf-8"))
     random.Random(a.seed).shuffle(works)
     tr_w, te_w = works[a.test_works:], works[:a.test_works]
+    if a.train_works:                                       # 成長曲線: 試しは固定のまま、学ぶ作品の数だけを変える
+        tr_w = tr_w[: a.train_works]
     train, test = pairs(tr_w), pairs(te_w)
     seq = [content(ln["toks"]) for wk in tr_w for ln in wk["lines"] if ln["text"].startswith("「")]
     seq_all = [content(ln["toks"]) for wk in tr_w for ln in wk["lines"]]   # 語の波は地の文も含めた全部の行の流れから学ぶ
@@ -142,7 +145,7 @@ def main():
         for w in prior:
             sc[w] += lam * pf[w]
         return [w for w, _ in sc.most_common(60)]
-    res = dict(train=len(train), test=len(test), vocab=len(vocab), 足した資料=a.extra_cache or "")
+    res = dict(学ぶ作品=len(tr_w), train=len(train), test=len(test), vocab=len(vocab), 足した資料=a.extra_cache or "")
 
     # 物差し 1: ふだんの多さ
     res["ふだんの多さ"] = evaluate([prior] * len(test), test)
