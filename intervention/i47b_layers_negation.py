@@ -96,6 +96,8 @@ def even(c):
 def part_layers(works, a):
     random.Random(a.seed).shuffle(works)
     tr_w, te_w = works[a.test_works:], works[:a.test_works]
+    if a.train_works:                                       # 成長曲線: 試しは固定のまま、学ぶ作品の数だけを変える
+        tr_w = tr_w[: a.train_works]
     wins = (1, 3, 10, 30)
 
     def scenes(ws_):
@@ -159,7 +161,7 @@ def part_layers(works, a):
                 t[3] += 1
             t[4] += len(c)
     n = len(test)
-    res = dict(train=len(train), test=n, vocab=len(wv.vocab), 層の窓=list(wins))
+    res = dict(学ぶ作品=len(tr_w), train=len(train), test=n, vocab=len(wv.vocab), 層の窓=list(wins))
     for m, t in tot.items():
         res[m] = dict(再現率=round(t[0] / n, 4), 当たり=round(t[1] / n, 4), 多い語を除いた再現率=round(t[2] / max(1, t[3]), 4), 板に残る語の数=round(t[4] / n, 1))
     return res
@@ -311,6 +313,7 @@ def main():
     ap.add_argument("--cache", required=True)
     ap.add_argument("--part", default="layers", choices=("layers", "neg"))
     ap.add_argument("--test_works", type=int, default=10)
+    ap.add_argument("--train_works", type=int, default=0, help="学ぶ作品の数（0 = 残り全部）。試しの作品は変わらない")
     ap.add_argument("--D", type=int, default=512)
     ap.add_argument("--top", type=int, default=30)
     ap.add_argument("--lam", type=float, default=0.5)
