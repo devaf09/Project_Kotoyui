@@ -133,7 +133,7 @@ def part_layers(works, a):
     K = [np.stack([wv.bag(c[l], idf) if wv.bag(c[l], idf) is not None else Z for c, _ in train]) for l in range(len(wins))]
 
     def scoop(l, q):
-        r = np.abs(K[l].conj() @ q)
+        r = np.abs(K[l] @ q.conj())
         c = Counter()
         for j in np.argsort(-r)[: a.top]:
             for w in set(train[j][1]):
