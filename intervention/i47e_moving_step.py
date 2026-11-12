@@ -26,6 +26,7 @@ from collections import Counter
 
 import numpy as np
 
+from i47_gpu import Scenes
 from i47b_layers_negation import Waves, content
 from i47d_negation_band import auc
 
@@ -146,16 +147,15 @@ def part_scoop(works, a, res):
     Z = np.zeros(a.D, complex)
     for name, (md, st, tm) in {"動かさない（I47a）": ("none", 0, 0), "同じ重さで混ぜる": ("uni", 1, 1), "共鳴で 1 回そろえて混ぜる（1 段）": ("res", 1, 1),
                                "共鳴で 4 回そろえて混ぜる（1 段）": ("res", 1, 4), "共鳴で 4 回そろえて混ぜる（2 段）": ("res", 2, 4)}.items():
-        K = np.stack([x if (x := line(q, md, st, tm)) is not None else Z for q, _ in train])
+        K = Scenes(np.stack([x if (x := line(q, md, st, tm)) is not None else Z for q, _ in train]))
         t = [0.0, 0, 0.0, 0]
         for q, b in test:
             v = line(q, md, st, tm)
             c = Counter()
             if v is not None:
-                r = np.abs(K @ v.conj())
-                for j in np.argsort(-r)[: a.top]:
+                for j, rj in zip(*K.top(v, a.top)):
                     for w in set(train[j][1]):
-                        c[w] += r[j] ** 2
+                        c[w] += rj ** 2
             s = sum(c.values()) or 1.0
             sc = Counter({w: (1 - a.lam) * x / s for w, x in c.items()})
             for w in prior:

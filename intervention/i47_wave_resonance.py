@@ -28,6 +28,8 @@ from collections import Counter, defaultdict
 
 import numpy as np
 
+from i47_gpu import Scenes, flow_sums
+
 CONTENT = ("NOUN", "PROPN", "VERB", "ADJ")
 STOP = {"する", "いる", "ある", "なる", "言う", "思う", "こと", "もの", "よう", "それ", "これ", "の", "ん", "方", "人", "今", "何", "自分", "私", "俺", "僕", "君", "あなた"}
 
@@ -60,19 +62,7 @@ class Waves:
     def learn(self, lines_seq, rounds=2, mix=0.5):
         """流れから学ぶ: 語の波 = 自分の乱数の波 + mix × (同じ行・隣の行に出た語の波の平均)。回すほど、似た流れの語の位相がそろう。"""
         for _ in range(rounds):
-            acc = np.zeros_like(self.W)
-            n = np.zeros(len(self.ix))
-            for k, ws in enumerate(lines_seq):
-                ctx = set(ws) | set(lines_seq[k - 1] if k else []) | set(lines_seq[k + 1] if k + 1 < len(lines_seq) else [])
-                ids = [self.ix[w] for w in ctx if w in self.ix]
-                if len(ids) < 2:
-                    continue
-                s = self.W[ids].sum(0)
-                for w in set(ws):
-                    if w in self.ix:
-                        j = self.ix[w]
-                        acc[j] += s - self.W[j]   # 1 回目は乱数の波（random indexing）、2 回目からは学んだ波の和
-                        n[j] += len(ids) - 1
+            acc, n = flow_sums(lines_seq, self.ix, self.W)  # 1 回目は乱数の波（random indexing）、2 回目からは学んだ波の和
             m = n > 0
             ctxw = np.zeros_like(self.W)
             ctxw[m] = acc[m] / n[m, None]
@@ -161,18 +151,17 @@ def main():
 
     def scoop(keys, query_vecs):
         """共鳴の強い場面の次の行の語を、共鳴の強さで重ねる。"""
-        K = np.stack(keys)
+        K = Scenes(np.stack(keys))
         out = []
         for q in query_vecs:
             if q is None:
                 out.append(prior)
                 continue
-            r = np.abs(K @ q.conj())
-            top = np.argsort(-r)[: a.top]
+            top, rt = K.top(q, a.top)
             c = Counter()
-            for j in top:
+            for j, rj in zip(top, rt):
                 for w in set(train[j][2]):
-                    c[w] += r[j] ** 2
+                    c[w] += rj ** 2
             out.append(mixed(c))
         return out
 
@@ -194,7 +183,7 @@ def main():
     def wave_pick(name, wv, keys):
         """波で測る: すくい上げた次の行の波（共鳴の強い場面の B の波の重ね）が、本当の B と、ほかの 99 行の B のどれと
         いちばん共鳴するか。本当の B が上位 10 に入る割合（偶然なら 0.10）。語を当てるより「向き」が合うかを見る。"""
-        K = np.stack(keys)
+        K = Scenes(np.stack(keys))
         BV = [wv.line(b, idf) for _, _, b in train]
         BV = np.stack([v if v is not None else np.zeros(a.D, complex) for v in BV])
         TB = [wv.line(b, idf) for _, _, b in test]
@@ -206,9 +195,8 @@ def main():
                 continue
             pv = wv.line(p, idf) if p else None
             q = v + (a.flow * pv if pv is not None else 0)
-            r = np.abs(K @ q.conj())
-            top = np.argsort(-r)[: a.top]
-            pw = (BV[top] * (r[top] ** 2)[:, None]).sum(0)
+            top, rt = K.top(q, a.top)
+            pw = (BV[top] * (rt ** 2)[:, None]).sum(0)
             others = [j for j in rr.choice(len(test), 120, replace=False) if j != i and TB[j] is not None][:99]
             cand = [TB[i]] + [TB[j] for j in others]
             s_ = [abs(np.vdot(c, pw)) for c in cand]
