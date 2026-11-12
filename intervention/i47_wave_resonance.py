@@ -107,6 +107,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--lam", type=float, default=0.5, help="ふだんの多さを混ぜる重さ")
     ap.add_argument("--mix", type=float, default=0.5, help="語の波を流れで寄せる重さ")
+    ap.add_argument("--extra_cache", help="語の波を学ぶ時だけ足す資料（流れのすくい上げには使わない）")
     ap.add_argument("--out")
     a = ap.parse_args()
     works = json.load(open(a.cache, encoding="utf-8"))
@@ -117,6 +118,16 @@ def main():
     seq_all = [content(ln["toks"]) for wk in tr_w for ln in wk["lines"]]   # 語の波は地の文も含めた全部の行の流れから学ぶ
     df = Counter(w for wk in tr_w for ln in wk["lines"] for w in set(content(ln["toks"])))
     N = sum(len(wk["lines"]) for wk in tr_w)
+    if a.extra_cache:                                       # 語の意味だけ、別の資料からも学ぶ（語の数と、語の波の流れに足す）
+        ex = json.load(open(a.extra_cache, encoding="utf-8"))
+        ex = ex["works"] if isinstance(ex, dict) else ex
+        for wk in ex:
+            for ln in wk["lines"]:
+                ws = content(ln["toks"])
+                seq_all.append(ws)
+                df.update(set(ws))
+            seq_all.append([])                              # 作品の境で流れを切る
+        N += sum(len(wk["lines"]) for wk in ex)
     idf = {w: math.log((N + 1) / (c + 0.5)) for w, c in df.items()}
     vocab = sorted(df)
     freq = Counter(w for _, _, b in train for w in b)
@@ -131,7 +142,7 @@ def main():
         for w in prior:
             sc[w] += lam * pf[w]
         return [w for w, _ in sc.most_common(60)]
-    res = dict(train=len(train), test=len(test), vocab=len(vocab))
+    res = dict(train=len(train), test=len(test), vocab=len(vocab), 足した資料=a.extra_cache or "")
 
     # 物差し 1: ふだんの多さ
     res["ふだんの多さ"] = evaluate([prior] * len(test), test)
