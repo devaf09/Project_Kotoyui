@@ -152,7 +152,7 @@ def part_scoop(works, a, res):
             v = line(q, md, st, tm)
             c = Counter()
             if v is not None:
-                r = np.abs(K.conj() @ v)
+                r = np.abs(K @ v.conj())
                 for j in np.argsort(-r)[: a.top]:
                     for w in set(train[j][1]):
                         c[w] += r[j] ** 2

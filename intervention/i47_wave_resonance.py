@@ -167,7 +167,7 @@ def main():
             if q is None:
                 out.append(prior)
                 continue
-            r = np.abs(K.conj() @ q)
+            r = np.abs(K @ q.conj())
             top = np.argsort(-r)[: a.top]
             c = Counter()
             for j in top:
@@ -206,7 +206,7 @@ def main():
                 continue
             pv = wv.line(p, idf) if p else None
             q = v + (a.flow * pv if pv is not None else 0)
-            r = np.abs(K.conj() @ q)
+            r = np.abs(K @ q.conj())
             top = np.argsort(-r)[: a.top]
             pw = (BV[top] * (r[top] ** 2)[:, None]).sum(0)
             others = [j for j in rr.choice(len(test), 120, replace=False) if j != i and TB[j] is not None][:99]
@@ -245,10 +245,10 @@ def main():
             pred.append(prior)
             continue
         q = v + (a.flow * pv if pv is not None else 0)
-        rc = np.abs(C.conj() @ q)
+        rc = np.abs(C @ q.conj())
         cs = np.argsort(-rc)[:3]
         cand = [j for c in cs for j in groups[c]]
-        r = np.abs(K[cand].conj() @ q)
+        r = np.abs(K[cand] @ q.conj())
         c = Counter()
         for jj in np.argsort(-r)[: a.top]:
             for w in set(train[cand[jj]][2]):

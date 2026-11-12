@@ -160,7 +160,7 @@ def part_scoop(works, wv, bd, idf, a, res):
             v = bd.line(q, idf, mode, beta)
             if v is None:
                 continue
-            r = np.abs(K.conj() @ v)
+            r = np.abs(K @ v.conj())
             top = np.argsort(-r)[: a.top]
             c = Counter()
             for j in top:
