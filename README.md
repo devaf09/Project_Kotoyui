@@ -242,6 +242,14 @@ python intervention/chat_partner.py --model echo                        # 試し
 
 関係するプロジェクト: [Sin-CNN2](https://github.com/devaf09/Sin-CNN2)（1 次元の光の学習器 SinWave。すべての元）、SN2-Parts-2D（2 次元の光の部品集）、[Sin-CNN3](https://github.com/devaf09/Sin-CNN3)（会話の部品と語板のライブラリの元）。
 
+## 使ったら教えてください（お願い）
+
+このプロジェクトのコードや考え方を、研究・製品・記事・授業などで使った時は、ひとこと知らせてもらえるとうれしいです。どこで役に立ったかが分かると、次に何を作るかを決める助けになります。
+
+- 知らせ方: [Issue の「使用報告」](https://github.com/devaf09/Project_Kotoyui/issues/new?template=usage_report.md) に、何に使ったかを 1〜2 行で。公開したくない場合は、中身を書かずに「使いました」だけでも構いません。
+- 論文や記事で触れる時は、[CITATION.cff](CITATION.cff) の書き方（GitHub の「Cite this repository」）を使ってください。
+- これはお願いで、義務ではありません。ライセンスは MIT のままで、知らせなくても条件どおりに使えます。
+
 ## ライセンスとデータの出典
 
 - コード・文書・assets/ の表: MIT ライセンス（[LICENSE](LICENSE)、Copyright (c) 2026 devaf09）。vendor/ のコードも同じ著作権者の MIT です。
