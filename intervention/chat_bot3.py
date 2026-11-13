@@ -747,6 +747,9 @@ class Bot3(C2.Bot2):
             self._trials.setdefault(out["line"], []).extend((pc, q) for pc in self.pb.pieces(self.conv["lines"][-1]["toks"]))
         self.trial = self._trials.get(out["line"], [])
         self._trials = {}
+        note = self.__dict__.pop("_wave_note", "")
+        if note and out["why"].startswith("行づくり"):
+            out["why"] += "（" + note + "）"
         if self.trial:
             out["why"] += "（試し: 「" + "・".join(pc["ns"] + pc["c"] + pc["ps"] for pc, _ in self.trial) + "」は経験の薄い形なので、言ってみて確かめる）"
         return out
@@ -970,10 +973,22 @@ class Bot3(C2.Bot2):
         c[n] = [(w, x, CB.to_toks(d)) for (w, x), d in zip(out, self.nlp.pipe(texts))] if texts else []
         return c[n]
 
+    wave = None                                             # I48: 意味の波の板（i48_wave_board.WaveSource、--wave）
+    wave_w = 1.0                                            # 波ですくった行の重み（いちばん共鳴した行の重み）
+
+    def wave_lines(self):
+        """I48: 会話のここまでの行（相手と自分、今の相手の行まで）を層の窓の波にして、意味の波の板からすくった行。"""
+        ctx = [[t["lemma"] for t in ln["toks"] if t["pos"] in ("NOUN", "PROPN", "VERB", "ADJ")] for ln in self.conv["lines"]]
+        ctx = [[w for w in c if w in self.wave.board.waves.ix] for c in ctx]
+        out = [(w * self.wave_w, x, tk) for w, x, tk in self.wave.lines(ctx)]
+        self._wave_note = self.wave.note
+        return out
+
     def extra_lines(self, toks):
+        wl = self.wave_lines() if self.wave is not None else []
         if not (self.attr_field and self.attrs):
-            return []
-        out = []
+            return wl
+        out = wl
         hum = [toks] + [ln["toks"] for ln in reversed(self.conv["lines"]) if ln["who"] == "人"]
         toks = next((T for T in hum if any(t["pos"] == "NOUN" and t["lemma"] in self.attrs and t["lemma"] not in FORMAL for t in T)), toks)
         for t in toks:                                      # 相手の今の行の名詞。無ければ、名詞のあった最後の人の行（話題を続ける）
@@ -1287,6 +1302,11 @@ def main():
     ap.add_argument("--pair_xp", action="store_true", help="I39c: 近さの組（問いの語, 所の語）で答えて指摘された割合だけ、その組の近さを下げる")
     ap.add_argument("--near_min", type=float, default=0.15, help="I39b: 自分の板で、これより近さの小さい所は選ばない")
     ap.add_argument("--self_attrs", help="I39a: 自分の板の近さに使う語板（content_boards.json）。無ければ --attrs")
+    ap.add_argument("--wave", help="I48: 意味の波の板を作る会話の資料（解析済み JSON）。行づくりの場の板に、波ですくった行を入れる")
+    ap.add_argument("--wave_D", type=int, default=2048, help="I48: 波の長さ")
+    ap.add_argument("--wave_store", default="c64", choices=("c128", "c64", "p8"), help="I48: 数の持ち方")
+    ap.add_argument("--wave_devices", default="auto", help="I48: 置き場（auto / numpy / cuda:0,cuda:1）")
+    ap.add_argument("--wave_only", action="store_true", help="I48: 場の板に本の似た行を入れず、波ですくった行だけにする")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
     a = ap.parse_args()
     if a.reader == "ginza":
@@ -1314,6 +1334,13 @@ def main():
     bot.trial_mode = a.trial
     bot.use_you = a.you
     bot.conv_share = a.conv_share
+    if a.wave:
+        import i48_wave_board as W48
+        ww = json.load(open(a.wave, encoding="utf-8"))
+        wb = W48.WaveBoard(D=a.wave_D, store=a.wave_store, devices=W48.parse_devices(a.wave_devices), keep_dir=False)
+        bot.wave = W48.WaveSource(wb.fit(ww["works"] if isinstance(ww, dict) else ww))
+        if a.wave_only:
+            bot.use_book = False
     if a.uptake:
         bot.uptake = json.load(open(a.uptake, encoding="utf-8"))
     if a.profile:
