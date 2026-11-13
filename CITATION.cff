@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "このプロジェクトを使った時は、下の形で引用し、できれば Issue の「使用報告」で知らせてください。"
+title: "Project_Kotoyui: 自分で気づき、見直し、少しずつ変わっていく小さな会話 AI"
+type: software
+authors:
+  - name: "devaf09"
+repository-code: "https://github.com/devaf09/Project_Kotoyui"
+url: "https://github.com/devaf09/Project_Kotoyui"
+license: MIT
+date-released: "2026-11-13"
