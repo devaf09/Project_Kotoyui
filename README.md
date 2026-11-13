@@ -236,8 +236,9 @@ python intervention/chat_partner.py --model echo                        # 試し
 | [docs/experiments_guide.md](docs/experiments_guide.md)・[NOTES.md](NOTES.md) | 最初の段の実験のやさしい説明と、実験ノート（数字の正本） |
 | [docs/quickstart.md](docs/quickstart.md)・[docs/data_format.md](docs/data_format.md) | 環境の用意と試し方、データの置き場と形 |
 | assets/ | 持ち主が書いた表の見本（キャラクタ「言結 となり」のプロフィールと「自分のこと」、時計グレイン） |
-| experiments/・results/ | 最初の段の実験のプログラムと結果 |
-| tools/・tests/・examples/ | データの取得・集計・図、部品ごとの確認、試し方のコード例。tools/corpora/ は会話コーパスを 1 行 1 発言の形にそろえる道具 |
+| experiments/・results/ | 最初の段の実験のプログラムと結果（exp14〜22 は人称・主語の実験。材料は公開していないので、プログラムだけ） |
+| [intervention/analysis/](intervention/analysis/README.md) | 会話の試しの記録を数える道具（記録は公開していない） |
+| tools/・tests/・examples/ | データの取得・集計・図、部品ごとの確認、試し方のコード例。tools/corpora/ は会話コーパスを 1 行 1 発言の形にそろえる道具、tools/knp_cf/ は KNP の格フレーム辞書を読む下調べ |
 | vendor/ | SN2-Parts-2D から写した光の部品（書き換えない。[vendor/README.md](vendor/README.md)） |
 
 関係するプロジェクト: [Sin-CNN2](https://github.com/devaf09/Sin-CNN2)（1 次元の光の学習器 SinWave。すべての元）、SN2-Parts-2D（2 次元の光の部品集）、[Sin-CNN3](https://github.com/devaf09/Sin-CNN3)（会話の部品と語板のライブラリの元）。
