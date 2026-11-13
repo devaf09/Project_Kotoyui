@@ -8,3 +8,5 @@
 - `sweeps/sweepNN.sh`: そのまま再実行できる条件の一覧。先頭のコメントに「実験NN: 何を比べるか。データ、学習の長さ、seed 数」。
 - 分野が増えたら `experiments/<分野>/` に分ける。
 - リポジトリ直下で実行する（例: `python experiments/exp01_wig_bag.py --seed 0 --device cuda --out results/exp01.txt`）。
+- `exp14`〜`exp22`・`build_persona_pairs.py`・`rerate_owner.py`・`fig_exp18.py`: 人称・主語の実験。材料と結果は公開していない置き場
+  （環境変数 `KOTOYUI_PRIVATE`、無ければリポジトリの隣の `Project_Kotoyui_private/`）から読み書きする。
