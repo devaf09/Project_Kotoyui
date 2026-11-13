@@ -229,7 +229,7 @@ python intervention/chat_partner.py --model echo                        # 試し
 |---|---|
 | [intervention/](intervention/README.md) | **いまの研究の中心**。介入の研究のプログラム（iNN_名前.py）、会話のボット（chat_bot3.py）、記憶板・自分の板、試しの場 |
 | [intervention/docs/](intervention/docs/) | 仕組みの説明（思考の部品、算術と文の圧縮、記憶、デジタルの重みの一覧）と図 |
-| [docs/boards/](docs/boards/) | 辞書の属性から作る語板の設計 |
+| lexicon/・[docs/boards/](docs/boards/) | 辞書の属性から語板を作るプログラム（品詞・機能語・内容語の板、辞書の数え上げ、文章の解析）と、その設計 |
 | [docs/i47_wave_resonance.md](docs/i47_wave_resonance.md) | 意味の波（I47）の説明シート。仕組み（波・4 層とそろえ方・否定の帯・動かす段）、資料ごとの数、成長曲線、分かったことと次の案 |
 | kotoyui.py | 最初の段の会話の本体（単独で動く 1 ファイル版、0.4.0。手直しだけ） |
 | [docs/overview.md](docs/overview.md) | 最初の段の紹介（2026-11-03 時点。光の部品・似た技術との違い） |
@@ -237,7 +237,7 @@ python intervention/chat_partner.py --model echo                        # 試し
 | [docs/quickstart.md](docs/quickstart.md)・[docs/data_format.md](docs/data_format.md) | 環境の用意と試し方、データの置き場と形 |
 | assets/ | 持ち主が書いた表の見本（キャラクタ「言結 となり」のプロフィールと「自分のこと」、時計グレイン） |
 | experiments/・results/ | 最初の段の実験のプログラムと結果 |
-| tools/・tests/・examples/ | データの取得・集計・図、部品ごとの確認、試し方のコード例 |
+| tools/・tests/・examples/ | データの取得・集計・図、部品ごとの確認、試し方のコード例。tools/corpora/ は会話コーパスを 1 行 1 発言の形にそろえる道具 |
 | vendor/ | SN2-Parts-2D から写した光の部品（書き換えない。[vendor/README.md](vendor/README.md)） |
 
 関係するプロジェクト: [Sin-CNN2](https://github.com/devaf09/Sin-CNN2)（1 次元の光の学習器 SinWave。すべての元）、SN2-Parts-2D（2 次元の光の部品集）、[Sin-CNN3](https://github.com/devaf09/Sin-CNN3)（会話の部品と語板のライブラリの元）。
