@@ -4,6 +4,7 @@
 (b) 波: 語ごと・帯ごとに 1 本の波 = Σ 割合 × 属性の印（乱数の位相）。読む時は印との共鳴 Re<印, 波>/D。
     雑音の床（σ√(2 ln 属性の数)、σ = |波|/(D√2)）より下は 0 にする。
     比べに、全部の帯を 1 本に重ねた形（語ごとに 1 本）も測る。
+    ズレの元を見るために、床を外した形と、印を直交にした形（属性 j に周波数 j。帯の属性が D 個までなら混信が 0）も測る。
 
 物差し:
 - 全変動: 読み戻した割合（帯の中で合計 1 にそろえる）と、元の割合の差の半分の合計。0 が同じ、1 が全く違う。帯ごと。
@@ -41,8 +42,8 @@ def auroc(pos, neg):
 class Bands:
     """属性の印と、語の帯の波。mode = "band"（帯ごとに 1 本）か "one"（全部の帯を 1 本に）。"""
 
-    def __init__(self, boards, D, store="p8", mode="band", seed=0):
-        self.D, self.mode, self.store = D, mode, Store(store)
+    def __init__(self, boards, D, store="p8", mode="band", seed=0, marks="rand", use_floor=True):
+        self.D, self.mode, self.store, self.use_floor = D, mode, Store(store), use_floor
         self.attrs = {}
         for b in boards:
             for band, d in b["attrs"].items():
@@ -52,6 +53,12 @@ class Bands:
         self.marks = {band: np.exp(1j * np.random.default_rng(zlib.crc32(f"帯:{band}:{seed}".encode())).uniform(0, 2 * np.pi, (len(v), D))
                                    ).astype(np.complex64) for band, v in self.attrs.items()}
         self.n_all = sum(len(v) for v in self.attrs.values())
+        if marks == "orth":                                 # 直交の印: 属性 j に周波数 j（D 個まで）。共通の乱数の位相を掛ける。混信が 0
+            assert mode == "band" and max(len(v) for v in self.attrs.values()) <= D, "直交の印は、帯の属性が D 個までの時だけ"
+            k = np.arange(D)
+            for band, v in self.attrs.items():
+                common = np.exp(1j * np.random.default_rng(zlib.crc32(f"帯:{band}:{seed}".encode())).uniform(0, 2 * np.pi, D))
+                self.marks[band] = (np.exp(2j * np.pi * np.outer(np.arange(len(v)), k) / D) * common).astype(np.complex64)
 
     def bytes_per_word(self, board):
         n = len(board["attrs"]) if self.mode == "band" else 1
@@ -71,6 +78,8 @@ class Bands:
         return self.store.decode_np(self.store.encode(w[None]))[0]
 
     def floor(self, w, band):
+        if not self.use_floor:
+            return -np.inf
         n = len(self.attrs[band]) if self.mode == "band" else self.n_all
         return np.linalg.norm(w) / (self.D * math.sqrt(2)) * math.sqrt(2 * math.log(n))
 
@@ -110,6 +119,8 @@ def fidelity(bd, boards):
             for x, r in d.items():
                 t[bd.aix[band][x]] = r
             v = bd.read(b, band)
+            s = v.sum()
+            v = np.maximum(v, 0.0)
             s = v.sum()
             tv += 0.5 * np.abs((v / s if s > 0 else v) - t).sum()
             top += int(v.argmax() == t.argmax() and s > 0)
@@ -164,6 +175,11 @@ def main():
     triples = random.Random(a.seed).sample(triples, min(a.n_triples, len(triples)))
     sub = boards[:: max(1, len(boards) // a.n_fidelity)]
     n_attr = np.mean([sum(len(d) for d in b["attrs"].values()) for b in boards])
+    seen = {}
+    for bb in boards:
+        for band, d in bb["attrs"].items():
+            seen.setdefault(band, set()).update(d)
+    max_attr = max(len(v) for v in seen.values())
     res = dict(語板=len(boards), 語あたりの属性=round(float(n_attr), 1), rows={})
     res["rows"]["(a) 割合のまま"] = dict(崩した文=odd_test(Table(), boards, triples), 語あたりのバイト=round(float(n_attr) * 6))  # 名札 4 ＋ 割合 2
     log.info("(a) 割合のまま: %s", res["rows"]["(a) 割合のまま"])
@@ -178,6 +194,17 @@ def main():
                 log.info("%s: 崩した文 %s、バイト %d", label, r["崩した文"], r["語あたりのバイト"])
                 log.info("    全変動 %s", {k: v["全変動"] for k, v in r["忠実さ"].items()})
                 log.info("    上位の一致 %s", {k: v["上位の一致"] for k, v in r["忠実さ"].items()})
+    for D in [int(x) for x in a.D.split(",")]:              # 持ち主の問い（なぜズレるか）: 床を外す、印を直交にする
+        for label, kw in (("乱数の印・床なし", dict(use_floor=False)), ("直交の印", dict(marks="orth")), ("直交の印・床なし", dict(marks="orth", use_floor=False))):
+            if kw.get("marks") == "orth" and D < max_attr:
+                continue                                    # 直交の印は D が帯の属性の数以上の時だけ
+            bd = Bands(boards, D, "p8", "band", a.seed, **kw)
+            label = f"(b) 波 D {D} p8 帯ごとに 1 本、{label}"
+            r = dict(忠実さ=fidelity(bd, sub), 崩した文=odd_test(bd, boards, triples),
+                     語あたりのバイト=round(float(np.mean([bd.bytes_per_word(b) for b in boards]))))
+            res["rows"][label] = r
+            log.info("%s: 崩した文 %s", label, r["崩した文"])
+            log.info("    全変動 %s", {k: float(v["全変動"]) for k, v in r["忠実さ"].items()})
     if a.out:
         json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
