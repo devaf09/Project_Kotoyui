@@ -169,6 +169,53 @@ class ParticleScoop:
         return out + 1e-6 * self.prior / self.prior.sum()
 
 
+ROLE_PARTS = {"主語": ("は", "が", "も", "って"), "目的語": ("を",), "補語": ("に", "で", "へ", "と", "から", "まで")}
+
+
+class ParticleLight:
+    """bot の行づくりにつなぐ口。会話の資料から助詞の波の板を作り、(名詞, 役, 述語) の「その役らしさ」を返す。
+
+    役らしさ = すくった助詞の明るさのうち、その役の助詞（主語: は・が・も・って、目的語: を、補語: に・で・へ・と・から・まで）の割合を、
+    資料全体での割合で割った物（1 で頭打ち）。全体より明るければ 1、暗いほど 0 に近い。手で置く数は無い。
+    i27s_fused_generate.role_light に入れると、主語と述語の組の点に掛かり、目的語・補語の枠の点から差として引かれる。"""
+
+    def __init__(self, works, D=512, seed=0, max_scenes=300000, top=30):
+        tr = [s for w in works for s in samples(w)]
+        if len(tr) > max_scenes:                            # 場面が多すぎる時は、等間隔に間引く（1 回の問いの速さのため）
+            tr = tr[:: math.ceil(len(tr) / max_scenes)]
+        self.parts = [p for p, c in Counter(s["p"] for s in tr).most_common(16) if any(p in v for v in ROLE_PARTS.values())]
+        vocab = sorted({t["lemma"] for w in works for ln in w["lines"] for t in ln["toks"] if t["pos"] in ("NOUN", "PROPN", "VERB", "ADJ", "PRON")})
+        seq = [[t["lemma"] for t in ln["toks"] if t["pos"] in ("NOUN", "PROPN", "VERB", "ADJ", "PRON")] for w in works for ln in w["lines"] + [dict(toks=[])]]
+        wv = Waves(vocab, D, seed)
+        wv.learn(seq)
+        self.ps = ParticleScoop(ParticleBoard(wv, self.parts, D, seed, keys=("対", "係る語", "名詞", "流れ")), top).fit(
+            [s for s in tr if s["p"] in self.parts])
+        self.cls = {r: np.array([p in ps for p in self.parts]) for r, ps in ROLE_PARTS.items()}
+        self.base = {r: float(self.ps.prior[m].sum() / self.ps.prior.sum()) for r, m in self.cls.items()}
+        self.ctx, self.memo = [], {}
+
+    def set_ctx(self, ctx):
+        """会話のここまでの中身の語（前の 3 行ぶん）。流れの鍵に使う。"""
+        self.ctx, self.memo = list(ctx), {}
+
+    def parts_light(self, n, p):
+        if (n, p) not in self.memo:
+            sc = self.ps.scores(dict(n=n, h=p, p=None, ctx=self.ctx, before=[], sib=[], aft=[]))
+            self.memo[(n, p)] = sc / max(sc.sum(), 1e-12)
+        return self.memo[(n, p)]
+
+    def __call__(self, n, role, p):
+        if self.ps.pb.w(n) is None and self.ps.pb.w(p) is None:
+            return 1.0                                      # 名詞も述語も知らない: 何も言わない
+        m = self.cls[role]
+        return min(1.0, float(self.parts_light(n, p)[m].sum()) / max(self.base[role], 1e-9))
+
+    def particle(self, n, role, p):
+        """その役の助詞のうち、いちばん明るい物（無ければ None）。"""
+        sc = np.where(self.cls[role], self.parts_light(n, p), 0.0)
+        return self.parts[int(sc.argmax())] if sc.max() > 0 else None
+
+
 class CountTable:
     def __init__(self, parts, feats=False):
         self.feats, self.f_ = feats, defaultdict(Counter)   # feats: ほかの助詞・後ろの語も、1 つずつ掛ける（波の鍵と同じ手がかり）

@@ -15,3 +15,17 @@ def test_scoop_reads_back():
     for (n, h), p in rule.items():
         sc = ps.scores(dict(n=n, h=h, p=p, ctx=[], before=[], sib=[], aft=["品:VERB"]))
         assert parts[int(sc.argmax())] == p
+
+
+def test_particle_light_roles():
+    def ln(words):      # (表記, 品詞, 係り先, 係り) の並び → 解析の形
+        return dict(text="".join(w for w, *_ in words), toks=[dict(i=i, text=w, lemma=w, pos=p, head=h, dep=d) for i, (w, p, h, d) in enumerate(words)])
+    a = ln([("海", "NOUN", 2, "obl"), ("に", "ADP", 0, "case"), ("行く", "VERB", 2, "ROOT")])
+    b = ln([("私", "PRON", 2, "nsubj"), ("は", "ADP", 0, "case"), ("行く", "VERB", 2, "ROOT")])
+    c = ln([("パン", "NOUN", 2, "obj"), ("を", "ADP", 0, "case"), ("食べる", "VERB", 2, "ROOT")])
+    works = [dict(name=f"w{k}", lines=[a, b, c]) for k in range(4)]
+    pl = m.ParticleLight(works, D=256, top=4)
+    assert pl("海", "補語", "行く") > pl("海", "主語", "行く")
+    assert pl("私", "主語", "行く") > pl("私", "補語", "行く")
+    assert pl.particle("パン", "目的語", "食べる") == "を"
+    assert pl("知らない", "主語", "知らない") == 1.0

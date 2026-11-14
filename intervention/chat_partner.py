@@ -199,6 +199,7 @@ def main():
     ap.add_argument("--wave_store", default="c64", choices=("c128", "c64", "p8"), help="I48: 数の持ち方")
     ap.add_argument("--wave_board", help="I48: 作った板の保存先（拡張子なし）。あれば読み込み、無ければ作って保存する。昼の足しを使う時は --wave_day を付けて作った板を使う")
     ap.add_argument("--wave_day", help="I48: 昼の足し。会話の行を今の語の波のまま板に足し、この JSONL に書く")
+    ap.add_argument("--particle", help="I48c: 助詞の波の板を作る会話の資料（解析済み JSON）。主語・目的語・補語の選び方に、助詞の明るさから読んだ役らしさを入れる")
     ap.add_argument("--wave_devices", default="auto", help="I48: 置き場（auto / numpy / cuda:0,cuda:1）")
     ap.add_argument("--rev", action="store_true", help="I42e: 述語の形を、本で見ていない印の組は逆引き（意味の組 → 繋ぎの語と並び、i42_fused_flow）で作る")
     ap.add_argument("--learn_imp", action="store_true", help="I41a: 大事かどうかを、後で「覚えてる？」と聞かれたかから学び、目印に当たらない行も P(大事) が高ければ大事な板に入れる")
@@ -255,6 +256,12 @@ def main():
         bot.sb.learn_w = a.learn_w
     if a.attrs:
         bot.attr_field, bot.use_book, bot.conv_share = True, False, 0.2
+    if a.particle:
+        import i48c_particle_wave as W48c
+        import i27s_fused_generate as S27
+        pw = json.load(open(a.particle, encoding="utf-8"))
+        bot.particle = W48c.ParticleLight(pw["works"] if isinstance(pw, dict) else pw)
+        S27.role_light = bot.particle
     if a.wave:
         import i48_wave_board as W48
         ww = json.load(open(a.wave, encoding="utf-8"))

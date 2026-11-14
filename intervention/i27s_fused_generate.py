@@ -120,6 +120,9 @@ def cands(c, k):
     return [x for _, x in sorted(((v, x) for x, v in c.items() if v > 0), reverse=True)[:k]]
 
 
+role_light = None     # I48c: (名詞, 役, 述語) → 0〜1。助詞の波の板から読んだ「その役らしさ」。None なら使わない（前と同じ）
+
+
 def pair_scores(board, avoid, prev_p, tr, kappa=0.05, avoid_w=0.2, k=6):
     """I27r の ranked_pairs と同じ点（I27o の joint）を、点ごと返す（照らすの材料）。"""
     w = board[0]
@@ -140,6 +143,8 @@ def pair_scores(board, avoid, prev_p, tr, kappa=0.05, avoid_w=0.2, k=6):
                 sc *= kappa + tr[prev_p].get(p, 0) / tot
             out.append((sc, n, p))
     out.sort(reverse=True)
+    if role_light is not None:                              # 上の候補だけ、主語らしさ（は・が・も が明るいか）を掛けて並べ直す
+        out = sorted(((sc * role_light(n, "主語", p), n, p) for sc, n, p in out[: 4 * k]), reverse=True)
     return out[:k]
 
 
@@ -151,7 +156,8 @@ def combos(st, s, p, k=3, pb=None):
     opts = {}
     for r, ro in ROLES:
         c = Counter({n: v.get(ro + p, 0) for n, v in st.wb.items() if n != s})
-        opts[r] = [(None, -react(e[r], 0.0)[0])] + [(n, st.slot(n, ro + p, e[r])) for n in cands(c, k)]
+        opts[r] = [(None, -react(e[r], 0.0)[0])] + [(n, st.slot(n, ro + p, e[r]) - (react(1.0, role_light(n, r, p))[0] if role_light else 0.0))
+                                                    for n in cands(c, k)]
 
     def mod_opts(n):
         em = ratio(G, own, ("飾", n), ("名", n))
