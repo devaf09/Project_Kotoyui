@@ -28,6 +28,8 @@ I47b との違い:
   # 容量と精度の表（波の長さ D と数の持ち方を変える）
   python intervention/i48_wave_board.py --cache <parsed.json> --D 512,1024,2048,4096 --store c128,c64,p8 \
       --devices cuda:0,cuda:1 --out i48a.json --log i48a.log
+  # 夜の学び直し: 昼に足した会話（chat_bot3.py --wave_day の JSONL）も学び、前の日の結果と比べて 合流／戻す を判定
+  python intervention/i48_wave_board.py --cache <parsed.json> --day day.jsonl --prev prev.json --out today.json
   # 層を足す（例: 100 行の層を 5 つめに）
   python intervention/i48_wave_board.py --cache <parsed.json> --wins 1,3,10,30,100
 
@@ -267,6 +269,26 @@ class Waves:
         self.ix = {w: i for i, w in enumerate(vocab)}
         self.base = np.exp(1j * rng.uniform(0, 2 * np.pi, (len(vocab), D)))
         self.W = self.base.copy()
+        self.spare = []
+
+    def reserve(self, n, seed=1):
+        """昼に出会う知らない語のための空き。乱数の印だけを先に作っておく（学んだ波はまだ無いので、印そのまま）。"""
+        rng = np.random.default_rng(seed + len(self.vocab))
+        new = np.exp(1j * rng.uniform(0, 2 * np.pi, (n, self.D)))
+        self.spare = list(range(len(self.vocab) + n - 1, len(self.vocab) - 1, -1))
+        self.vocab = list(self.vocab) + [None] * n
+        self.base = np.concatenate([self.base, new])
+        self.W = np.concatenate([self.W, new])
+
+    def add_word(self, w):
+        """知らない語に、空きの印を割り当てる。空きが無ければ None（夜の学び直しまで使えない）。"""
+        if w in self.ix:
+            return self.ix[w]
+        if not self.spare:
+            return None
+        j = self.spare.pop()
+        self.ix[w], self.vocab[j] = j, w
+        return j
 
     def flow_sums(self, seq, dev=None):
         """acc[j] = Σ（語 j の出た行）（その行と前後の行の語の波の和 − 自分の波）、n[j] = その相手の数。"""
@@ -373,12 +395,15 @@ class WaveBoard:
     read(F, k)            : 波を語の波と共鳴させて、明るい順に k 語（語に戻すのは、ここだけ）。
     """
 
-    def __init__(self, D=512, store="c64", wins=WINS, devices=(None,), top=30, mix=0.6, seed=0, lam=0.5, keep_dir=True):
+    def __init__(self, D=512, store="c64", wins=WINS, devices=(None,), top=30, mix=0.6, seed=0, lam=0.5, keep_dir=True, spare=0):
         self.D, self.wins, self.devices, self.top, self.mix, self.seed, self.lam = D, list(wins), list(devices), top, mix, seed, lam
         self.wstore = Store(store, unit=True)
         self.kstore = Store(store)
         self.banks = []
         self.keep_dir = keep_dir
+        self.spare = spare                                  # 昼に足す語のための空き（0 なら昼の足しを使わない）
+        self.day_K, self.day_B, self.day_Bd, self.day_nB = [], [], [], []
+        self.day_works, self.day_from = {}, None
 
     # ---- 学び ----
     def fit(self, works, waves=None):
@@ -404,13 +429,23 @@ class WaveBoard:
         self.answer_vocab = sorted(freq)                    # 読み出す語（次の行に出た語）
         self.aix = {w: j for j, w in enumerate(self.answer_vocab)}
         aid = [waves.ix[w] for w in self.answer_vocab]
+        if self.spare:                                      # 昼の空き: 語の印と、読み出す語の席
+            if not waves.spare:
+                waves.reserve(self.spare)
+            self.a_spare = list(range(len(aid) + self.spare - 1, len(aid) - 1, -1))
+            self.answer_vocab = self.answer_vocab + [None] * self.spare
+            self.idf_new = math.log((len(seq) + 1) / 0.5)   # 初めての語の珍しさ（1 度も見ていない語と同じ）
         self.readers = {}
         self._A = waves.base[aid].astype(np.complex64)      # 読み出しは自分の印（乱数の位相。ほかの語と重ならないので、混信はただの雑音になる）
         self._Aw = waves.W[aid].astype(np.complex64)        # 向きを測る時は学んだ波（似た語どうしが重なる）
+        if self.spare:                                      # 空きの席には、どの語とも違う乱数の印を入れておく（語が決まったら、その語の印に替える）
+            fill = np.exp(1j * np.random.default_rng(self.seed + 7).uniform(0, 2 * np.pi, (self.spare, self.D))).astype(np.complex64)
+            self._A, self._Aw = np.concatenate([self._A, fill]), np.concatenate([self._Aw, fill])
         self.prior = [w for w, _ in freq.most_common(200)]
         self.common = set(self.prior[:50])
         z = sum(freq.values())
         self.pf = np.zeros(len(self.answer_vocab))
+        self.n_main = len(self.scenes)
         for w in self.prior:
             self.pf[self.aix[w]] = freq[w] / z
         self.pf_c = Counter({w: freq[w] / z for w in self.prior})
@@ -437,12 +472,14 @@ class WaveBoard:
         li = len(self.banks)
         dev = self.devices[li % len(self.devices)]
         rows = []
-        for wi, i in self.scenes:
+        for wi, i in self.scenes[: self.n_main]:            # 本体の場面（昼に足した分は短期の置き場に別に持つ）
             ws = sum(self.cw[wi][max(0, i - win):i], [])
             rows.append(self.bag_ids(ws))
         K = sparse_sum(rows, self.waves.W.astype(self.kstore.cdtype), dev)
         K /= np.linalg.norm(K, axis=1, keepdims=True) + 1e-9
         self.banks.append(Bank(K, self.kstore, dev, name=f"層 {win} 行"))
+        self.day_K.append([q.astype(np.complex64) if (q := self.query(sum(self.cw[wi][max(0, i - win):i], []))) is not None
+                           else np.zeros(self.D, np.complex64) for wi, i in self.scenes[self.n_main:]])
         del K
         if dev not in self.readers:
             self.readers[dev] = Reader(self._A, self.wstore, dev)
@@ -468,11 +505,88 @@ class WaveBoard:
     def scoop_layer(self, l, Q):
         """層 l で、問いの波 Q（問い × D）ごとに共鳴の強い場面を選び、次の行の波を強さの 2 乗で重ねる。"""
         idx, r = self.banks[l].top(Q, self.top)
+        if self.day_B:                                      # 昼に足した場面（短期の置き場）も同じ問いで共鳴させ、強い順に合わせる
+            Kd = np.stack(self.day_K[l])
+            rd = np.abs(Kd @ np.conj(Q).T.astype(np.complex64)).T
+            V = np.concatenate([r, rd], 1)
+            I = np.concatenate([idx, np.broadcast_to(self.n_main + np.arange(len(Kd)), rd.shape)], 1)
+            o = np.argsort(-V, 1)[:, : self.top]
+            idx, r = np.take_along_axis(I, o, 1), np.take_along_axis(V, o, 1)
         w2 = r ** 2
-        S = np.einsum("qk,qkd->qd", w2.astype(np.float32), self.B.rows(idx))
-        Sd = np.einsum("qk,qkd->qd", w2.astype(np.float32), self.Bd.rows(idx)) if self.Bd is not None else None
-        Z = (w2 * self.nB[idx]).sum(1)                      # 表の板で言えば、明るさの合計
+        S = np.einsum("qk,qkd->qd", w2.astype(np.float32), self.brows(idx))
+        Sd = np.einsum("qk,qkd->qd", w2.astype(np.float32), self.brows(idx, True)) if self.Bd is not None else None
+        Z = (w2 * self.nb(idx)).sum(1)                      # 表の板で言えば、明るさの合計
         return S, Z, idx, w2, Sd
+
+    def brows(self, idx, learned=False):
+        """場面の番号 → 次の行の波（本体と、昼に足した分）。"""
+        bank, day = (self.Bd, self.day_Bd) if learned else (self.B, self.day_B)
+        idx = np.asarray(idx)
+        if not day:
+            return bank.rows(idx)
+        m = idx >= self.n_main
+        out = np.zeros(idx.shape + (self.D,), np.complex64)
+        out[~m] = bank.rows(idx[~m])
+        if m.any():
+            out[m] = np.stack(day)[idx[m] - self.n_main]
+        return out
+
+    def nb(self, idx):
+        return (np.concatenate([self.nB, self.day_nB]) if self.day_nB else self.nB)[idx]
+
+    # ---- 昼: 場面を 1 つずつ足す ----
+    def add_line(self, conv, text, toks):
+        """会話 conv（名前）に 1 行足す。前の行と今の行に中身の語があれば、新しい場面として短期の置き場に入れる。
+        今の語の波のまま足すだけで、学び直さない。知らない語には空きの印を割り当てる。足した場面はすぐにすくえる。
+        返り値: 場面を足したか。"""
+        assert self.spare, "昼の足しを使うには WaveBoard(spare=…) で空きを作る"
+        if conv not in self.day_works:
+            self.day_works[conv] = len(self.works)
+            if self.day_from is None:
+                self.day_from = len(self.works)
+            self.works.append(dict(name=conv, lines=[]))
+            self.cw.append([])
+        wi = self.day_works[conv]
+        ws = content(toks)
+        for w in ws:
+            if self.waves.add_word(w) is not None:
+                self.idf.setdefault(w, self.idf_new)
+        self.works[wi]["lines"].append(dict(text=text if text.startswith("「") else "「" + text + "」", toks=toks))
+        self.cw[wi].append(ws)
+        c = self.cw[wi]
+        i = len(c) - 1
+        b = sorted({w for w in ws if w in self.waves.ix})
+        if i < 1 or not c[i - 1] or not b:
+            return False
+        keys = [self.query(sum(c[max(0, i - w):i], [])) for w in self.wins]
+        if keys[0] is None:
+            return False
+        for w in b:                                         # 返事に出た語を、読み出せる語にする
+            if w not in self.aix and self.a_spare:
+                j = self.a_spare.pop()
+                self.aix[w], self.answer_vocab[j] = j, w
+                self._A[j], self._Aw[j] = self.waves.base[self.waves.ix[w]], self.waves.W[self.waves.ix[w]]
+                for r in self.readers.values():
+                    r.set_row(j, self._A[j])
+        b = [w for w in b if w in self.aix]
+        if not b:
+            return False
+        ids = [self.waves.ix[w] for w in b]
+        for l, k in enumerate(keys):
+            self.day_K[l].append(k.astype(np.complex64))
+        self.day_B.append(self.waves.base[ids].sum(0).astype(np.complex64))
+        if self.Bd is not None:
+            self.day_Bd.append(self.waves.W[ids].sum(0).astype(np.complex64))
+        self.day_nB.append(float(len(b)))
+        self.nxt.append(b)
+        self.scenes.append((wi, i))
+        return True
+
+    def save_day(self, path):
+        """昼に足した会話を、資料と同じ形（作品 = 会話、行 = 文と語の解析）で書く。夜の学び直しで --day に渡す。"""
+        with open(path, "w", encoding="utf-8") as f:
+            for wi in self.day_works.values():
+                f.write(json.dumps(self.works[wi], ensure_ascii=False) + "\n")
 
     def scoop(self, ctx_q):
         """ctx_q: 層ごとの問いの波（問い × D、無い問いは 0）。層ごとに別の GPU で同時に回す。"""
@@ -505,7 +619,7 @@ class WaveBoard:
         s = v.sum()
         sc = (1 - self.lam) * (v / s if s > 0 else v) + self.lam * self.pf
         top = np.argpartition(-sc, k)[:k]
-        return [self.answer_vocab[j] for j in top[np.argsort(-sc[top])]]
+        return [self.answer_vocab[j] for j in top[np.argsort(-sc[top])] if self.answer_vocab[j] is not None]
 
     def rank_counter(self, c, k=10):
         s = sum(c.values()) or 1.0
@@ -542,6 +656,13 @@ class Reader:
         out = (St @ A.conj().T).real / self.D
         return out.cpu().numpy().astype(np.float64)
 
+    def set_row(self, j, a):
+        """読み出す語の席 j に、語の印を入れる（昼に足した語）。"""
+        e = self.store.encode(a[None])
+        self.enc[j] = e[0]
+        if self.t is not None:
+            self.t[j] = torch.from_numpy(e).to(self.dev)[0]
+
     def free(self):
         self.t = None
         release(self.dev)
@@ -577,8 +698,8 @@ class WaveSource:
         E[0] = even_dense(E[0])
         F = bd.resuperpose(E)[0]                            # 返事の意味の波
         cand = np.unique(np.concatenate([res[l][2][0] for l in range(L) if qs[l] is not None]))
-        sc = (bd.B.rows(cand) @ np.conj(F)).real / (bd.D * np.sqrt(np.maximum(bd.nB[cand], 1.0)))
-        top = [(w, float(E[0, j])) for j, w in ((j, bd.answer_vocab[j]) for j in np.argsort(-E[0])[:8]) if E[0, j] > 0]
+        sc = (bd.brows(cand) @ np.conj(F)).real / (bd.D * np.sqrt(np.maximum(bd.nb(cand), 1.0)))
+        top = [(w, float(E[0, j])) for j, w in ((j, bd.answer_vocab[j]) for j in np.argsort(-E[0])[:8]) if E[0, j] > 0 and w is not None]
         out, seen = [], set()
         mx = max(float(sc.max()), 1e-12)
         for o in np.argsort(-sc):
@@ -719,6 +840,23 @@ def evaluate(board, test, a, rng_seed=1):
     return out
 
 
+NIGHT_KEYS = (("波・周波数ごとにそろえる／" + MODES[2], "当たり"), ("波・読み出してそろえる／" + MODES[1], "向き"))
+
+
+def night_verdict(prev, now):
+    """前の日の板と今日学び直した板を、同じ試しで比べる。当たりか向きが「揺れより大きく」下がっていたら戻す。
+    揺れ = 同じ試しの組で 2 つの割合を比べる時のばらつき √(p(1−p)·2/n) の 2 倍（手で置く値ではなく、試しの数から決まる）。"""
+    out = dict(判定="合流")
+    n = min(prev["試しの組"], now["試しの組"])
+    for k, m in NIGHT_KEYS:
+        p0, p1 = float(prev[k][m]), float(now[k][m])
+        se = 2 * math.sqrt(max(p0 * (1 - p0), 1e-9) * 2 / n)
+        out[f"{k}・{m}"] = dict(前=p0, 今=p1, 揺れ=round(se, 4))
+        if p1 < p0 - se:
+            out["判定"] = "戻す"
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", required=True)
@@ -735,6 +873,8 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--batch", type=int, default=256, help="まとめて共鳴させる問いの数")
     ap.add_argument("--no_dir", action="store_true", help="向きを測らない（学んだ波の次の行を持たないので、PC のメモリが半分で済む）")
+    ap.add_argument("--day", help="夜の学び直し: 昼に足した会話（save_day の JSONL、カンマで並べる）を学ぶ資料に足す")
+    ap.add_argument("--prev", help="夜の学び直し: 前の日の結果（--out の JSON）。当たりと向きが下がっていたら「戻す」と判定する")
     ap.add_argument("--out")
     ap.add_argument("--log")
     a = ap.parse_args()
@@ -743,6 +883,10 @@ def main():
     works = json.load(open(a.cache, encoding="utf-8"))
     works = works["works"] if isinstance(works, dict) else works
     tr_w, te_w = split(works, a)
+    for path in (a.day.split(",") if a.day else []):        # 試しは固定のまま、昼の会話を学ぶ側にだけ足す
+        day = [json.loads(x) for x in open(path, encoding="utf-8") if x.strip()]
+        tr_w = tr_w + day
+        log.info("昼の会話を足した: %s（%d 会話）", path, len(day))
     devs = parse_devices(a.devices)
     wins = [int(x) for x in a.wins.split(",")]
     log.info("始め: 学ぶ作品 %d、試し %d、置き場 %s、torch %s", len(tr_w), len(te_w), devs, getattr(torch, "__version__", "なし"))
@@ -771,6 +915,11 @@ def main():
             del board
             if a.out:
                 json.dump(table, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    if a.prev:                                              # 夜の判定: 前の日より下がったら、今日の分を合流させない
+        table["夜の判定"] = night_verdict(json.load(open(a.prev, encoding="utf-8"))["結果"][0], table["結果"][0])
+        log.info("夜の判定: %s", table["夜の判定"])
+        if a.out:
+            json.dump(table, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(json.dumps(table, ensure_ascii=False, indent=1))
 
 

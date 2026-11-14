@@ -80,3 +80,33 @@ def test_wave_source_returns_lines():
     out = src.lines(ctx)
     assert 1 <= len(out) <= 5 and out[0][0] == 1.0 and out[0][1].startswith("「")
     assert src.lines([["知らない語"]]) == []
+
+
+def test_day_add_line_is_scooped_at_once_and_saved(tmp_path):
+    works = toy_works()
+    bd = W.WaveBoard(D=2048, store="c64", wins=(1, 3), devices=[None], top=10, keep_dir=False, spare=16).fit(works)
+    n0, v0 = len(bd.scenes), len(bd.answer_vocab)
+    tok = lambda ws: [dict(i=i, text=w, lemma=w, pos="NOUN", dep="dep", head=0) for i, w in enumerate(ws)]
+    assert not bd.add_line("今日", "新語A 新語B", tok(["新語A", "新語B"]))      # 1 行目は場面にならない
+    assert bd.add_line("今日", "新語C 新語D", tok(["新語C", "新語D"]))          # 知らない語だけの場面を足す
+    assert len(bd.scenes) == n0 + 1 and len(bd.answer_vocab) == v0 and "新語C" in bd.aix
+    res = bd.scoop([bd.query(["新語A", "新語B"])[None]] * 2)
+    assert res[0][2][0][0] == n0                             # 足した場面がいちばん強く共鳴する
+    v = bd.read_dense((res[0][0] / res[0][1][:, None]))[0]
+    assert {bd.answer_vocab[j] for j in np.argsort(-v)[:2]} == {"新語C", "新語D"}   # 足した返事の語が読める
+    out = W.WaveSource(bd, n=3).lines([["新語A", "新語B"]])
+    assert out[0][1] == "「新語C 新語D」"
+    bd.add_layer(10)                                         # 層を足しても、昼の場面は付いてくる
+    assert len(bd.day_K[2]) == 1
+    p = tmp_path / "day.jsonl"
+    bd.save_day(str(p))
+    import json
+    day = [json.loads(x) for x in open(p, encoding="utf-8")]
+    assert len(day) == 1 and len(day[0]["lines"]) == 2 and day[0]["lines"][0]["text"].startswith("「")
+
+
+def test_night_verdict():
+    k1, k2 = W.NIGHT_KEYS
+    mk = lambda a, d: {"試しの組": 10000, k1[0]: {k1[1]: a}, k2[0]: {k2[1]: d}}
+    assert W.night_verdict(mk(0.50, 0.50), mk(0.495, 0.51))["判定"] == "合流"      # 揺れの中
+    assert W.night_verdict(mk(0.50, 0.50), mk(0.51, 0.40))["判定"] == "戻す"       # 向きが崩れた

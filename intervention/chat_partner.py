@@ -197,6 +197,7 @@ def main():
     ap.add_argument("--wave", help="I48: 意味の波の板を作る会話の資料（解析済み JSON）。行づくりの場の板に、波ですくった行を入れる")
     ap.add_argument("--wave_D", type=int, default=2048, help="I48: 波の長さ")
     ap.add_argument("--wave_store", default="c64", choices=("c128", "c64", "p8"), help="I48: 数の持ち方")
+    ap.add_argument("--wave_day", help="I48: 昼の足し。会話の行を今の語の波のまま板に足し、この JSONL に書く")
     ap.add_argument("--wave_devices", default="auto", help="I48: 置き場（auto / numpy / cuda:0,cuda:1）")
     ap.add_argument("--rev", action="store_true", help="I42e: 述語の形を、本で見ていない印の組は逆引き（意味の組 → 繋ぎの語と並び、i42_fused_flow）で作る")
     ap.add_argument("--learn_imp", action="store_true", help="I41a: 大事かどうかを、後で「覚えてる？」と聞かれたかから学び、目印に当たらない行も P(大事) が高ければ大事な板に入れる")
@@ -256,8 +257,10 @@ def main():
     if a.wave:
         import i48_wave_board as W48
         ww = json.load(open(a.wave, encoding="utf-8"))
-        wb = W48.WaveBoard(D=a.wave_D, store=a.wave_store, devices=W48.parse_devices(a.wave_devices), keep_dir=False)
+        wb = W48.WaveBoard(D=a.wave_D, store=a.wave_store, devices=W48.parse_devices(a.wave_devices), keep_dir=False,
+                           spare=4096 if a.wave_day else 0)
         bot.wave = W48.WaveSource(wb.fit(ww["works"] if isinstance(ww, dict) else ww))
+        bot.wave_day = a.wave_day
     bot.use_chain = a.no_one_clause
     mem = None
     if a.memory:
