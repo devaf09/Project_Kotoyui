@@ -152,21 +152,27 @@ class Bank:
         self.enc = store.encode(X)
         self.chunk = chunk
         self.gpu = {}
+        self.host = None                                    # GPU に載らなかった区切りだけ、PC のメモリに持つ
+        self._nbytes = self.enc.nbytes
         if dev is not None:
-            room = free_bytes(dev) * budget if dev.type == "cuda" else float("inf")
+            reserve = 6 * chunk * self.D * 8                # 測る時の作業用（区切りを複素数に戻す分）を先に空けておく
+            room = max(0.0, free_bytes(dev) * budget - reserve) if dev.type == "cuda" else float("inf")
             for c0 in range(0, self.N, chunk):
                 part = self.enc[c0:c0 + chunk]
                 if part.nbytes > room:
                     break
                 self.gpu[c0] = torch.from_numpy(part).to(dev)
                 room -= part.nbytes
+            if self.gpu:                                    # GPU に載せた区切りの写しは PC のメモリに残さない
+                self.host = {c0: self.enc[c0:c0 + chunk].copy() for c0 in range(0, self.N, chunk) if c0 not in self.gpu}
+                self.enc = None
             if len(self.gpu) * chunk < self.N:
                 log.info("%s: GPU に載らない分を PC のメモリから流す（%d/%d 区切りが GPU）", name, len(self.gpu),
                          (self.N + chunk - 1) // chunk)
 
     @property
     def nbytes(self):
-        return self.enc.nbytes
+        return self._nbytes
 
     def free(self):
         self.gpu.clear()
@@ -197,7 +203,8 @@ class Bank:
         for c0 in range(0, self.N, self.chunk):
             E = self.gpu.get(c0)
             if E is None:
-                E = torch.from_numpy(self.enc[c0:c0 + self.chunk]).to(self.dev, non_blocking=True)
+                part = self.host[c0] if self.host is not None else self.enc[c0:c0 + self.chunk]
+                E = torch.from_numpy(part).to(self.dev, non_blocking=True)
             R = (self.store.decode_t(E).to(cdt) @ Qt).abs()                  # 区切り × 問い
             vv, ii = torch.topk(R, min(k, R.shape[0]), dim=0)
             ii = ii + c0
@@ -211,7 +218,8 @@ class Bank:
         return best_i.T.cpu().numpy(), best_v.T.cpu().numpy().astype(np.float64)
 
     def rows(self, idx):
-        """番号の波を計算用の複素数で（PC のメモリから）。"""
+        """番号の波を計算用の複素数で（PC のメモリから）。GPU に載せない置き場（次の行の波）だけで使う。"""
+        assert self.enc is not None, "GPU に載せた置き場からは取り出せない"
         return self.store.decode_np(self.enc[idx])
 
 
