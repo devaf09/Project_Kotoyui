@@ -133,6 +133,9 @@ def move_roles(BB):
     out = Board()
     for k, v in BB.items():
         out[k] = v
+    prep = getattr(getattr(role_move, "__self__", None), "prepare", None)
+    if prep:                                                # I48f: (名詞, 述語) をまとめて共鳴させておく（1 つずつ引くと遅い）
+        prep(list(tot))
     for (n, p), d in tot.items():
         lift = role_move(n, p)
         if not lift:
@@ -177,6 +180,8 @@ def pair_scores(board, avoid, prev_p, tr, kappa=0.05, avoid_w=0.2, k=6):
             out.append((sc, n, p))
     out.sort(reverse=True)
     if role_light is not None:                              # 上の候補だけ、主語らしさ（は・が・も が明るいか）を掛けて並べ直す
+        if hasattr(role_light, "prepare"):
+            role_light.prepare([(n, p) for _, n, p in out[: 4 * k]])
         out = sorted(((sc * role_light(n, "主語", p), n, p) for sc, n, p in out[: 4 * k]), reverse=True)
     return out[:k]
 
