@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")   # 呼び出し側が GPU を指定した時（波の板）は上書きしない
 
 PARTNER = (
     "あなたは日本語で気軽に雑談する相手です。相手（ボット）は日本語を学んでいる途中で、ときどき変な文を言います。\n"

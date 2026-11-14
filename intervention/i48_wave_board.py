@@ -42,6 +42,7 @@ import json
 import logging
 import math
 import random
+import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -406,6 +407,7 @@ class WaveBoard:
         self.wstore = Store(store, unit=True)
         self.kstore = Store(store)
         self.banks = []
+        self._locks = {}
         self.keep_dir = keep_dir
         self.spare = spare                                  # 昼に足す語のための空き（0 なら昼の足しを使わない）
         self.day_K, self.day_B, self.day_Bd, self.day_nB = [], [], [], []
@@ -498,10 +500,10 @@ class WaveBoard:
 
     # ---- 保存と読み込み ----
     def save(self, path):
-        """作った板（本体）を保存する。波はしまった形（--store の持ち方）のまま .npz に、語や場面の表は .json に書く。
+        """作った板（本体）を保存する。場面の波はしまった形（--store の持ち方）のまま、語の波は complex64 で .npz に、語や場面の表は .json に書く。
         昼に足した分は入れない（save_day の JSONL に書き、夜の学び直しで本体に入る）。"""
         n = self.n_main
-        arr = dict(base=self.wstore.encode(self.waves.base), W=self.wstore.encode(self.waves.W), A=self._A, Aw=self._Aw,
+        arr = dict(base=self.waves.base.astype(np.complex64), W=self.waves.W.astype(np.complex64), A=self._A, Aw=self._Aw,
                    B=self.B.dump(), nB=self.nB, pf=self.pf)
         if self.Bd is not None:
             arr["Bd"] = self.Bd.dump()
@@ -526,7 +528,8 @@ class WaveBoard:
         wv = Waves.__new__(Waves)
         wv.vocab, wv.D, wv.spare = m["vocab"], m["D"], m["w_spare"]
         wv.ix = {w: i for i, w in enumerate(wv.vocab) if w is not None}
-        wv.base, wv.W = bd.wstore.decode_np(z["base"]), bd.wstore.decode_np(z["W"])
+        # 語の波は complex64 で保存する（位相 8 ビットで書くと、読み込んだ後の問いがずれる）。前の形も読める
+        wv.base, wv.W = [x if np.iscomplexobj(x) else bd.wstore.decode_np(x) for x in (z["base"], z["W"])]
         bd.waves, bd.works = wv, list(works)
         bd.cw = [[content(ln["toks"]) for ln in wk["lines"]] for wk in works]
         bd.idf, bd.idf_new, bd.prior = m["idf"], m["idf_new"], m["prior"]
@@ -563,7 +566,9 @@ class WaveBoard:
     # ---- すくう ----
     def scoop_layer(self, l, Q):
         """層 l で、問いの波 Q（問い × D）ごとに共鳴の強い場面を選び、次の行の波を強さの 2 乗で重ねる。"""
-        idx, r = self.banks[l].top(Q, self.top)
+        dev = self.devices[l % len(self.devices)]
+        with self._locks.setdefault(dev, threading.Lock()):   # 同じ GPU の層は 1 つずつすくう（同時だと作業用のメモリが足りなくなる）
+            idx, r = self.banks[l].top(Q, self.top)
         if self.day_B:                                      # 昼に足した場面（短期の置き場）も同じ問いで共鳴させ、強い順に合わせる
             Kd = np.stack(self.day_K[l])
             rd = np.abs(Kd @ np.conj(Q).T.astype(np.complex64)).T
