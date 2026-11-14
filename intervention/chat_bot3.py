@@ -1320,6 +1320,7 @@ def main():
     ap.add_argument("--wave_D", type=int, default=2048, help="I48: 波の長さ")
     ap.add_argument("--wave_store", default="c64", choices=("c128", "c64", "p8"), help="I48: 数の持ち方")
     ap.add_argument("--wave_devices", default="auto", help="I48: 置き場（auto / numpy / cuda:0,cuda:1）")
+    ap.add_argument("--wave_board", help="I48: 作った板の保存先（拡張子なし）。あれば読み込み、無ければ作って保存する。昼の足しを使う時は --wave_day を付けて作った板を使う")
     ap.add_argument("--wave_day", help="I48: 昼の足し。会話の行を今の語の波のまま板に足し、この JSONL に書く（夜の学び直しで i48_wave_board.py --day に渡す）")
     ap.add_argument("--wave_only", action="store_true", help="I48: 場の板に本の似た行を入れず、波ですくった行だけにする")
     ap.add_argument("--self_lines", help="与えると I34d の決め方（自分の行と本の行の分かれ方）で比べる")
@@ -1354,7 +1355,14 @@ def main():
         ww = json.load(open(a.wave, encoding="utf-8"))
         wb = W48.WaveBoard(D=a.wave_D, store=a.wave_store, devices=W48.parse_devices(a.wave_devices), keep_dir=False,
                            spare=4096 if a.wave_day else 0)
-        bot.wave = W48.WaveSource(wb.fit(ww["works"] if isinstance(ww, dict) else ww))
+        ww = ww["works"] if isinstance(ww, dict) else ww
+        if a.wave_board and os.path.exists(a.wave_board + ".npz"):   # 保存した板があれば読み込む（学びと層づくりをしない）
+            wb = W48.WaveBoard.load(a.wave_board, ww, devices=W48.parse_devices(a.wave_devices))
+        else:
+            wb.fit(ww)
+            if a.wave_board:
+                wb.save(a.wave_board)
+        bot.wave = W48.WaveSource(wb)
         bot.wave_day = a.wave_day
         if a.wave_only:
             bot.use_book = False

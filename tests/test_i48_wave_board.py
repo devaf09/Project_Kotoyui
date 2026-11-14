@@ -110,3 +110,19 @@ def test_night_verdict():
     mk = lambda a, d: {"試しの組": 10000, k1[0]: {k1[1]: a}, k2[0]: {k2[1]: d}}
     assert W.night_verdict(mk(0.50, 0.50), mk(0.495, 0.51))["判定"] == "合流"      # 揺れの中
     assert W.night_verdict(mk(0.50, 0.50), mk(0.51, 0.40))["判定"] == "戻す"       # 向きが崩れた
+
+
+def test_save_and_load_give_same_scoop(tmp_path):
+    works = toy_works()
+    for store in ("c64", "p8"):
+        bd = W.WaveBoard(D=512, store=store, wins=(1, 3), devices=[None], top=10, spare=8).fit(works)
+        p = str(tmp_path / ("board_" + store))
+        bd.save(p)
+        b2 = W.WaveBoard.load(p, works, devices=[None])
+        Q = [np.stack([bd.query(["語0_1", "語0_2"]), bd.query(["語3_4"])])] * 2
+        r1, r2 = bd.scoop(Q), b2.scoop(Q)
+        assert (r1[1][2] == r2[1][2]).all() and np.allclose(r1[1][0], r2[1][0], atol=1e-4)
+        assert np.allclose(bd.read_dense(r1[0][0]), b2.read_dense(r2[0][0]), atol=1e-5)
+        tok = lambda ws: [dict(i=i, text=w, lemma=w, pos="NOUN", dep="dep", head=0) for i, w in enumerate(ws)]
+        b2.add_line("今日", "新語A", tok(["新語A"]))
+        assert b2.add_line("今日", "新語B", tok(["新語B"]))       # 読み込んだ板にも昼の足しができる

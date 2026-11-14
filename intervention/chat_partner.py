@@ -197,6 +197,7 @@ def main():
     ap.add_argument("--wave", help="I48: 意味の波の板を作る会話の資料（解析済み JSON）。行づくりの場の板に、波ですくった行を入れる")
     ap.add_argument("--wave_D", type=int, default=2048, help="I48: 波の長さ")
     ap.add_argument("--wave_store", default="c64", choices=("c128", "c64", "p8"), help="I48: 数の持ち方")
+    ap.add_argument("--wave_board", help="I48: 作った板の保存先（拡張子なし）。あれば読み込み、無ければ作って保存する。昼の足しを使う時は --wave_day を付けて作った板を使う")
     ap.add_argument("--wave_day", help="I48: 昼の足し。会話の行を今の語の波のまま板に足し、この JSONL に書く")
     ap.add_argument("--wave_devices", default="auto", help="I48: 置き場（auto / numpy / cuda:0,cuda:1）")
     ap.add_argument("--rev", action="store_true", help="I42e: 述語の形を、本で見ていない印の組は逆引き（意味の組 → 繋ぎの語と並び、i42_fused_flow）で作る")
@@ -259,7 +260,14 @@ def main():
         ww = json.load(open(a.wave, encoding="utf-8"))
         wb = W48.WaveBoard(D=a.wave_D, store=a.wave_store, devices=W48.parse_devices(a.wave_devices), keep_dir=False,
                            spare=4096 if a.wave_day else 0)
-        bot.wave = W48.WaveSource(wb.fit(ww["works"] if isinstance(ww, dict) else ww))
+        ww = ww["works"] if isinstance(ww, dict) else ww
+        if a.wave_board and os.path.exists(a.wave_board + ".npz"):   # 保存した板があれば読み込む（学びと層づくりをしない）
+            wb = W48.WaveBoard.load(a.wave_board, ww, devices=W48.parse_devices(a.wave_devices))
+        else:
+            wb.fit(ww)
+            if a.wave_board:
+                wb.save(a.wave_board)
+        bot.wave = W48.WaveSource(wb)
         bot.wave_day = a.wave_day
     bot.use_chain = a.no_one_clause
     mem = None

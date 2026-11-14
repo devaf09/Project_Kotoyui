@@ -147,11 +147,11 @@ class Bank:
     """しまってある波（行 × D）。区切り（chunk）ごとに、載る分は GPU に、載らない分は PC のメモリに置く。
     top(Q, k): 問いの波をまとめて共鳴させ、|K q*| の強い順に k 個（番号, 強さ）。"""
 
-    def __init__(self, X, store, dev=None, chunk=0, budget=0.8, name=""):
+    def __init__(self, X, store, dev=None, chunk=0, budget=0.8, name="", enc=None):
         self.store, self.dev, self.name = store, dev, name
-        self.N, self.D = X.shape
+        self.N, self.D = (X if enc is None else enc).shape[:2]
         chunk = chunk or max(4096, (1 << 29) // (8 * self.D))   # 計算用に戻した 1 区切りが 512 MB ほど
-        self.enc = store.encode(X)
+        self.enc = store.encode(X) if enc is None else enc  # enc: しまった形のまま受け取る（保存した板の読み込み）
         self.chunk = chunk
         self.gpu = {}
         self.host = None                                    # GPU に載らなかった区切りだけ、PC のメモリに持つ
@@ -179,6 +179,12 @@ class Bank:
     def free(self):
         self.gpu.clear()
         release(self.dev)
+
+    def dump(self):
+        """しまった形のまま、全部を 1 つの並びで（保存用）。GPU に載せた区切りは PC のメモリに戻して集める。"""
+        if self.enc is not None:
+            return self.enc
+        return np.concatenate([self.gpu[c0].cpu().numpy() if c0 in self.gpu else self.host[c0] for c0 in range(0, self.N, self.chunk)])
 
     def top(self, Q, k):
         k = min(k, self.N)
@@ -489,6 +495,59 @@ class WaveBoard:
         """層を後から足す。今の場面と語の波はそのままで、窓 win 行の場面の波を作ってしまう。"""
         self.wins.append(win)
         self._build_layer(win)
+
+    # ---- 保存と読み込み ----
+    def save(self, path):
+        """作った板（本体）を保存する。波はしまった形（--store の持ち方）のまま .npz に、語や場面の表は .json に書く。
+        昼に足した分は入れない（save_day の JSONL に書き、夜の学び直しで本体に入る）。"""
+        n = self.n_main
+        arr = dict(base=self.wstore.encode(self.waves.base), W=self.wstore.encode(self.waves.W), A=self._A, Aw=self._Aw,
+                   B=self.B.dump(), nB=self.nB, pf=self.pf)
+        if self.Bd is not None:
+            arr["Bd"] = self.Bd.dump()
+        for l, b in enumerate(self.banks):
+            arr[f"K{l}"] = b.dump()
+        np.savez(path + ".npz", **arr)
+        meta = dict(D=self.D, store=self.wstore.name, wins=self.wins, top=self.top, mix=self.mix, seed=self.seed, lam=self.lam,
+                    spare=self.spare, vocab=self.waves.vocab, w_spare=self.waves.spare, answer_vocab=self.answer_vocab,
+                    a_spare=getattr(self, "a_spare", []), idf_new=getattr(self, "idf_new", 0.0), scenes=self.scenes[:n],
+                    idf=self.idf, prior=self.prior, pf_c=dict(self.pf_c), n_works=self.day_from if self.day_from is not None else len(self.works))
+        json.dump(meta, open(path + ".json", "w", encoding="utf-8"), ensure_ascii=False)
+
+    @classmethod
+    def load(cls, path, works, devices=(None,)):
+        """保存した板を読み込む。works は作った時と同じ資料（行の文と語の解析は資料から取る）。語の波の学びと層づくりをしない。"""
+        t0 = time.time()
+        m = json.load(open(path + ".json", encoding="utf-8"))
+        z = np.load(path + ".npz")
+        assert len(works) == m["n_works"], "板を作った時と資料の数が違う"
+        bd = cls(D=m["D"], store=m["store"], wins=m["wins"], devices=devices, top=m["top"], mix=m["mix"], seed=m["seed"], lam=m["lam"],
+                 keep_dir="Bd" in z.files, spare=m["spare"])
+        wv = Waves.__new__(Waves)
+        wv.vocab, wv.D, wv.spare = m["vocab"], m["D"], m["w_spare"]
+        wv.ix = {w: i for i, w in enumerate(wv.vocab) if w is not None}
+        wv.base, wv.W = bd.wstore.decode_np(z["base"]), bd.wstore.decode_np(z["W"])
+        bd.waves, bd.works = wv, list(works)
+        bd.cw = [[content(ln["toks"]) for ln in wk["lines"]] for wk in works]
+        bd.idf, bd.idf_new, bd.prior = m["idf"], m["idf_new"], m["prior"]
+        bd.scenes = [tuple(x) for x in m["scenes"]]
+        bd.n_main = len(bd.scenes)
+        bd.nxt = [sorted(set(bd.cw[wi][i])) for wi, i in bd.scenes]
+        bd.answer_vocab, bd.a_spare = m["answer_vocab"], m["a_spare"]
+        bd.aix = {w: j for j, w in enumerate(bd.answer_vocab) if w is not None}
+        bd._A, bd._Aw, bd.nB, bd.pf = z["A"], z["Aw"], z["nB"], z["pf"]
+        bd.common, bd.pf_c = set(bd.prior[:50]), Counter(m["pf_c"])
+        bd.B = Bank(None, bd.kstore, None, name="次の行", enc=z["B"])
+        bd.Bd = Bank(None, bd.kstore, None, name="次の行（学んだ波）", enc=z["Bd"]) if "Bd" in z.files else None
+        bd.readers = {}
+        for l, win in enumerate(bd.wins):
+            dev = bd.devices[l % len(bd.devices)]
+            bd.banks.append(Bank(None, bd.kstore, dev, name=f"層 {win} 行", enc=z[f"K{l}"]))
+            bd.day_K.append([])
+            if dev not in bd.readers:
+                bd.readers[dev] = Reader(bd._A, bd.wstore, dev)
+        log.info("板を読み込んだ: 場面 %d、層 %s、%.0f 秒。%s", bd.n_main, bd.wins, time.time() - t0, gpu_note(bd.devices))
+        return bd
 
     def bag_ids(self, ws):
         ids = [self.waves.ix[w] for w in ws if w in self.waves.ix]
