@@ -15,7 +15,7 @@ def test_version_matches_docstring_and_readme():
     top = re.search(r"変更履歴.*?\n\s+(\d+\.\d+\.\d+) \(", kotoyui.__doc__, re.S).group(1)
     assert top == kotoyui.__version__
     readme = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
-    assert f"版 {kotoyui.__version__}" in readme
+    assert re.search(rf"kotoyui\.py[^\n]*{re.escape(kotoyui.__version__)}", readme)   # README の書き方が「版 0.4.0」から「kotoyui.py 0.4.0」に変わった
 
 
 def test_docstring_first_line():
