@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")   # 呼び出し側が GPU を指定した時（波の板）は上書きしない
 
 PARTNER = (
     "あなたは日本語で気軽に雑談する相手です。相手（ボット）は日本語を学んでいる途中で、ときどき変な文を言います。\n"
@@ -194,6 +194,15 @@ def main():
     ap.add_argument("--learn_w", action="store_true", help="I43a: 自分の板の掛け目（軽い語 0.3・項目 0.8・時 0.5）と近さの下限（0.15・6 割）を手で置かず、言って指摘された数から")
     ap.add_argument("--learn_marks", action="store_true", help="I41k: 大事な板の目印を見込みの記号にし、種類ごとに後で聞かれた割合で入れるか決める")
     ap.add_argument("--imp_p", type=float, default=0.9, help="I41e: 目印なしの行を、学んだ見込みで大事な板に入れる P の下限。負なら I41i: 経験から（目印のある行と同じくらい後で聞かれる帯だけ）")
+    ap.add_argument("--wave", help="I48: 意味の波の板を作る会話の資料（解析済み JSON）。行づくりの場の板に、波ですくった行を入れる")
+    ap.add_argument("--wave_D", type=int, default=2048, help="I48: 波の長さ")
+    ap.add_argument("--wave_store", default="c64", choices=("c128", "c64", "p8"), help="I48: 数の持ち方")
+    ap.add_argument("--wave_board", help="I48: 作った板の保存先（拡張子なし）。あれば読み込み、無ければ作って保存する。昼の足しを使う時は --wave_day を付けて作った板を使う")
+    ap.add_argument("--wave_day", help="I48: 昼の足し。会話の行を今の語の波のまま板に足し、この JSONL に書く")
+    ap.add_argument("--particle", help="I48c: 助詞の波の板を作る会話の資料（解析済み JSON）。主語・目的語・補語の選び方に、助詞の明るさから読んだ役らしさを入れる")
+    ap.add_argument("--particle_mode", default="light", choices=("light", "move"), help="I48c: light = 合わない役の点を下げる。move = 場の板の役の明るさを置き直し、助詞も波から選ぶ")
+    ap.add_argument("--wave_devices", default="auto", help="I48: 置き場（auto / numpy / cuda:0,cuda:1）")
+    ap.add_argument("--wave_only", action="store_true", help="I48c: 行づくりの場の板に、語板の属性の行（本の似た行の代わり）を入れず、波ですくった行だけにする（人の行は残る）")
     ap.add_argument("--rev", action="store_true", help="I42e: 述語の形を、本で見ていない印の組は逆引き（意味の組 → 繋ぎの語と並び、i42_fused_flow）で作る")
     ap.add_argument("--learn_imp", action="store_true", help="I41a: 大事かどうかを、後で「覚えてる？」と聞かれたかから学び、目印に当たらない行も P(大事) が高ければ大事な板に入れる")
     ap.add_argument("--recall", action="store_true", help="I40d: 「覚えてる？」に大事な板・記憶板で答える（--important が要る）")
@@ -249,6 +258,31 @@ def main():
         bot.sb.learn_w = a.learn_w
     if a.attrs:
         bot.attr_field, bot.use_book, bot.conv_share = True, False, 0.2
+    if a.particle:
+        import i48c_particle_wave as W48c
+        import i27s_fused_generate as S27
+        pw = json.load(open(a.particle, encoding="utf-8"))
+        bot.particle = W48c.ParticleLight(pw["works"] if isinstance(pw, dict) else pw)
+        if a.particle_mode == "move":
+            S27.role_move, S27.role_particle = bot.particle.lifts, bot.particle.particle
+        else:
+            S27.role_light = bot.particle
+    if a.wave:
+        import i48_wave_board as W48
+        ww = json.load(open(a.wave, encoding="utf-8"))
+        wb = W48.WaveBoard(D=a.wave_D, store=a.wave_store, devices=W48.parse_devices(a.wave_devices), keep_dir=False,
+                           spare=4096 if a.wave_day else 0)
+        ww = ww["works"] if isinstance(ww, dict) else ww
+        if a.wave_board and os.path.exists(a.wave_board + ".npz"):   # 保存した板があれば読み込む（学びと層づくりをしない）
+            wb = W48.WaveBoard.load(a.wave_board, ww, devices=W48.parse_devices(a.wave_devices))
+        else:
+            wb.fit(ww)
+            if a.wave_board:
+                wb.save(a.wave_board)
+        bot.wave = W48.WaveSource(wb)
+        bot.wave_day = a.wave_day
+        if a.wave_only:                                     # I48c: 場の板は波の行と人の行だけ（--attrs の属性の行も、本の似た行も入れない）
+            bot.attr_field, bot.use_book = False, False
     bot.use_chain = a.no_one_clause
     mem = None
     if a.memory:
@@ -416,10 +450,10 @@ def main():
                     got = bot.taught(True, odd, "" if a.no_model_reply else ev.get("suggested_reply", ""))
                     c["先生の指摘"] += 1
                     streak = 0
-                    log.append(f"  - 先生（段 {stage}）: {ev.get('intervention_message', '')} ／ 経験: {'・'.join(k + ':' + w for k, w in got) or 'なし'}")
+                    log.append(f"  - 先生（段 {stage}）［{kind or 'なし'}］: {ev.get('intervention_message', '')} ／ 経験: {'・'.join(k + ':' + w for k, w in got) or 'なし'}")
                 elif ev is not None:                        # 褒めは、話し相手の次の行を見てから経験に入れる
                     pending = ev
-                    log.append(f"  - 先生（段 {stage}）: {ev.get('intervention_message', '')} ／ 経験: 相手の次の行を見てから")
+                    log.append(f"  - 先生（段 {stage}）［{kind or 'なし'}］: {ev.get('intervention_message', '')} ／ 経験: 相手の次の行を見てから")
             hist.append(f"ボット: {line}")
             msgs.append(dict(role="user", content=line))
             human = ollama_chat(a.host, a.model, msgs) if a.model != "echo" else "うん、そうなんだ。"   # echo: 試し用
