@@ -201,6 +201,7 @@ def main():
     ap.add_argument("--wave_day", help="I48: 昼の足し。会話の行を今の語の波のまま板に足し、この JSONL に書く")
     ap.add_argument("--particle", help="I48c: 助詞の波の板を作る会話の資料（解析済み JSON）。主語・目的語・補語の選び方に、助詞の明るさから読んだ役らしさを入れる")
     ap.add_argument("--wave_devices", default="auto", help="I48: 置き場（auto / numpy / cuda:0,cuda:1）")
+    ap.add_argument("--wave_only", action="store_true", help="I48c: 行づくりの場の板に、語板の属性の行（本の似た行の代わり）を入れず、波ですくった行だけにする（人の行は残る）")
     ap.add_argument("--rev", action="store_true", help="I42e: 述語の形を、本で見ていない印の組は逆引き（意味の組 → 繋ぎの語と並び、i42_fused_flow）で作る")
     ap.add_argument("--learn_imp", action="store_true", help="I41a: 大事かどうかを、後で「覚えてる？」と聞かれたかから学び、目印に当たらない行も P(大事) が高ければ大事な板に入れる")
     ap.add_argument("--recall", action="store_true", help="I40d: 「覚えてる？」に大事な板・記憶板で答える（--important が要る）")
@@ -276,6 +277,8 @@ def main():
                 wb.save(a.wave_board)
         bot.wave = W48.WaveSource(wb)
         bot.wave_day = a.wave_day
+        if a.wave_only:                                     # I48c: 場の板は波の行と人の行だけ（--attrs の属性の行も、本の似た行も入れない）
+            bot.attr_field, bot.use_book = False, False
     bot.use_chain = a.no_one_clause
     mem = None
     if a.memory:
@@ -443,10 +446,10 @@ def main():
                     got = bot.taught(True, odd, "" if a.no_model_reply else ev.get("suggested_reply", ""))
                     c["先生の指摘"] += 1
                     streak = 0
-                    log.append(f"  - 先生（段 {stage}）: {ev.get('intervention_message', '')} ／ 経験: {'・'.join(k + ':' + w for k, w in got) or 'なし'}")
+                    log.append(f"  - 先生（段 {stage}）［{kind or 'なし'}］: {ev.get('intervention_message', '')} ／ 経験: {'・'.join(k + ':' + w for k, w in got) or 'なし'}")
                 elif ev is not None:                        # 褒めは、話し相手の次の行を見てから経験に入れる
                     pending = ev
-                    log.append(f"  - 先生（段 {stage}）: {ev.get('intervention_message', '')} ／ 経験: 相手の次の行を見てから")
+                    log.append(f"  - 先生（段 {stage}）［{kind or 'なし'}］: {ev.get('intervention_message', '')} ／ 経験: 相手の次の行を見てから")
             hist.append(f"ボット: {line}")
             msgs.append(dict(role="user", content=line))
             human = ollama_chat(a.host, a.model, msgs) if a.model != "echo" else "うん、そうなんだ。"   # echo: 試し用
