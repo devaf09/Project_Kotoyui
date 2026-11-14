@@ -73,7 +73,7 @@ def is_question(ln):
 def samples(work):
     """対話 1 本 → 中身の語ごとの場面。host = 名 / 述。post = 後ろのつなぎ。"""
     out, prev, prev_q = [], [], False
-    for ln in work["lines"]:
+    for li, ln in enumerate(work["lines"]):
         T = ln["toks"]
         q = is_question(ln)
         idx = [i for i, t in enumerate(T) if t["pos"] in CONTENT]
@@ -92,7 +92,7 @@ def samples(work):
             flags = dict(問い=q, 前の行の問い=prev_q, 否定=neg, 既出=w in seen, 先頭=k == 0, 末尾=k == len(idx) - 1)
             s = dict(w=w, pos=T[i]["pos"], host="名" if T[i]["pos"] in NOUNS else "述", post=chain(T[i + 1:j]),
                      cues=[c for c in cues if c != w], head=head, dep=T[i].get("dep", "?"), flags=flags,
-                     nxt=T[idx[k + 1]]["lemma"] if k + 1 < len(idx) else NONE, npost=NONE)
+                     nxt=T[idx[k + 1]]["lemma"] if k + 1 < len(idx) else NONE, npost=NONE, li=li)
             if line_s:
                 line_s[-1]["npost"] = s["post"]
             line_s.append(s)
