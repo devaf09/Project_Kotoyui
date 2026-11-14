@@ -90,6 +90,8 @@ class Site:
 
     def __init__(self, BB, G, own, propn):
         self.BB, self.G, self.own, self.propn = BB, G, own, propn
+        if role_move is not None:
+            self.BB = BB = move_roles(BB)
         self.wb = defaultdict(Counter)
         self.form = defaultdict(Counter)
         self.part = defaultdict(Counter)
@@ -116,10 +118,41 @@ class Site:
         return self.bright(n, a) - react(1.0, self.attested(n, a))[0] - react(e_fill, 1.0)[0]
 
 
+MOVE_ROLES = ("する", "される", "で・に")
+
+
+def move_roles(BB):
+    """I48c: (名詞, 述語) ごとに、する・される・で・に の明るさの合計はそのままに、役の間の分け方を
+    「板の明るさ × 助詞の波から読んだ持ち上げ」に比べて置き直す。板に無かった役にも、合計の中から分ける。"""
+    tot = defaultdict(dict)
+    for k, v in BB.items():
+        if k[0] == "板" and ":" in k[2]:
+            r, p = k[2].split(":", 1)
+            if r in MOVE_ROLES and v > 0:
+                tot[(k[1], p)][r] = v
+    out = Board()
+    for k, v in BB.items():
+        out[k] = v
+    for (n, p), d in tot.items():
+        lift = role_move(n, p)
+        if not lift:
+            continue
+        T = sum(d.values())
+        w = {r: (d.get(r, 0.0) + T / len(MOVE_ROLES)) * lift.get(r, 1.0) for r in MOVE_ROLES}   # 板に無い役にも、均しの分を持たせてから掛ける
+        z = sum(w.values())
+        if z <= 0:
+            continue
+        for r in MOVE_ROLES:
+            out[("板", n, r + ":" + p)] = T * w[r] / z
+    return out
+
+
 def cands(c, k):
     return [x for _, x in sorted(((v, x) for x, v in c.items() if v > 0), reverse=True)[:k]]
 
 
+role_move = None      # I48c: (名詞, 述語) → {役の頭: 持ち上げ}。場の板の (名詞, 役:述語) の明るさを、役の間で置き直す。None なら使わない
+role_particle = None  # I48c: (名詞, 役の頭, 述語) → 助詞。場の板にその名詞・役の助詞が無い時に使う
 role_light = None     # I48c: (名詞, 役, 述語) → 0〜1。助詞の波の板から読んだ「その役らしさ」。None なら使わない（前と同じ）
 
 
@@ -178,7 +211,7 @@ def render2(st, pick):
         return max(c, key=lambda k: (c[k], k)) if c else None
 
     def pt(n, role, dflt):
-        return top(st.part.get((n, role), Counter())) or dflt
+        return top(st.part.get((n, role), Counter())) or (role_particle(n, role, pick["述語"]) if role_particle else None) or dflt
 
     def mf(m):
         return top(st.form["修飾:" + m]) or m

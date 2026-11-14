@@ -29,3 +29,20 @@ def test_particle_light_roles():
     assert pl("私", "主語", "行く") > pl("私", "補語", "行く")
     assert pl.particle("パン", "目的語", "食べる") == "を"
     assert pl("知らない", "主語", "知らない") == 1.0
+
+
+def test_move_roles_keeps_total():
+    import i27s_fused_generate as S
+    from board_ops import Board
+    BB = Board()
+    BB[("板", "海", "する:行く")] = 2.0
+    BB[("板", "海", "修飾:青い")] = 1.0
+    S.role_move = lambda n, p: {"する": 0.1, "される": 0.1, "で・に": 3.0}
+    try:
+        out = S.move_roles(BB)
+    finally:
+        S.role_move = None
+    tot = sum(out[("板", "海", r + ":行く")] for r in S.MOVE_ROLES)
+    assert abs(tot - 2.0) < 1e-9
+    assert out[("板", "海", "で・に:行く")] > out[("板", "海", "する:行く")]
+    assert out[("板", "海", "修飾:青い")] == 1.0

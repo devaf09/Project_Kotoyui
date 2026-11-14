@@ -210,8 +210,18 @@ class ParticleLight:
         m = self.cls[role]
         return min(1.0, float(self.parts_light(n, p)[m].sum()) / max(self.base[role], 1e-9))
 
+    HEAD = {"する": "主語", "される": "目的語", "で・に": "補語"}
+
+    def lifts(self, n, p):
+        """役の頭（する・される・で・に）ごとの持ち上げ = その役の助詞の割合 ÷ 資料全体での割合（頭打ちなし）。"""
+        if self.ps.pb.w(n) is None and self.ps.pb.w(p) is None:
+            return None
+        pl = self.parts_light(n, p)
+        return {h: float(pl[self.cls[r]].sum()) / max(self.base[r], 1e-9) for h, r in self.HEAD.items()}
+
     def particle(self, n, role, p):
         """その役の助詞のうち、いちばん明るい物（無ければ None）。"""
+        role = self.HEAD.get(role, role)
         sc = np.where(self.cls[role], self.parts_light(n, p), 0.0)
         return self.parts[int(sc.argmax())] if sc.max() > 0 else None
 
