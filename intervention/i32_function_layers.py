@@ -184,7 +184,8 @@ class Layers:
                 sc += math.log(r if m[k] else 1 - r)
             out.append((sc, s))
         out.sort(reverse=True)
-        return out
+        pick = getattr(self, "slide_pick", None)            # I48o: 状況のスライドで候補を絞る（chat_bot3 の --slide。無ければ今まで通り）
+        return pick(p, out) if pick is not None else out
 
 
 def build_index(LG):

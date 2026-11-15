@@ -319,6 +319,7 @@ class Bot3(C2.Bot2):
         if tw and getattr(self, "mem", None) is not None and hasattr(self.mem, "topic_result"):   # I45b: 話題の答えの当たり外れ
             self.mem.topic_result(tw, not fixed)
         self._uke_begin(text)                               # I48l: 受けの板の問い（相手の今の行・自分の前の行）
+        self._slide_begin(text)                             # I48o: 状況のスライドの状況（相手の今の行・自分の前の行）
         if not self.conv["lines"]:                          # 新しい会話: この会話で指摘された行は空にする
             self.conv_dark = set()
             self.conv_asked = set()
@@ -363,6 +364,7 @@ class Bot3(C2.Bot2):
             if self.nov is not None and self.novelty(self.conv["lines"][-1]["toks"])[0] < 0:
                 out = self._novel_alt(out)
         out = self._uke_end(out)
+        out = self._slide_end(out)
         return self._said(out)
 
     def _novel_alt(self, out):
@@ -1057,6 +1059,79 @@ class Bot3(C2.Bot2):
             self.__dict__.setdefault("_uke_used", Counter())[o] += 1
         return out
 
+    # ---- I48o: 行づくりの返事の述語の語尾を、状況のスライドの板で選ぶ（--slide） ----
+    slide = None
+
+    def load_slide(self, path, works):
+        """板を読み、本の言い切りの表記ごとに、後ろのつなぎ（板の候補の形）と語尾の終助詞を数えておく。"""
+        import i48e_relation_split as E48
+        import i48o_slide_board as O48
+        self.slide = O48.SlideBoard.load(path)
+        self._slide_sit, self._slide_note = (None, None, None), []
+        self.slide_log = Counter()
+        info = {}
+        for w in works:
+            for ln in w["lines"]:
+                T = ln["toks"]
+                kids = L.kids_of(T)
+                for i, t in enumerate(T):
+                    if t["dep"] == "ROOT" and t["pos"] in L.PRED:
+                        conn, _, surf = L.layers(kids, t)
+                        if conn == "連用":
+                            j = i + 1
+                            while j < len(T) and T[j]["pos"] in E48.FUNC:
+                                j += 1
+                            info.setdefault(surf, Counter())[(E48.chain(T[i + 1:j]), O48.tail_of(T[i + 1:j]))] += 1
+        self._end_info = {s: c.most_common(1)[0][0] for s, c in info.items()}
+        self.layers.slide_pick = self._slide_pick
+
+    def _slide_begin(self, text):
+        if self.slide is None:
+            return
+        import i48o_slide_board as O48
+        own = next((ln["toks"] for ln in reversed(self.conv["lines"]) if ln["who"] == "ボット"), None)
+        partner = O48.line_sit(CB.to_toks(self.nlp(text)))
+        self._slide_sit = self.slide.reader.read(partner, O48.line_sit(own) if own is not None else None)
+        self._slide_note = []
+
+    def _slide_pick(self, p, out):
+        """end_score の候補（点, 表記）を、スライドで読んだ状況の表記に絞る。軸の外（否定、語尾の ね・よ・か）は今の決め方の 1 番目に
+        合わせる（合う物が無ければ外す）。板から何も出ない時は今の候補のまま（何も出ない行を作らない）。"""
+        if not out:
+            return out
+        import i48j_situation_slide as J48
+        inf = self._end_info
+        r, src = self.slide.scores(p, self.lpos.get(p, "VERB"), self._slide_sit)
+        by = Counter()
+        for _, s in out:
+            if s in inf:
+                j = self.slide.band.cix.get(inf[s][0])
+                if j is not None and r[j] > 0:
+                    by[J48.situation(inf[s][0])] += r[j]
+        sit_s = "".join("?" if x is None else str(x) for x in self._slide_sit)
+        if not by:
+            self.slide_log["出ない（今の語尾）"] += 1
+            self._slide_note.append(f"{p}: 状況 {sit_s} から出ない、今の語尾")
+            return out
+        want = by.most_common(1)[0][0]
+        K = [(v, s) for v, s in out if s in inf and J48.situation(inf[s][0]) == want]
+        neg = lambda c: any(e in ("ない", "ぬ") for e in J48.elems(c))
+        c0, t0 = inf.get(out[0][1], ("∅", ""))
+        for cond in (lambda c, t: neg(c) == neg(c0) and t == t0, lambda c, t: neg(c) == neg(c0)):
+            K2 = [(v, s) for v, s in K if cond(*inf[s])]
+            if K2:
+                K = K2
+                break
+        self.slide_log["同じ" if K[0][1] == out[0][1] else "替えた"] += 1
+        self.slide_log["出どころ:" + src] += 1
+        self._slide_note.append(f"{p}: 状況 {sit_s} → {''.join(map(str, want))}（{src}）「{out[0][1]}」→「{K[0][1]}」")
+        return K
+
+    def _slide_end(self, out):
+        if self.slide is not None and self._slide_note and "行づくり" in out.get("why", ""):
+            out["why"] += "（スライド " + " ／ ".join(self._slide_note[-1:]) + "）"
+        return out
+
     def extra_lines(self, toks):
         if self.particle is not None:                       # 流れの鍵: 会話の前の 3 行の中身の語
             self.particle.set_ctx([t["lemma"] for ln in self.conv["lines"][-4:-1] for t in ln["toks"] if t["pos"] in ("NOUN", "PROPN", "VERB", "ADJ")])
@@ -1382,6 +1457,7 @@ def main():
     ap.add_argument("--wave_store", default="c64", choices=("c128", "c64", "p8"), help="I48: 数の持ち方")
     ap.add_argument("--particle", help="I48c: 助詞の波の板を作る会話の資料（解析済み JSON）。主語・目的語・補語の選び方に、助詞の明るさから読んだ役らしさを入れる")
     ap.add_argument("--uke", help="I48l: 保存した受けの板（i48l_uke_flow.py --board の名前）。相槌の受けと、行づくりの頭の受けを、相手の前の行から選ぶ")
+    ap.add_argument("--slide", help="I48o: 保存した状況のスライドの板（i48o_slide_board.py --board の名前）。行づくりの返事の述語の語尾を、読んだ状況で選ぶ")
     ap.add_argument("--relation", help="I48f: 保存した関係の板（i48f_relation_board.py --out の名前）。--particle の代わりに、語板 v3 の L3 から役らしさと助詞を読む")
     ap.add_argument("--relation_device", default=None, help="I48f: 関係の板の置き場（cuda:1 など。無ければ PC のメモリ）")
     ap.add_argument("--particle_mode", default="light", choices=("light", "move"), help="I48c: light = 合わない役の点を下げる。move = 場の板の役の明るさを置き直し、助詞も波から選ぶ")
@@ -1421,6 +1497,8 @@ def main():
         import i48l_uke_flow as U48l
         bot.uke = U48l.UkeBoard.load(a.uke)
         bot._uke_rng = random.Random(f"uke:{getattr(a, 'seed', 0)}")
+    if a.slide:
+        bot.load_slide(a.slide, works)
     if a.relation:
         import i48f_relation_board as W48f
         import i27s_fused_generate as S27
