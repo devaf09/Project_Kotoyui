@@ -228,14 +228,75 @@ class Bot3(C2.Bot2):
         d = self.__dict__
         if k in d.setdefault("conv_dark", set()):
             return True
+        if self.silver and d.get("silver_forms") and self._silver_hit(line):   # I48x: 白銀律の門（門の並びの「絞る」）
+            return True
         said, pt = d.setdefault("line_said", Counter())[k], d.setdefault("line_pointed", Counter())[k]
-        return said > 0 and (pt + 0.1) / (said + 1.0) > 0.5
+        return said > 0 and (pt + 0.1) / (said + 1.0) > self.dark_cut()
 
-    def mark_line(self, line, w=1.0):
+    # ---- I48x: 門（--gate 深刻な相談、--silver 白銀律） ----
+    gate = False
+    silver = False
+    _gate_text = None
+
+    def _gates(self):
+        """I48x: 門の口（i48x_mesh.GateChain）。どの門も 通す / 絞る / 固定 を返す。"""
+        ch = self.__dict__.get("gate_chain")
+        if ch is None:
+            import i48x_gate as G
+            import i48x_mesh as X48
+            ch = self.gate_chain = X48.GateChain()
+            if self.gate:
+                ch.add("深刻な相談", lambda text: (X48.FIXED, g) if (g := self._gate_reply(text)) is not None else (X48.PASS, None))
+            if self.silver:
+                ch.add("白銀律", lambda text: (X48.NARROW, self._silver_hit) if self.__dict__.get("silver_forms") else (X48.PASS, None))
+            ch.add("言ってよい時か", lambda text: (X48.PASS, None) if G.mood_ok() else (X48.NARROW, None))
+        return ch
+
+    def _is_gate_line(self, line):
+        return bool(self.gate) and self._gate_text is not None and line.strip() == self._gate_text
+
+    def _gate_reply(self, text):
+        import i48x_gate as G
+        if self._gate_text is None:
+            self._gate_text = G.fixed_reply()
+        if not G.crisis(text):
+            return None
+        toks = CB.to_toks(self.nlp(text))
+        line = self._gate_text
+        self.conv["lines"] += [dict(text=text, toks=toks, who="人"), dict(text=line, toks=CB.to_toks(self.nlp(line)), who="ボット")]
+        self.__dict__.setdefault("gate_log", Counter())["深刻な相談"] += 1
+        return dict(line=line, tries=0, breaks=[], sim=0, why="門: 深刻な相談（固定の返事。学びに入れない）", gate=True)
+
+    def _silver_hit(self, line):
+        """言おうとしている行に、相手にされて嫌だった形（相手に指摘・拒まれた時の相手の行の所）があるか。"""
+        toks = CB.to_toks(self.nlp(line)) if isinstance(line, str) else line
+        forms = self.__dict__.get("silver_forms", {})
+        hit = any((pc["ns"] + pc["c"] + pc["ps"]) in forms for pc in self.pb.pieces(toks))
+        if hit:
+            self.__dict__.setdefault("gate_log", Counter())["白銀律で暗くした"] += 1
+        return hit
+
+    dark_base = False                                       # I48r: --dark_base
+
+    def dark_cut(self):
+        """I48r: 会話をまたいだ暗さの線。ふつうは 0.5。dark_base では、その時までの全体の指摘の割合（言った行のうち指摘された割合。
+        use_base の違和感の線と同じ考え）。先生がほぼ毎回何か言う場で、1 回指摘されただけの行をいつまでも暗くしない。"""
+        if not self.dark_base:
+            return 0.5
+        d = self.__dict__
+        n = sum(d.setdefault("line_said", Counter()).values())
+        return sum(d.setdefault("line_pointed", Counter()).values()) / n if n else 0.5
+
+    def mark_line(self, line, w=1.0, src="相手"):
+        """行のまるごとの指摘。src = 相手（指摘・聞き返し）か 先生。dark_base では、この会話で暗くする（conv_dark）のは相手に
+        通じなかった行だけにする（先生の指摘は、会話をまたいだ数え（line_pointed）にだけ入れる）。"""
+        if self._is_gate_line(line):                        # I48x: 門の固定の返事は暗くしない
+            return
         self.nov_result("指摘")
         k = self._exp_key(line)
         self.__dict__.setdefault("line_pointed", Counter())[k] += w
-        self.__dict__.setdefault("conv_dark", set()).add(k)
+        if not self.dark_base or src == "相手":
+            self.__dict__.setdefault("conv_dark", set()).add(k)
 
     use_good = False                                        # I37b: 褒めの板と好奇心の点で返事を選ぶ
 
@@ -258,7 +319,44 @@ class Bot3(C2.Bot2):
     def value(self, toks, line):
         """I37b: 返事の見込みの点 = P(良かった) − P(指摘) + 好奇心（経験の少なさ: 2 値の見込みの事後のばらつきの上限 0.5/√(n+2)）。
         所のある行は所ごとの平均、所の無い行（「はい。」「ああ、ならん。」）は行のまるごとの経験で。"""
-        return self._value(toks, line) + (self.flow(toks, line) if self.use_flow else 0.0) + self.novelty(toks)[0]
+        return self._value(toks, line) + (self.flow(toks, line) if self.use_flow else 0.0) + self.novelty(toks)[0] + \
+            (self._bind_value(toks, line) if self.bind else 0.0)
+
+    # ---- I48t: 結び（別々の行の語を結んだ返事）を、相手が受けて続けた経験（--bind） ----
+    bind = False
+
+    def _bind_keys(self, toks, line):
+        pcs = self.pb.pieces(toks)
+        return [("所", pc["ns"] + pc["c"] + pc["ps"]) for pc in pcs] or [("行", self._exp_key(line))]
+
+    def _dl(self):
+        """I48x: 遅れて付く点の口（i48x_mesh.Delayed）。印を登録するだけで足せる。結び = 相手の次の行を見てから。"""
+        d = self.__dict__.get("delayed")
+        if d is None:
+            import i48x_mesh as X48
+            d = self.delayed = X48.Delayed()
+            d.register("結び", d.NEXT)
+        return d
+
+    def _bind_value(self, toks, line):
+        """P(結び→受けた): 所（無ければ行のまるごと）ごとに、言った数のうち「結んで、相手が受けて続けた」割合（P(良) と同じ形）の平均。"""
+        return self._dl().value("結び", self._bind_keys(toks, line))
+
+    def _bind_said(self):
+        """言った行の所を数え、その行が結びか（相手の今の行の語と、それより前の行の語の両方を持つ）を覚えておく。"""
+        import i48s_reward_marks as S48
+        L_ = self.conv["lines"]
+        if not L_ or L_[-1]["who"] != "ボット":
+            self._last_bind = None
+            self._dl().last.pop("結び", None)
+            return
+        me = L_[-1]
+        p = L_[-2] if len(L_) >= 2 and L_[-2]["who"] == "人" else None
+        self._last_bind = (me["toks"], me["text"]) if p is not None and S48.aha(me["toks"], p["toks"], [x["toks"] for x in L_[:-2]]) else None
+        self._dl().said_keys("結び", self._bind_keys(me["toks"], me["text"]), eligible=bool(self._last_bind))
+        self.__dict__.setdefault("bind_log", Counter())["言った"] += 1
+        if self._last_bind:
+            self.bind_log["結び"] += 1
 
     use_flow = False
     nov = None                                              # I38a: 新規性の感覚（i38_novelty.Novelty、--novelty）
@@ -306,6 +404,10 @@ class Bot3(C2.Bot2):
     _last_topic = None
 
     def reply(self, text):
+        if self.gate or self.silver:                        # I48x: 門の並び（深刻な相談 → 白銀律 → 言ってよい時か）。固定の返事なら型の板も行づくりも通さない
+            kind, x, _ = self._gates().run(text)
+            if kind == "固定":
+                return x
         # I44b: 思い出しで答えたすぐ後に相手が「ううん・違う」と直したら、その項目を弱める（再記憶の逆）
         x = self._last_recall_item
         self._last_recall_item = None
@@ -403,6 +505,8 @@ class Bot3(C2.Bot2):
                 self.sb.note_pair(self._last_pair, "言った")
                 self.sb.note_src(self._last_src, "言った")
         self.__dict__.setdefault("line_said", Counter())[self._exp_key(out["line"])] += 1
+        if self.bind:
+            self._bind_said()
         if self.nov is not None and getattr(self, "_asked_attr", None):   # I38a: この会話で聞いた属性（読み手が問いの行の所を取れなくても、同じ属性をまた聞かない）
             self.__dict__.setdefault("conv_asked", set()).add(self._asked_attr)
         if self.nov is not None and self.conv["lines"] and self.conv["lines"][-1]["who"] == "ボット":
@@ -478,7 +582,7 @@ class Bot3(C2.Bot2):
             return self._end_turn(self._name(r))
         bots = [ln for ln in self.conv["lines"] if ln["who"] == "ボット"]
         hums = [ln for ln in self.conv["lines"] if ln["who"] == "人"]
-        if bots and self.negx is not None:
+        if bots and self.negx is not None and not self._is_gate_line(bots[-1]["text"]):   # I48x: 門の固定の返事への相手の行は、経験に入れない
             toks = CB.to_toks(self.nlp(text))
             a = dict(text="「" + bots[-1]["text"] + "」", toks=bots[-1]["toks"])
             b = dict(text="「" + text + "」", toks=toks)
@@ -515,12 +619,22 @@ class Bot3(C2.Bot2):
             trial, self.trial = self.trial, []
             self._prev_trial = {pc["ns"] + pc["c"] + pc["ps"] for pc, _ in trial}
             if cs:
+                if self.silver:                             # I48x: 白銀律の門。相手に指摘・拒まれた時の、相手の行の所（自分の行を引いた所）を覚える
+                    own = {pc["ns"] + pc["c"] + pc["ps"] for pc in self.pb.pieces(a["toks"])}
+                    for pc in self.pb.pieces(toks):
+                        w = pc["ns"] + pc["c"] + pc["ps"]
+                        if w and w not in own:
+                            self.__dict__.setdefault("silver_forms", Counter())[w] += 1
                 out = self.pointed(text, toks, a, cs, hums[-1]["text"] if hums else None)
                 return self._end_turn(out)
             took = self.uptake is not None and R.uptake_score(self.uptake, a, b) > 0
             if self.use_good and took:                     # I37b: 相手が前の返事を受けて話を続けた: 良かった経験
                 self.good(a["toks"], bots[-1]["text"])
                 trial = []
+            if self.bind and took:                         # I48t: 結んだ返事を、相手が受けて続けた（相手の次の行を見てから付ける。I48x の遅れて付く点の口）
+                if getattr(self, "_last_bind", None):
+                    self.__dict__.setdefault("bind_log", Counter())["結び→受けた"] += 1
+                self._dl().resolve("結び", True)
             if trial and self.uptake is not None and R.uptake_score(self.uptake, a, b) <= 0:
                 self.unresolved += [pc["ns"] + pc["c"] + pc["ps"] for pc, _ in trial]
                 trial = []                                  # 相手の行が前の返事を受けていない: 通じたかは分からない（経験にしない）
@@ -853,7 +967,7 @@ class Bot3(C2.Bot2):
         """I35z: 先生役の見立てを、前の返事の所の経験に足す。間違いなら、先生が抜き出した所（無ければ自分でいちばん怪しいと見る所）を指摘に、
         合っていれば全部の所をそのままに。お手本の返事（model）の所もそのままの経験に足す（先生の好みを学ぶことになるので、記録は分ける）。"""
         bots = [ln for ln in self.conv["lines"] if ln["who"] == "ボット"]
-        if not bots:
+        if not bots or self._is_gate_line(bots[-1]["text"]):   # I48x: 門の固定の返事は、先生の見立てを経験に入れない
             return []
         toks = bots[-1]["toks"]
         q = self._is_q(toks)
@@ -865,7 +979,7 @@ class Bot3(C2.Bot2):
                 self.sb.note_pair(self._last_pair, "指摘")
                 self.sb.note_src(self._last_src, "指摘")
             self.sb.note_src(self._last_src, "指摘")
-            self.mark_line(bots[-1]["text"])
+            self.mark_line(bots[-1]["text"], src="先生")
             out.append(("行", bots[-1]["text"]))
             tgt = [pc for pc in pcs if odd and ((pc["ns"] + pc["c"] + pc["ps"]) in odd or (len(pc["ns"]) >= 2 and pc["ns"] in odd))]
             # I37c: 先生の抜き出した所が、どの所にも当たらない（言い方・つながり・「はい」だけ）なら、行のまるごとの経験だけにする
@@ -1559,6 +1673,10 @@ def main():
     ap.add_argument("--uke", help="I48l: 保存した受けの板（i48l_uke_flow.py --board の名前）。相槌の受けと、行づくりの頭の受けを、相手の前の行から選ぶ")
     ap.add_argument("--slide", help="I48o: 保存した状況のスライドの板（i48o_slide_board.py --board の名前）。行づくりの返事の述語の語尾を、読んだ状況で選ぶ")
     ap.add_argument("--tail", help="I48p: 保存した終助詞の板（i48p_tail_board.py --board の .json）。言い切りだけの行づくりの返事に、資料の割合で終助詞を付ける")
+    ap.add_argument("--dark_base", action="store_true", help="I48r: 行のまるごとの暗さの線を 0.5 でなく全体の指摘の割合にし、会話の中で暗くするのは相手の指摘・聞き返しの行だけにする")
+    ap.add_argument("--bind", action="store_true", help="I48t: 返事の点に P(結び→受けた)（別々の行の語を結んだ返事を、相手が受けて続けた経験の割合）を足す")
+    ap.add_argument("--gate", action="store_true", help="I48x: 深刻な相談の門（目印の行には固定の返事。学びに入れない）")
+    ap.add_argument("--silver", action="store_true", help="I48x: 白銀律の門（相手に指摘・拒まれた時の相手の行の所を、自分が言う前に暗くする）")
     ap.add_argument("--relation", help="I48f: 保存した関係の板（i48f_relation_board.py --out の名前）。--particle の代わりに、語板 v3 の L3 から役らしさと助詞を読む")
     ap.add_argument("--relation_device", default=None, help="I48f: 関係の板の置き場（cuda:1 など。無ければ PC のメモリ）")
     ap.add_argument("--particle_mode", default="light", choices=("light", "move"), help="I48c: light = 合わない役の点を下げる。move = 場の板の役の明るさを置き直し、助詞も波から選ぶ")
@@ -1580,6 +1698,9 @@ def main():
                dialogue=a.dialogue, self_lines=a.self_lines, smooth=a.smooth, attrs=a.attrs, use_at=a.at)
     bot.quiet_ok = a.quiet_ok
     bot.explore = a.explore
+    bot.dark_base = a.dark_base
+    bot.bind = a.bind
+    bot.gate, bot.silver = a.gate, a.silver
     bot.attr_field = a.attr_field
     bot.no_ask = a.no_ask
     bot.use_good = a.good

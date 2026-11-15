@@ -74,8 +74,14 @@ PERSONA = (                                                  # I40c: --persona�
 UP = {1: 3, 2: 5}                                            # 続けて褒められた回数で段を上げる（持ち主の案）
 
 
-def teacher_eval(host, model, history, reply, stage):
+def teacher_eval(host, model, history, reply, stage, prompt="old"):
+    """prompt = old（今の型）か、I48u の促しの型（i48u_teacher.PROMPTS の p2a・p2b・p2c）。"""
     hist = "\n".join(history[-6:])
+    if prompt != "old":
+        import i48u_teacher as U48
+        msgs = [dict(role="system", content=U48.PROMPTS[prompt] + STAGES[stage]),
+                dict(role="user", content=f"会話の流れ:\n{hist}\n\nボットの返事:\n{reply}")]
+        return U48.parse(ollama_chat(host, model, msgs, temperature=0.2, first_line=False, num_predict=2048, fmt="json"), reply)
     msgs = [dict(role="system", content=TEACHER + STAGES[stage]),
             dict(role="user", content=f"会話の流れ:\n{hist}\n\nボットの返事:\n{reply}")]
     text = ollama_chat(host, model, msgs, temperature=0.2, first_line=False, num_predict=2048, fmt="json")
@@ -204,6 +210,12 @@ def main():
     ap.add_argument("--slide", help="I48o: 保存した状況のスライドの板（i48o_slide_board.py --board の名前）。行づくりの返事の述語の語尾を、相手の今の行と自分の前の行から読んだ状況で選ぶ")
     ap.add_argument("--tail", help="I48p: 保存した終助詞の板（i48p_tail_board.py --board の .json）。言い切りだけの行づくりの返事に、資料の割合で終助詞を付ける")
     ap.add_argument("--explore", action="store_true", help="I35t（I48q で chat_partner にも）: 作り直しが直らない時、相槌で黙らず、いちばん指摘の見込みの小さい行を言ってみる")
+    ap.add_argument("--dark_base", action="store_true", help="I48r: 行のまるごとの暗さの線を 0.5 でなく全体の指摘の割合にし、会話の中で暗くするのは相手の指摘・聞き返しの行だけにする")
+    ap.add_argument("--bind", action="store_true", help="I48t: 返事の点に P(結び→受けた)（別々の行の語を結んだ返事を、相手が受けて続けた経験の割合）を足す")
+    ap.add_argument("--gate", action="store_true", help="I48x: 深刻な相談の門（目印の行には固定の返事。学びに入れない）")
+    ap.add_argument("--silver", action="store_true", help="I48x: 白銀律の門（相手に指摘・拒まれた時の相手の行の所を、自分が言う前に暗くする）")
+    ap.add_argument("--partner_mood", action="store_true", help="I48v: 話し相手に会話の初めの気分の設定を足し、往復ごとに自分の気分（4 つの対の両側の強さ 8 つ）をログと stats に書かせる（bot には渡さない）")
+    ap.add_argument("--teacher_prompt", default="old", choices=("old", "p2a", "p2b", "p2c"), help="I48u: 先生の型。old = 今の型、p2a・p2b・p2c = 促しの型（i48u_teacher.py）")
     ap.add_argument("--relation", help="I48f: 保存した関係の板（i48f_relation_board.py --out の名前）。--particle の代わりに、語板 v3 の L3 から役らしさと助詞を読む")
     ap.add_argument("--relation_device", default=None, help="I48f: 関係の板の置き場（cuda:1 など。無ければ PC のメモリ）")
     ap.add_argument("--particle_mode", default="light", choices=("light", "move"), help="I48c: light = 合わない役の点を下げる。move = 場の板の役の明るさを置き直し、助詞も波から選ぶ")
@@ -273,6 +285,9 @@ def main():
     if a.tail:
         bot.load_tail(a.tail, works, random.Random(f"tail:{a.seed}"))
     bot.explore = a.explore
+    bot.dark_base = a.dark_base
+    bot.bind = a.bind
+    bot.gate, bot.silver = a.gate, a.silver
     if a.relation:
         import i48f_relation_board as W48f
         import i27s_fused_generate as S27
@@ -336,6 +351,10 @@ def main():
     rng = random.Random(a.seed)
     log = [f"# 話し相手との会話（非公開）", "", f"- 話し相手: {a.model}、先生: {a.teacher or 'なし'}、会話 {a.convs} × {a.turns} 往復", ""]
     stage, streak = 1, 0
+    moods = None
+    if a.partner_mood:                                      # I48v
+        import i48v_mood as V48
+        moods = V48.order(a.convs, a.seed)
     for ci in range(a.convs):
         bot.conv_no = ci + 1
         bot.conv["lines"] = []                              # 会話の行は会話ごとに空にする（経験・自覚・自分の板は持ち越す）
@@ -347,12 +366,21 @@ def main():
         if a.persona and not script and ci % 5 == 4:                       # I41c: 誕生日・猫の名前を一度も聞かなかったので、5 会話に 1 回は聞かせる
             ask = {4: "私の誕生日、知ってる？", 9: "うちの猫の名前、覚えてる？", 14: "私の名前、みさきって覚えてる？"}.get(ci, "私の誕生日、覚えてる？")   # I44e
             sys_c += "\n今回の会話のどこかで、必ず「" + ask + "」と聞く。"
+        if moods:                                           # I48v: 会話の初めの気分の設定（bot には渡さない）
+            sys_c += "\n" + V48.MOODS[moods[ci]]
         msgs = [dict(role="system", content=sys_c), dict(role="assistant", content=human)]
         c = dict(会話=ci + 1, 往復=0, 指摘=0, 受け=0, 中身なし=0, 先生の指摘=0, 先生の段=stage, 先生の見立てを捨てた=0, 相手の空=0,
                  繰り返し=0, 語の繰り返し=0, 新規性=0.0, 自分の板=0)
+        mood_log = None
+        if moods:
+            c["気分の設定"], c["気分"] = moods[ci], []
+            mood_log = lambda: (c["気分"].append(V48.rate(ollama_chat, a.host, a.model, msgs)), log.append(f"  - 相手の気分: {json.dumps(c['気分'][-1], ensure_ascii=False)}"))
         said = []                                           # I38a: この会話の自分の行（繰り返しを数える）
         hist = [f"相手: {human}"]
         log += [f"## 会話 {ci + 1}", ""]
+        if mood_log is not None:                            # I48v: 気分の設定と、始めの行の後の気分
+            log.append(f"  - 相手の気分の設定: {moods[ci]}")
+            mood_log()
         prev_bot = None
         prev_recall = False                                 # I46b: 前のボットの返事が思い出しの答えだったか
         pending = None
@@ -456,7 +484,7 @@ def main():
             said.append((line, lt))
             log += [f"- 相手: {human}", f"- ボット: **{line}** （{r['why']}、{time.time() - t0:.1f} 秒）"]
             if a.teacher:                                   # 先生の見立て（話し相手とは別）
-                ev, bad = teacher_eval(a.host, a.teacher, hist, line, stage)
+                ev, bad = teacher_eval(a.host, a.teacher, hist, line, stage, a.teacher_prompt)
                 if ev is not None and ev["has_error"] and ev["suggested_reply"]:   # 変と言った所を、お手本でも言っている（同じ所に両方の経験が入る）
                     key = lambda t: {(p["ns"], p["c"], p["ps"]) for p in bot.pb.pieces(B3.CB.to_toks(nlp(t)))}
                     if key(ev["odd_part"]) & key(ev["suggested_reply"]):
@@ -464,6 +492,10 @@ def main():
                 if bad:
                     c["先生の見立てを捨てた"] += 1
                     log.append(f"  - 先生（段 {stage}）: 見立てを捨てた（{bad}）")
+                if ev is not None and ev.get("verdict") == "そのまま":   # I48u: 促しの型の「そのまま」は、何も言わない（経験に入れない）
+                    c["先生のそのまま"] = c.get("先生のそのまま", 0) + 1
+                    log.append(f"  - 先生（段 {stage}）［そのまま］")
+                    ev = None
                 if ev is not None and ev["has_error"]:
                     kind = str(ev.get("kind") or "").strip()
                     c.setdefault("先生の種類", {})
@@ -489,6 +521,8 @@ def main():
             msgs.append(dict(role="assistant", content=human))
             hist.append(f"相手: {human}")
             prev_bot = line
+            if mood_log is not None:
+                mood_log()
         if pending is not None:                             # 会話の終わり: 相手の指摘が無かったので褒めを入れる
             stage, streak = praise(pending, stage, streak)
         c["新規性"] = round(c["新規性"] / max(1, c["往復"]), 3)
@@ -505,6 +539,10 @@ def main():
             c["スライド"] = dict(bot.slide_log)                 # I48o: 会話をまたいだ累計（同じ・替えた・出ない・出どころ）
         if getattr(bot, "tail", None) is not None:
             c["終助詞"] = dict(bot.tail_log)                    # I48p: 会話をまたいだ累計（付けた・付けない・付く表記が無い …）
+        if getattr(bot, "gate", False) or getattr(bot, "silver", False):
+            c["門"] = dict(bot.__dict__.get("gate_log", {}))     # I48x: 会話をまたいだ累計（深刻な相談・白銀律で暗くした）
+        if getattr(bot, "bind", False):
+            c["結び"] = dict(bot.__dict__.get("bind_log", {}))   # I48t: 会話をまたいだ累計（言った・結び・結び→受けた）
         if imp is not None:
             imp.save()
         if mem is not None:
