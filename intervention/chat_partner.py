@@ -200,6 +200,7 @@ def main():
     ap.add_argument("--wave_board", help="I48: 作った板の保存先（拡張子なし）。あれば読み込み、無ければ作って保存する。昼の足しを使う時は --wave_day を付けて作った板を使う")
     ap.add_argument("--wave_day", help="I48: 昼の足し。会話の行を今の語の波のまま板に足し、この JSONL に書く")
     ap.add_argument("--particle", help="I48c: 助詞の波の板を作る会話の資料（解析済み JSON）。主語・目的語・補語の選び方に、助詞の明るさから読んだ役らしさを入れる")
+    ap.add_argument("--uke", help="I48l: 保存した受けの板（i48l_uke_flow.py --board の名前）。相槌の受けと、行づくりの頭の受けを、相手の前の行から選ぶ")
     ap.add_argument("--relation", help="I48f: 保存した関係の板（i48f_relation_board.py --out の名前）。--particle の代わりに、語板 v3 の L3 から役らしさと助詞を読む")
     ap.add_argument("--relation_device", default=None, help="I48f: 関係の板の置き場（cuda:1 など。無ければ PC のメモリ）")
     ap.add_argument("--particle_mode", default="light", choices=("light", "move"), help="I48c: light = 合わない役の点を下げる。move = 場の板の役の明るさを置き直し、助詞も波から選ぶ")
@@ -260,6 +261,10 @@ def main():
         bot.sb.learn_w = a.learn_w
     if a.attrs:
         bot.attr_field, bot.use_book, bot.conv_share = True, False, 0.2
+    if a.uke:
+        import i48l_uke_flow as U48l
+        bot.uke = U48l.UkeBoard.load(a.uke)
+        bot._uke_rng = random.Random(f"uke:{a.seed}")
     if a.relation:
         import i48f_relation_board as W48f
         import i27s_fused_generate as S27

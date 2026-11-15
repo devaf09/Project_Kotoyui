@@ -308,6 +308,7 @@ class Bot3(C2.Bot2):
         tw, self._last_topic = self._last_topic, None
         if tw and getattr(self, "mem", None) is not None and hasattr(self.mem, "topic_result"):   # I45b: 話題の答えの当たり外れ
             self.mem.topic_result(tw, not fixed)
+        self._uke_begin(text)                               # I48l: 受けの板の問い（相手の今の行・自分の前の行）
         if not self.conv["lines"]:                          # 新しい会話: この会話で指摘された行は空にする
             self.conv_dark = set()
             self.conv_asked = set()
@@ -351,6 +352,7 @@ class Bot3(C2.Bot2):
                 out["why"] += f"（点 {v0:.2f}、行づくり {v1:.2f}）"
             if self.nov is not None and self.novelty(self.conv["lines"][-1]["toks"])[0] < 0:
                 out = self._novel_alt(out)
+        out = self._uke_end(out)
         return self._said(out)
 
     def _novel_alt(self, out):
@@ -999,6 +1001,51 @@ class Bot3(C2.Bot2):
         return out
 
     particle = None                                         # I48c: 助詞の波の板（i48c_particle_wave.ParticleLight、--particle）
+    uke = None                                              # I48l: 受けの板（i48l_uke_flow.UkeBoard、--uke）。無ければ今までと同じ intj
+    _uke_s = None
+    _uke_rng = None
+
+    def intj(self, qt, kind):
+        """I48l: --uke がある時、相槌の受けを、相手の前の行から受けの板の 2 段目の明るさの比で選ぶ（はい/いいえ の答えは今のまま）。"""
+        if self.uke is None or self._uke_s is None or qt != "問いでない" or kind != "相槌":
+            return C2.Bot2.intj(self, qt, kind)
+        u, q = self.uke.choose(self._uke_s, self.__dict__.setdefault("_uke_used", Counter()), self._uke_rng)
+        self._uke_note = f"受け「{u}」（明るさの割合 {q:.2f}）"
+        return u
+
+    def _uke_begin(self, text):
+        if self.uke is None:
+            return
+        import i48l_uke_flow as U48l
+        if not self.conv["lines"]:
+            self._uke_used = Counter()
+        own = next((ln["toks"] for ln in reversed(self.conv["lines"]) if ln["who"] == "ボット"), None)
+        self._uke_s = U48l.query(CB.to_toks(self.nlp(text)), own)
+        self._uke_note = ""
+
+    def _uke_end(self, out):
+        """I48l: 行づくりの返事の頭に受けを付けるかを、1 段目の見込みの比で決める。言った受けを、この会話の使った受けに数える。"""
+        if self.uke is None or self._uke_s is None:
+            return out
+        import i48l_uke_flow as U48l
+        lt = CB.to_toks(self.nlp(out["line"]))
+        if "行づくり" in out.get("why", "") and U48l.uke(lt) is None:
+            p = self.uke.open_prob(self._uke_s)
+            if self._uke_rng.random() < p:
+                u, q = self.uke.choose(self._uke_s, self.__dict__.setdefault("_uke_used", Counter()), self._uke_rng)
+                out["line"] = u + "、" + out["line"]
+                lt = CB.to_toks(self.nlp(out["line"]))
+                if self.conv["lines"] and self.conv["lines"][-1]["who"] == "ボット":
+                    self.conv["lines"][-1] = dict(self.conv["lines"][-1], text=out["line"], toks=lt)
+                out["why"] += f"（受け「{u}」を頭に付ける。付ける見込み {p:.2f}、明るさの割合 {q:.2f}）"
+            else:
+                out["why"] += f"（受けは付けない。付ける見込み {p:.2f}）"
+        elif getattr(self, "_uke_note", "") and U48l.uke(lt) is not None:
+            out["why"] += "（" + self._uke_note + "）"
+        o = U48l.uke(lt)
+        if o is not None:
+            self.__dict__.setdefault("_uke_used", Counter())[o] += 1
+        return out
 
     def extra_lines(self, toks):
         if self.particle is not None:                       # 流れの鍵: 会話の前の 3 行の中身の語
@@ -1324,6 +1371,7 @@ def main():
     ap.add_argument("--wave_D", type=int, default=2048, help="I48: 波の長さ")
     ap.add_argument("--wave_store", default="c64", choices=("c128", "c64", "p8"), help="I48: 数の持ち方")
     ap.add_argument("--particle", help="I48c: 助詞の波の板を作る会話の資料（解析済み JSON）。主語・目的語・補語の選び方に、助詞の明るさから読んだ役らしさを入れる")
+    ap.add_argument("--uke", help="I48l: 保存した受けの板（i48l_uke_flow.py --board の名前）。相槌の受けと、行づくりの頭の受けを、相手の前の行から選ぶ")
     ap.add_argument("--relation", help="I48f: 保存した関係の板（i48f_relation_board.py --out の名前）。--particle の代わりに、語板 v3 の L3 から役らしさと助詞を読む")
     ap.add_argument("--relation_device", default=None, help="I48f: 関係の板の置き場（cuda:1 など。無ければ PC のメモリ）")
     ap.add_argument("--particle_mode", default="light", choices=("light", "move"), help="I48c: light = 合わない役の点を下げる。move = 場の板の役の明るさを置き直し、助詞も波から選ぶ")
@@ -1358,6 +1406,11 @@ def main():
     bot.trial_mode = a.trial
     bot.use_you = a.you
     bot.conv_share = a.conv_share
+    if a.uke:
+        import random
+        import i48l_uke_flow as U48l
+        bot.uke = U48l.UkeBoard.load(a.uke)
+        bot._uke_rng = random.Random(f"uke:{getattr(a, 'seed', 0)}")
     if a.relation:
         import i48f_relation_board as W48f
         import i27s_fused_generate as S27

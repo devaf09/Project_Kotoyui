@@ -225,11 +225,18 @@ def main():
     ap.add_argument("--device", default=None)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out")
+    ap.add_argument("--board", help="受けの板を、資料の全部で作って、この名前（拡張子なし）で書き出す（測りはしない）")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     t0 = time.time()
     works = json.load(open(a.cache, encoding="utf-8"))
     works = works["works"] if isinstance(works, dict) else works
+    if a.board:
+        dev = torch.device(a.device) if (a.device and torch is not None) else None
+        bd = UkeBoard.build(works, a.D, a.seed, a.min_count, a.max_scenes, dev)
+        bd.save(a.board)
+        log.info("受けの板: 候補 %d、1 段目 %d 場面、2 段目 %d 場面、%.0f 秒", len(bd.cands), len(bd.r1.P), len(bd.r2.P), time.time() - t0)
+        return
     random.Random(a.seed).shuffle(works)
     te_w, tr_w = works[: a.test_works], works[a.test_works:]
     if a.train_works:
@@ -282,6 +289,89 @@ def main():
     if a.out:
         json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     log.info("済み %.0f 秒", time.time() - t0)
+
+
+# ---------------------------------------------------------------- bot につなぐ板（I48l の 2 段）
+class _Wv:
+    """読み込んだ語の波（Relation が使う ix・W だけ）。"""
+
+    def __init__(self, vocab, W):
+        self.vocab, self.W = list(vocab), W
+        self.ix = {w: i for i, w in enumerate(self.vocab)}
+
+
+def query(prev_toks, own_toks=None):
+    """相手の前の行（と自分の前の行）から、1 つの場面（鍵を作る形）。"""
+    work = dict(lines=([dict(toks=own_toks)] if own_toks is not None else []) + [dict(toks=prev_toks), dict(toks=[])])
+    return samples(work)[-1]
+
+
+class UkeBoard:
+    """受けの板。1 段目（付けるか: 受け無しの見込み）と 2 段目（どの受けか: 受けのある場面だけ）を持つ。
+    build で資料から作り、save・load で書き出す・読み込む（I48f の関係の板と同じ作り）。"""
+
+    KEYS = ("尾", "中", "印")
+
+    def __init__(self, wv, cands, D, K1, P1, K2, P2):
+        self.cands, self.D = list(cands), D
+        self.cix = {c: i for i, c in enumerate(self.cands)}
+        self.r1 = UkeRelation(wv, self.cands, D, self.KEYS)
+        self.r2 = UkeRelation(wv, self.cands, D, self.KEYS)
+        for r, K, P in ((self.r1, K1, P1), (self.r2, K2, P2)):
+            r.K, r.P = K, P
+            r.prior = np.bincount(P, minlength=len(self.cands)).astype(float)
+
+    @classmethod
+    def build(cls, works, D=512, seed=0, min_count=20, max_scenes=200000, dev=None):
+        tr = [s for w in works for s in samples(w)]
+        cnt = Counter(s["post"] for s in tr)
+        cands = [c for c, n in cnt.most_common() if n >= min_count and c != NO_UKE] + [OTHER, NO_UKE]
+        tr = to_cands(tr, cands)
+        vocab = sorted({t["lemma"] for w in works for ln in w["lines"] for t in ln["toks"] if t["pos"] in CUE})
+        seq = [[t["lemma"] for t in ln["toks"] if t["pos"] in CUE] for w in works for ln in w["lines"] + [dict(toks=[])]]
+        wv = Waves(vocab, D, seed)
+        wv.learn(seq, dev=dev)
+        wv = _Wv(vocab, wv.W.astype(np.complex64))
+        has = [x for x in tr if x["post"] not in (NO_UKE, OTHER)]
+        r1 = UkeRelation(wv, cands, D, cls.KEYS).fit(tr[:: max(1, math.ceil(len(tr) / max_scenes))])
+        r2 = UkeRelation(wv, cands, D, cls.KEYS).fit(has[:: max(1, math.ceil(len(has) / max_scenes))])
+        return cls(wv, cands, D, r1.K, r1.P, r2.K, r2.P)
+
+    def save(self, path):
+        wv = self.r1.wv
+        np.savez(path + ".npz", W=wv.W, K1=self.r1.K, P1=self.r1.P, K2=self.r2.K, P2=self.r2.P)
+        json.dump(dict(D=self.D, cands=self.cands, vocab=wv.vocab), open(path + ".json", "w", encoding="utf-8"), ensure_ascii=False)
+
+    @classmethod
+    def load(cls, path):
+        m = json.load(open(path + ".json", encoding="utf-8"))
+        z = np.load(path + ".npz")
+        return cls(_Wv(m["vocab"], z["W"]), m["cands"], m["D"], z["K1"], z["P1"], z["K2"], z["P2"])
+
+    def open_prob(self, s):
+        """1 段目: 受けを付ける見込み（1 − 受け無しの明るさの割合）。"""
+        p = self.r1.scoop_scores([s])[0]
+        return float(1 - p[self.cix[NO_UKE]] / p.sum())
+
+    def brightness(self, s):
+        """2 段目: 名前のある受けごとの明るさの割合（受け無し・ほかの受け は 0）。"""
+        q = self.r2.scoop_scores([s])[0].copy()
+        q[self.cix[NO_UKE]] = q[self.cix[OTHER]] = 0
+        return q / q.sum()
+
+    def choose(self, s, used, rng):
+        """明るさの比で選ぶ（1 番目に固定しない）。この会話で使った受けは、薄れた記憶として明るさを下げる:
+        使った割合が、その場の見込み（明るさの割合）を越えている分だけ、見込み ÷ 使った割合 を掛ける（消さない。手で置く値は無い）。"""
+        q = self.brightness(s)
+        n = sum(used.values())
+        if n:
+            for u, k in used.items():
+                j = self.cix.get(u)
+                if j is not None and q[j] > 0:
+                    q[j] *= min(1.0, q[j] / (k / n))
+        q = q / q.sum()
+        j = int(rng.choices(range(len(q)), weights=q)[0])
+        return self.cands[j], float(q[j])
 
 
 if __name__ == "__main__":
