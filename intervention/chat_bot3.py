@@ -255,6 +255,11 @@ class Bot3(C2.Bot2):
     def _is_gate_line(self, line):
         return bool(self.gate) and self._gate_text is not None and line.strip() == self._gate_text
 
+    skip_lines = frozenset()                                # I48z: 経験に入れない相手の行（台本の行など。既定は空）
+
+    def _is_skip_line(self, text):
+        return bool(self.skip_lines) and text.strip().strip("「」") in self.skip_lines
+
     def _gate_reply(self, text):
         import i48x_gate as G
         if self._gate_text is None:
@@ -445,7 +450,8 @@ class Bot3(C2.Bot2):
         snap = (list(self.conv["lines"]), list(getattr(self, "trial", [])), getattr(self, "_asked_attr", None), self.asked)
         out = self._reply_dark(text)
         self._prev_recall = bool(out.get("recall"))
-        if self.use_good and len(self.conv["lines"]) >= 2 and not out.get("form") and not out.get("recall"):  # I37b（I39a: 自分の板で答えた時は、形の候補どうしで比べ済み）: ほかの返し方（行づくり）とも比べ、見込みの点の大きい方を言う
+        if self.use_good and len(self.conv["lines"]) >= 2 and not out.get("form") and not out.get("recall") \
+                and not (self.keep_repair and out.get("repair")):   # I37b（I39a: 自分の板で答えた時は、形の候補どうしで比べ済み）: ほかの返し方（行づくり）とも比べ、見込みの点の大きい方を言う（I48z: 聞き返しへの言い直しは比べて替えない）
             v0 = self.value(self.conv["lines"][-1]["toks"], out["line"])
             keep = (out, list(self.conv["lines"]), list(self.trial), getattr(self, "_asked_attr", None), self.asked)
             self.conv["lines"] = list(snap[0])
@@ -537,6 +543,8 @@ class Bot3(C2.Bot2):
 
     def _reply_dark(self, text):
         out = self._reply_once(text)
+        if self.keep_repair and out.get("repair"):          # I48z（A-1）: 聞き返しへの言い直しは、関係のない行に作り直さない
+            return self._repair_alt(out) if self.dark_line(out["line"]) else out
         if self.dark_line(out["line"]) and len(self.conv["lines"]) >= 2 and not out.get("recall"):   # 前に指摘された行（I40e: 思い出した中身は、言い方の指摘で捨てない）をまた言いそう: 行づくりで言い直し、直らなければ見込みの小さい行を言ってみる
             first = out
             del self.conv["lines"][-2:]
@@ -582,7 +590,7 @@ class Bot3(C2.Bot2):
             return self._end_turn(self._name(r))
         bots = [ln for ln in self.conv["lines"] if ln["who"] == "ボット"]
         hums = [ln for ln in self.conv["lines"] if ln["who"] == "人"]
-        if bots and self.negx is not None and not self._is_gate_line(bots[-1]["text"]):   # I48x: 門の固定の返事への相手の行は、経験に入れない
+        if bots and self.negx is not None and not self._is_gate_line(bots[-1]["text"]) and not self._is_skip_line(text):   # I48x: 門の固定の返事への相手の行は、経験に入れない（I48z: 台本の行も、--skip_script の時）
             toks = CB.to_toks(self.nlp(text))
             a = dict(text="「" + bots[-1]["text"] + "」", toks=bots[-1]["toks"])
             b = dict(text="「" + text + "」", toks=toks)
@@ -1414,6 +1422,45 @@ class Bot3(C2.Bot2):
 
     # ---- I46a: 聞き返し（「〜って？」）に、前の人の行に戻らず、聞き返された自分の行を言い直す ----
     use_restate = False
+    keep_repair = False                                     # I48z（A-1）: 言い直しを後の段（点の比べ・繰り返しの替え・暗い行の作り直し）で替えない
+
+    def _repair_alt(self, out):
+        """I48z（A-1）: 言い直しが前に指摘された行だった: 言い直しの別の形（頭の語を外す・聞き返された一続きに、聞き返された行の前の相手の行の
+        いちばん珍しい名詞を「の」で足して「〜のこと。」）を作り、前に指摘されていない形のうち点の大きい方を言う。
+        どれも前に指摘された行なら、そのままの言い直しと、短い「〜のこと。」の点の大きい方。"""
+        L = self.conv["lines"]
+        last = L[-1]
+        chunk = (getattr(self, "_chunk", "") or "").strip("「」、。 ")
+        head = self.restate_head()
+        alts = []
+        if head and out["line"].startswith(head + "、"):
+            alts.append(out["line"][len(head) + 1:])
+        if chunk:
+            ph = [ln for ln in L[:-3] if ln["who"] == "人"]
+            ns = [t for t in (ph[-1]["toks"] if ph else []) if t["pos"] == "NOUN" and t["lemma"] not in C2.YOU and t["text"] not in chunk
+                  and t["lemma"] not in ("こと", "もの", "の", "時")]
+            if ns:
+                n = max(ns, key=lambda t: self.idf.get(t["lemma"], 0.0))["text"]
+                alts.append(n + "の、" + chunk + "のこと。")
+            short = chunk + "のこと。"
+            alts.append(short)
+        else:
+            short = None
+        ok = [x for x in dict.fromkeys(alts) if x != out["line"] and not self.dark_line(x)]
+        pool = ok or [out["line"]] + ([short] if short and short != out["line"] else [])
+
+        def val(line):
+            L[-1] = dict(text=line, toks=CB.to_toks(self.nlp(line)), who="ボット")
+            return self.value(L[-1]["toks"], line)
+        sc = [(val(x), x) for x in pool]
+        v, line = max(sc, key=lambda z: z[0])
+        if line == out["line"]:
+            L[-1] = last
+            out["why"] += f"（言い直しは前に指摘された行だが、別の形が無いのでそのまま言う。点 {v:.2f}）"
+            return out
+        L[-1] = dict(text=line, toks=CB.to_toks(self.nlp(line)), who="ボット")
+        return dict(line=line, tries=0, breaks=[], sim=0, repair=True,
+                    why=out["why"] + f"。言い直し「{out['line']}」は前に指摘された行なので、別の形「{line}」（点 {v:.2f}、候補 {len(pool)}）を言う")
     _restate_head = None
 
     def restate_head(self):
@@ -1606,6 +1653,7 @@ class Bot3(C2.Bot2):
             out = self.restate(a, tgt, prev_human, sure=pre_p <= 0.5 and not any(pc["ns"] + pc["c"] + pc["ps"] in getattr(self, "_prev_trial", ()) for pc in tgt))
             if out is not None:
                 out["why"] = f"相手の聞き返し → 所「{'・'.join(pc['ns'] + pc['c'] + pc['ps'] for pc in tgt) or 'なし'}」を経験に足し、" + out["why"]
+                out["repair"] = True                        # I48z: 相手の行（聞き返し）に答える返事の印
                 return self._log(text, toks, out)
         r = self.pick_route([k for k, _ in cs])
         kinds = "・".join(dict.fromkeys(k for k, _ in cs))

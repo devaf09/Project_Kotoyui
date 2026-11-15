@@ -64,3 +64,13 @@ def test_bot_bind_value():
     v = b._bind_value(b.conv["lines"][-1]["toks"], "海")
     b._dl().resolve("結び", True)                                   # 結びでない返事が受けられても、結びの良は付かない
     assert b._bind_value(b.conv["lines"][-1]["toks"], "海") == v and b.delayed.said["結び"][k[0]] == 1
+
+
+def test_i48z_asked_back_counts():
+    assert M.asked_back(dict(text="光って？"))
+    assert M.asked_back(dict(text="へえ。光って？"))
+    assert not M.asked_back(dict(text="会話って楽しいよね。"))
+    assert not M.took_counted(True, dict(text="光って？")) and M.took_counted(True, dict(text="いいね。"))
+    assert not M.bind_counted(True, dict(text="海って？")) and M.bind_counted(True, dict(text="海に行った。"))
+    assert M.repair_kept(dict(why="相手の聞き返し → 所「光」を経験に足し、…"))
+    assert not M.repair_kept(dict(why="「…」（点 0.04）より、行づくりの「…」を言う。"))

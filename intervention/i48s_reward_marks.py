@@ -70,3 +70,27 @@ class Odd:
 
     def worst(self, toks):
         return self.C2.Bot2.oddness(self, toks)          # (差, (種類, 所), 鍵)
+
+
+# ---- I48z: 数えの直し。聞き返しは why の先頭ではなく、相手の行の形（「〜って？」で終わる問いの文）で見る ----
+def asked_back(ln):
+    """相手の行が、前の返事への聞き返し（「？」で終わる文に「〜って？」がある）か。"""
+    import re
+    t = (ln or {}).get("text", "")
+    return any(re.search(r"って[？?]", x) for x in re.split(r"(?<=[。！!？?])", t) if x.rstrip("」 ").endswith(("？", "?")))
+
+
+def repair_kept(r):
+    """bot の返事が、聞き返しへの言い直し（相手の行に答える返事）のまま言えたか（chat_bot3 の why の経路で読む）。"""
+    w = r.get("why", "")
+    return w.startswith("相手の聞き返し") or "相手の聞き返し →" in w[:40]
+
+
+def took_counted(took, n):
+    """受けたの数え: 相手の次の行が聞き返しなら受けたに数えない。"""
+    return bool(took) and not asked_back(n)
+
+
+def bind_counted(bind, p):
+    """結びの数え: 相手の前の行が聞き返し（返事はその言い直し）なら結びに数えない。"""
+    return bool(bind) and not asked_back(p)

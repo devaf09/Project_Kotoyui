@@ -195,6 +195,8 @@ def main():
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
+    ap.add_argument("--keep_repair", action="store_true", help="I48z（A-1）: 聞き返しへの言い直しを、後の段（点の比べ・繰り返しの替え・暗い行の作り直し）で替えない（--restate が要る）")
+    ap.add_argument("--skip_script", action="store_true", help="I48z: 台本の行を、前の返事への相手の反応（指摘・受け・褒めの段・経験）として数えない（既定は数える）")
     ap.add_argument("--script", help="I45a: 話し相手の行を、決まった会話・往復で差し替える台本（JSON {\"会話:往復\": \"行\"}、または default）")
     ap.add_argument("--rehearse", action="store_true", help="I44a: 思い出しで読み出した項目・記憶板で引っかかった鍵を再記憶する（残りやすくする）")
     ap.add_argument("--learn_w", action="store_true", help="I43a: 自分の板の掛け目（軽い語 0.3・項目 0.8・時 0.5）と近さの下限（0.15・6 割）を手で置かず、言って指摘された数から")
@@ -259,6 +261,7 @@ def main():
         bot.enable_rev(works)
     bot.use_good = a.good
     bot.use_restate = a.restate
+    bot.keep_repair = a.keep_repair
     bot.use_flow = a.flow
     bot.use_base = a.base
     if a.novelty:
@@ -347,6 +350,8 @@ def main():
     if a.script:                                            # I45a: {"会話:往復": "行"}（往復は 1 から。1 は始めの行なので 2 から使う）
         src = SCRIPT if a.script == "default" else json.load(open(a.script, encoding="utf-8"))
         script = {tuple(int(x) for x in k.split(":")): v for k, v in src.items()}
+        if a.skip_script:                                   # I48z
+            bot.skip_lines = frozenset(v.strip().strip("「」") for v in script.values())
     openers = [x.strip() for x in open(a.openers, encoding="utf-8") if x.strip()]
     rng = random.Random(a.seed)
     log = [f"# 話し相手との会話（非公開）", "", f"- 話し相手: {a.model}、先生: {a.teacher or 'なし'}、会話 {a.convs} × {a.turns} 往復", ""]
@@ -385,7 +390,9 @@ def main():
         prev_recall = False                                 # I46b: 前のボットの返事が思い出しの答えだったか
         pending = None
         for ti in range(a.turns):
-            if prev_bot is not None:                        # 話し相手の行が、前の返事への指摘か・受けか（ボットの見分けと同じ物差し）
+            if prev_bot is not None and a.skip_script and human.strip().strip("「」") in bot.skip_lines:   # I48z: 台本の行は相手の反応として数えない
+                pending = None
+            elif prev_bot is not None:                      # 話し相手の行が、前の返事への指摘か・受けか（ボットの見分けと同じ物差し）
                 ta = bot.conv["lines"][-1]["toks"]
                 A_ = dict(text="「" + prev_bot + "」", toks=ta)
                 B_ = dict(text="「" + human + "」", toks=B3.CB.to_toks(nlp(human)))
