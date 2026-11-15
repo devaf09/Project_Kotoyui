@@ -211,10 +211,20 @@ class Bot3(C2.Bot2):
     def _line_key(line):
         return "".join(ch for ch in line if ch not in "。、！？!?…「」 　")
 
+    AIZUCHI_ONLY = "<相槌だけ>"
+
+    def _exp_key(self, line):
+        """行のまるごとの経験の鍵。--uke の時は、受けの一言だけの行（受けの板の候補の 1 つだけ）を、どの受けでも 1 つの鍵にまとめる
+        （暗さを行の形でなく「相槌だけで返した」という返し方に付ける）。--uke が無ければ行の形のまま（今までと同じ）。"""
+        k = self._line_key(line)
+        if self.uke is not None and k in self.uke.cix:
+            return self.AIZUCHI_ONLY
+        return k
+
     def dark_line(self, line):
         """I37a: 行のまるごとの経験。この会話で聞き返された・先生に変と言われた行は言わない（所の無い行「ああ、ならん。」「はい。」も）。
         会話をまたいでは、言った数のうち指摘された割合が、されなかった割合より大きい行だけ（「はい。」はふつう通じる）。"""
-        k = self._line_key(line)
+        k = self._exp_key(line)
         d = self.__dict__
         if k in d.setdefault("conv_dark", set()):
             return True
@@ -223,7 +233,7 @@ class Bot3(C2.Bot2):
 
     def mark_line(self, line, w=1.0):
         self.nov_result("指摘")
-        k = self._line_key(line)
+        k = self._exp_key(line)
         self.__dict__.setdefault("line_pointed", Counter())[k] += w
         self.__dict__.setdefault("conv_dark", set()).add(k)
 
@@ -275,7 +285,7 @@ class Bot3(C2.Bot2):
                     n = 0
                 vs.append(self.p_lab(pc, q, "良") - self.p_point(pc, q) + 0.5 / math.sqrt(n + 2))
             return sum(vs) / len(vs)
-        k = self._line_key(line)
+        k = self._exp_key(line)
         d = self.__dict__
         said = d.setdefault("line_said", Counter())[k]
         g, pt = d.setdefault("line_good", Counter())[k], d.setdefault("line_pointed", Counter())[k]
@@ -287,7 +297,7 @@ class Bot3(C2.Bot2):
         for pc in self.pb.pieces(toks):
             self.grain.add(self.sym(pc, q), "良")
             self.aware[("良かった", pc["ns"] + pc["c"] + pc["ps"])] += w
-        self.__dict__.setdefault("line_good", Counter())[self._line_key(line)] += w
+        self.__dict__.setdefault("line_good", Counter())[self._exp_key(line)] += w
         self.nov_result("良")
         if self.sb is not None and self._last_form:
             self.sb.note(self._last_form, "良")
@@ -388,7 +398,7 @@ class Bot3(C2.Bot2):
                 self.sb.note(self._last_form, "言った")
                 self.sb.note_pair(self._last_pair, "言った")
                 self.sb.note_src(self._last_src, "言った")
-        self.__dict__.setdefault("line_said", Counter())[self._line_key(out["line"])] += 1
+        self.__dict__.setdefault("line_said", Counter())[self._exp_key(out["line"])] += 1
         if self.nov is not None and getattr(self, "_asked_attr", None):   # I38a: この会話で聞いた属性（読み手が問いの行の所を取れなくても、同じ属性をまた聞かない）
             self.__dict__.setdefault("conv_asked", set()).add(self._asked_attr)
         if self.nov is not None and self.conv["lines"] and self.conv["lines"][-1]["who"] == "ボット":
