@@ -320,6 +320,7 @@ class Bot3(C2.Bot2):
             self.mem.topic_result(tw, not fixed)
         self._uke_begin(text)                               # I48l: 受けの板の問い（相手の今の行・自分の前の行）
         self._slide_begin(text)                             # I48o: 状況のスライドの状況（相手の今の行・自分の前の行）
+        self._tail_begin()                                  # I48p: 終助詞を付けるかの数（この返事の間は同じ）
         if not self.conv["lines"]:                          # 新しい会話: この会話で指摘された行は空にする
             self.conv_dark = set()
             self.conv_asked = set()
@@ -365,6 +366,7 @@ class Bot3(C2.Bot2):
                 out = self._novel_alt(out)
         out = self._uke_end(out)
         out = self._slide_end(out)
+        out = self._tail_end(out)
         return self._said(out)
 
     def _novel_alt(self, out):
@@ -1064,11 +1066,26 @@ class Bot3(C2.Bot2):
 
     def load_slide(self, path, works):
         """板を読み、本の言い切りの表記ごとに、後ろのつなぎ（板の候補の形）と語尾の終助詞を数えておく。"""
-        import i48e_relation_split as E48
         import i48o_slide_board as O48
         self.slide = O48.SlideBoard.load(path)
         self._slide_sit, self._slide_note = (None, None, None), []
         self.slide_log = Counter()
+        self._end_infos(works)
+        self.layers.slide_pick = self._end_pick
+
+    def _end_pick(self, p, out):
+        """end_score の候補を、--slide（状況）、--tail（終助詞）の順に絞る。"""
+        if self.slide is not None:
+            out = self._slide_pick(p, out)
+        if self.tail is not None:
+            out = self._tail_pick(p, out)
+        return out
+
+    def _end_infos(self, works):
+        if getattr(self, "_end_info", None) is not None:
+            return
+        import i48e_relation_split as E48
+        import i48o_slide_board as O48
         info = {}
         for w in works:
             for ln in w["lines"]:
@@ -1083,7 +1100,6 @@ class Bot3(C2.Bot2):
                                 j += 1
                             info.setdefault(surf, Counter())[(E48.chain(T[i + 1:j]), O48.tail_of(T[i + 1:j]))] += 1
         self._end_info = {s: c.most_common(1)[0][0] for s, c in info.items()}
-        self.layers.slide_pick = self._slide_pick
 
     def _slide_begin(self, text):
         if self.slide is None:
@@ -1130,6 +1146,90 @@ class Bot3(C2.Bot2):
     def _slide_end(self, out):
         if self.slide is not None and self._slide_note and "行づくり" in out.get("why", ""):
             out["why"] += "（スライド " + " ／ ".join(self._slide_note[-1:]) + "）"
+        return out
+
+    # ---- I48p: 行づくりの返事が言い切りだけの時に、同じ述語の終助詞付きの表記を選ぶ（--tail） ----
+    tail = None
+
+    def load_tail(self, path, works, rng):
+        import i48p_tail_board as P48
+        self.tail = P48.TailBoard.load(path)
+        self._tail_rng, self._tail_u, self._tail_note = rng, (1.0, 0.0), []
+        self._tail_used = Counter()
+        self.tail_log = Counter()
+        self._end_infos(works)
+        self.layers.slide_pick = self._end_pick
+
+    def _tail_begin(self):
+        if self.tail is None:
+            return
+        if not self.conv["lines"]:
+            self._tail_used = Counter()
+        self._tail_u = (self._tail_rng.random(), self._tail_rng.random())   # この返事の間は同じ数で決める（候補を作るたびに引き直さない）
+        self._tail_note = []
+
+    def _tail_pick(self, p, out):
+        """1 番目の表記が言い切りだけ（終助詞も丁寧も無い）の時だけ、資料の割合で終助詞を付けるか決め、付けるなら同じ芯の
+        終助詞付きの表記から、述語の数える表の比（この会話で使った分は薄れ）で選ぶ。本に無ければ 1 番目の表記の後ろに終助詞の原形をつなぐ。
+        問いの「の」などが付いた表記は今のまま。"""
+        if not out:
+            return out
+        import i48j_situation_slide as J48
+        import i48p_tail_board as P48
+        inf = self._end_info
+        s0 = out[0][1]
+        if s0 not in inf:
+            self.tail_log["本の表記に無い"] += 1
+            return out
+        c0, t0 = inf[s0]
+        if t0 or J48.situation(c0)[2]:
+            self.tail_log["言い切りだけでない"] += 1
+            return out
+        pos = self.lpos.get(p, "VERB")
+        r, _ = self.tail.rate(p, pos)
+        if self._tail_u[0] >= r:
+            self.tail_log["付けない"] += 1
+            self._tail_note.append(f"{p}: 付けない（割合 {r:.2f}）")
+            return out
+        avail = {}
+        for v, s in out:
+            if s in inf and inf[s][1] in self.tail.cands and P48.core_of(*inf[s]) == c0 and inf[s][1] not in avail:
+                avail[inf[s][1]] = s
+        d = dict(self.tail.dist(p, pos))
+        if not d:
+            self.tail_log["表に無い"] += 1
+            self._tail_note.append(f"{p}: 終助詞の表に無い（割合 {r:.2f}）")
+            return out
+        for t in d:                                         # 本の言い切りの表記には終助詞の付いた物がほとんど無い（I32 の層では終助詞は
+            if t not in avail:                              # 「つなぎ」に分かれ、言い切りの表記に入らない）。無い時は、1 番目の表記の後ろに終助詞の原形をつなぐ
+                avail[t] = s0 + t.replace("+", "")
+        q = P48.dim(d, self._tail_used)
+        tot = sum(q.values())
+        acc, pick = 0.0, None
+        for t in sorted(q, key=lambda t: -q[t]):
+            acc += q[t] / tot
+            pick = t
+            if self._tail_u[1] < acc:
+                break
+        made = avail[pick] not in {s for _, s in out}
+        self.tail_log["付けた（つないだ）" if made else "付けた（本の表記）"] += 1
+        self._tail_note.append(f"{p}: 終助詞「{pick}」（割合 {r:.2f}、比 {q[pick] / tot:.2f}）「{s0}」→「{avail[pick]}」")
+        self.__dict__.setdefault("_tail_made", {})[avail[pick]] = self._tail_note[-1]
+        return [(out[0][0], avail[pick])] if made else [(v, s) for v, s in out if s == avail[pick]]
+
+    def _tail_end(self, out):
+        if self.tail is None:
+            return out
+        import i48p_tail_board as P48
+        made, self._tail_made = self.__dict__.get("_tail_made", {}), {}
+        if "行づくり" in out.get("why", ""):
+            end = out["line"].rstrip("。！？!?…」 　")              # 印は、言った行の終わりの表記に付けた物だけ（候補を作るたびの最後の物ではなく）
+            note = next((n for s, n in made.items() if end.endswith(s)), None)
+            if note:
+                out["why"] += "（終助詞 " + note + "）"
+            f = P48.final_pred(CB.to_toks(self.nlp(out["line"])))
+            if f is not None and f[3] in self.tail.cands:
+                self._tail_used[f[3]] += 1
         return out
 
     def extra_lines(self, toks):
@@ -1458,6 +1558,7 @@ def main():
     ap.add_argument("--particle", help="I48c: 助詞の波の板を作る会話の資料（解析済み JSON）。主語・目的語・補語の選び方に、助詞の明るさから読んだ役らしさを入れる")
     ap.add_argument("--uke", help="I48l: 保存した受けの板（i48l_uke_flow.py --board の名前）。相槌の受けと、行づくりの頭の受けを、相手の前の行から選ぶ")
     ap.add_argument("--slide", help="I48o: 保存した状況のスライドの板（i48o_slide_board.py --board の名前）。行づくりの返事の述語の語尾を、読んだ状況で選ぶ")
+    ap.add_argument("--tail", help="I48p: 保存した終助詞の板（i48p_tail_board.py --board の .json）。言い切りだけの行づくりの返事に、資料の割合で終助詞を付ける")
     ap.add_argument("--relation", help="I48f: 保存した関係の板（i48f_relation_board.py --out の名前）。--particle の代わりに、語板 v3 の L3 から役らしさと助詞を読む")
     ap.add_argument("--relation_device", default=None, help="I48f: 関係の板の置き場（cuda:1 など。無ければ PC のメモリ）")
     ap.add_argument("--particle_mode", default="light", choices=("light", "move"), help="I48c: light = 合わない役の点を下げる。move = 場の板の役の明るさを置き直し、助詞も波から選ぶ")
@@ -1499,6 +1600,9 @@ def main():
         bot._uke_rng = random.Random(f"uke:{getattr(a, 'seed', 0)}")
     if a.slide:
         bot.load_slide(a.slide, works)
+    if a.tail:
+        import random
+        bot.load_tail(a.tail, works, random.Random(f"tail:{getattr(a, 'seed', 0)}"))
     if a.relation:
         import i48f_relation_board as W48f
         import i27s_fused_generate as S27
