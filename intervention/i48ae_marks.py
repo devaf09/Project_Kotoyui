@@ -110,6 +110,8 @@ def main():
     ap.add_argument("--train", type=int, default=50000)
     ap.add_argument("--test", type=int, default=3000)
     ap.add_argument("--D", type=int, default=8192)
+    ap.add_argument("--units", nargs="*", default=["文", "節"])
+    ap.add_argument("--modes", nargs="*", default=list(MODES))
     a = ap.parse_args()
     sents = [s for s in G.read_conllu(a.conllu) if s["toks"]]
     te = [s for s in sents if zlib.crc32(s["id"].encode()) % 20 == 0][: a.test]
@@ -118,7 +120,7 @@ def main():
     func = G.Func(json.load(open(a.func, encoding="utf-8")))
     S = G.AttrSpace(cb, func, a.D, bands=("B", "C", "D", "E", "G"))
     res = dict(学びの文=len(tr), 試しの文=len(te), D=a.D, 手で置いた物=dict(印のシフトの歩幅={m: mark_step(S, m) for m in MARK_NAMES}, 時の語=TIME_WORDS), 構成={})
-    for unit in ("文", "節"):
+    for unit in a.units:
         TR = [x for s in tr for x in items(S, s, unit)]
         TE = [x for s in te for x in items(S, s, unit)]
         cnt = Counter(x["y"] for x in TR)
@@ -138,7 +140,7 @@ def main():
                         ch += c.most_common(1)[0][0] != c2.most_common(1)[0][0]
             hum[m] = [n, round(ch / max(1, n), 3)]
         res.setdefault("人の資料_印で途中の詰め物が変わる割合", {})[unit] = hum
-        for mode in MODES:
+        for mode in a.modes:
             t0 = time.time()
             pg = G.PairGrain(a.D).fit(((*feats(S, x, mode), x["y"]) for x in TR), cnt)
             c = Counter()
