@@ -78,6 +78,8 @@ def main():
     ap.add_argument("--D", type=int, default=2048)
     ap.add_argument("--tasks", nargs="*", default=["詰め物", "機能語", "品詞"])
     ap.add_argument("--n_cls", type=int, default=300)
+    ap.add_argument("--pairs", action="store_true", help="周りの語どうしの組（2 語の波の積）も持つグレイン（PairCenterGrain）")
+    ap.add_argument("--count", action="store_true", help="中心のグレインを、相対の位置の帯と組の帯の数え上げ（多項の足し込み）で持つ（center_features と PairGrain）")
     a = ap.parse_args()
     t0 = time.time()
     sents = [s for s in G.read_conllu(a.conllu) if s["toks"]]
@@ -109,12 +111,20 @@ def main():
                  隣の語の表=round(sum(nt.predict(x[2], x[3]) == x[1] for x in T_items) / max(1, len(T_items)), 3), 窓ごと={})
         for W in a.W:
             t1 = time.time()
-            cg = CG.CenterGrain(S, W, classes, C)
-            for s in tr:
-                for ctx, y, l, r, i, n in items(s):
-                    cg.add(y, ctx)
-            cg.build()
-            temp = cg.fit_temp(H_items)
+            if a.count:                                     # 数え上げの版: 学びは足すだけ、選ぶのは多項の対数の足し算
+                pg = G.PairGrain(S.D, n_cls=a.n_cls).fit(((*CG.center_features(S, ctx, W), y) for s in tr for ctx, y, l, r, i, n in items(s)), cnt)
+
+                class _CG:
+                    def predict(self, ctx, W=W, pg=pg):
+                        return pg.predict(*CG.center_features(S, ctx, W))[0]
+                cg, temp = _CG(), None
+            else:
+                cg = (CG.PairCenterGrain if a.pairs else CG.CenterGrain)(S, W, classes, C)
+                for s in tr:
+                    for ctx, y, l, r, i, n in items(s):
+                        cg.add(y, ctx)
+                cg.build()
+                temp = cg.fit_temp(H_items)
             hit = Counter()
             for ctx, y, l, r, i, n in T_items:
                 p = cg.predict(ctx)

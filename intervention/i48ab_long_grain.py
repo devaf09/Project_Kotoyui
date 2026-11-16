@@ -243,8 +243,8 @@ class PairGrain:
         self.logp[other] = -1e9                             # 「その他」は言わない
         return self
 
-    def predict(self, f, v, k=1):
-        s = self.prior + self.logp[:, f] @ v
+    def predict(self, f, v, k=1, prior_w=1.0):
+        s = prior_w * self.prior + self.logp[:, f] @ v
         o = np.argsort(-s)[:k]
         return [self.cls[i] for i in o]
 

@@ -138,3 +138,137 @@ class NeighborTable:
             if c:
                 return c.most_common(1)[0][0]
         return self.t0.most_common(1)[0][0]
+
+
+class PairCenterGrain(CenterGrain):
+    """周りの語どうしの組も持つ中心のグレイン。周りの波（語ごとの和）に加え、組 (o1, o2) ごとに 2 語の波の要素ごとの積
+    （拡散の符号どうしの積は、また別の乱数の符号になる = 2 語を結んだ印）を、組ごとの別のずれに置いて足す。足すだけ。
+    手で置く物: 組の並び PAIRS、組の重み BETA。"""
+
+    PAIRS = ((-1, 1), (-2, -1), (1, 2), (-1, 2), (-2, 1))
+    BETA = 1.0
+
+    def __init__(self, S, W, classes, C=None):
+        super().__init__(S, W, classes, C)
+        self.GW = np.zeros((len(self.cls), self.D), dtype=np.complex64)
+        self.pairs = [p for p in self.PAIRS if max(abs(p[0]), abs(p[1])) <= W]
+
+    def full_wave(self, ctx):
+        words = {}
+        X = np.zeros(self.D, dtype=np.complex64)
+        for o, (f, v) in ctx:
+            if 0 < abs(o) <= self.W:
+                y = v.astype(np.complex64) @ self.C[f]
+                words[o] = words.get(o, 0) + y
+                X += np.roll(y, o * self.S.shift)
+        for k, (o1, o2) in enumerate(self.pairs):
+            if o1 in words and o2 in words:
+                p = words[o1] * words[o2] * np.sqrt(self.D)
+                X += self.BETA * np.roll(p, (self.W + 1 + k) * self.S.shift)
+        return X
+
+    def add(self, cls, ctx):
+        i = self.ci.get(cls)
+        if i is None:
+            return
+        self.n[i] += 1
+        X = self.full_wave(ctx)
+        nx = float(np.linalg.norm(X))
+        if nx > 0:
+            self.GW[i] += X / nx
+
+    def build(self):
+        keep = self.n > 0
+        G = self.GW / np.maximum(1, self.n)[:, None]
+        mean = (G * self.n[:, None]).sum(0) / self.n.sum()
+        G = G - mean[None, :]
+        self.Gn = G / np.maximum(1e-9, np.linalg.norm(G, axis=1, keepdims=True))
+        self.prior = np.where(keep, np.log(np.maximum(self.n, 1) / self.n.sum()), -1e9)
+        self.temp = 10.0
+        return self
+
+    def scores(self, ctx):
+        X = self.full_wave(ctx)
+        return np.real(self.Gn @ np.conj(X)) / max(1e-9, float(np.linalg.norm(X)))
+
+
+TRIPLES = ((-1, 1, 2), (-1, 1, "印"))                     # 全体一致の帯: 左の語 × 右の語 × その次の語、左 × 右 × 意味の印（文末の印は +1 に置かれる）
+
+
+def center_features(S, ctx, W, pairs=PairCenterGrain.PAIRS, triples=()):
+    """中心のグレインを数え上げ（多項の足し込み、i48ab の PairGrain）で持つ時の特徴: 相対の位置 o の語の帯を o × SHIFT だけずらした物と、
+    組 (o1, o2) の 2 語の帯の和の周波数（I48ab の pair と同じ積の帯）を組ごとに別のずれに置いた物。"""
+    D, sh, mix = S.D, S.shift, S.mix
+    fs, vs, words = [], [], {}
+    for o, (f, v) in ctx:
+        if 0 < abs(o) <= W:
+            words[o] = (f, v)
+            fs.append((f + (o + W) * sh) % D)
+            vs.append(v)
+    for k, (o1, o2) in enumerate(p for p in pairs if max(abs(p[0]), abs(p[1])) <= W):
+        if o1 in words and o2 in words:
+            (fa, va), (fb, vb) = words[o1], words[o2]
+            fs.append(((fa[:, None] + fb[None, :] * mix + (2 * W + 2 + k) * sh) % D).ravel())
+            vs.append((va[:, None] * vb[None, :]).ravel())
+    nk = len(pairs)
+    for k, tr in enumerate(triples):                       # 3 語が同時に合った時だけ立つ帯（3 つの帯の和の周波数）
+        if all(o in words for o in tr if o != "印"):
+            ws = [words[o] for o in tr if o != "印"]
+            if "印" in tr:
+                ws.append(words.get("印", (np.array([S.f_of("印:なし")]), np.array([1.0], dtype=np.float32))))
+            (fa, va), (fb, vb), (fc, vc) = ws
+            f3 = (fa[:, None, None] + fb[None, :, None] * mix + fc[None, None, :] * (mix * mix % D) + (2 * W + 3 + nk + k) * sh) % D
+            fs.append(f3.ravel())
+            vs.append((va[:, None, None] * vb[None, :, None] * vc[None, None, :]).ravel())
+    if not fs:
+        return np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.float32)
+    return np.concatenate(fs), np.concatenate(vs).astype(np.float32)
+
+
+def spec_features(S, ctx, spec):
+    """組み立てを選べる中心のグレインの特徴（数え上げの版）。ctx の位置は数（相対の位置）か "述"（文末の述語）・"印"（意味の印）。
+    spec: dict(W=窓, lin=線形に入れる位置の札の並び（"述"・"印" を含めてよい）, pairs=[(a, b)], triples=[(a, b, c)])。
+    返り値: {組の名前: (周波数, 重み)}（帯の種類ごとに分けて返す。点の内訳を出すため）。"""
+    D, sh, mix = S.D, S.shift, S.mix
+    W = spec["W"]
+    words = {}
+    for o, fv in ctx:
+        if isinstance(o, str) or 0 < abs(o) <= W:
+            words[o] = fv
+    slot = {}
+
+    def sl(name):
+        if name not in slot:
+            slot[name] = len(slot) + 1
+        return slot[name] * sh
+
+    out = {}
+    lin_f, lin_v = [], []
+    for o, (f, v) in words.items():
+        if isinstance(o, str) and o not in spec.get("lin", ()):
+            continue
+        if not isinstance(o, str) and abs(o) > spec.get("lin_W", W):
+            continue
+        lin_f.append((f + sl(("線", o))) % D)
+        lin_v.append(v)
+    if lin_f:
+        out["線形"] = (np.concatenate(lin_f), np.concatenate(lin_v))
+    for a, b in spec.get("pairs", ()):
+        if a in words and b in words:
+            (fa, va), (fb, vb) = words[a], words[b]
+            out[f"積{a}×{b}"] = (((fa[:, None] + fb[None, :] * mix + sl(("積", a, b))) % D).ravel(), (va[:, None] * vb[None, :]).ravel())
+    for a, b, c in spec.get("triples", ()):
+        if a in words and b in words and c in words:
+            (fa, va), (fb, vb), (fc, vc) = words[a], words[b], words[c]
+            f3 = (fa[:, None, None] + fb[None, :, None] * mix + fc[None, None, :] * (mix * mix % D) + sl(("三", a, b, c))) % D
+            out[f"三{a}×{b}×{c}"] = (f3.ravel(), (va[:, None, None] * vb[None, :, None] * vc[None, None, :]).ravel())
+    return out
+
+
+def join(groups, norm=False):
+    """norm: 帯の種類ごとに重みの和を 1 にそろえる（帯の数が多い組が、数え上げの対数の足し算で何度も数えられないように）。"""
+    if norm:
+        groups = {k: (f, v / max(1e-9, float(v.sum()))) for k, (f, v) in groups.items()}
+    if not groups:
+        return np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.float32)
+    return np.concatenate([g[0] for g in groups.values()]), np.concatenate([g[1] for g in groups.values()]).astype(np.float32)
