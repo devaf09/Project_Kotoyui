@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")   # 呼び出し側が GPU を指定した時（波の板）は上書きしない
 
 PARTNER = (
     "あなたは日本語で気軽に雑談する相手です。相手（ボット）は日本語を学んでいる途中で、ときどき変な文を言います。\n"
@@ -74,8 +74,14 @@ PERSONA = (                                                  # I40c: --persona�
 UP = {1: 3, 2: 5}                                            # 続けて褒められた回数で段を上げる（持ち主の案）
 
 
-def teacher_eval(host, model, history, reply, stage):
+def teacher_eval(host, model, history, reply, stage, prompt="old"):
+    """prompt = old（今の型）か、I48u の促しの型（i48u_teacher.PROMPTS の p2a・p2b・p2c）。"""
     hist = "\n".join(history[-6:])
+    if prompt != "old":
+        import i48u_teacher as U48
+        msgs = [dict(role="system", content=U48.PROMPTS[prompt] + STAGES[stage]),
+                dict(role="user", content=f"会話の流れ:\n{hist}\n\nボットの返事:\n{reply}")]
+        return U48.parse(ollama_chat(host, model, msgs, temperature=0.2, first_line=False, num_predict=2048, fmt="json"), reply)
     msgs = [dict(role="system", content=TEACHER + STAGES[stage]),
             dict(role="user", content=f"会話の流れ:\n{hist}\n\nボットの返事:\n{reply}")]
     text = ollama_chat(host, model, msgs, temperature=0.2, first_line=False, num_predict=2048, fmt="json")
@@ -189,11 +195,37 @@ def main():
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
+    ap.add_argument("--keep_repair", action="store_true", help="I48z（A-1）: 聞き返しへの言い直しを、後の段（点の比べ・繰り返しの替え・暗い行の作り直し）で替えない（--restate が要る）")
+    ap.add_argument("--pair_set", help="I48z: 対の比べ。同じ設定の bot をもう 1 つ作り、この属性だけ替える（例 keep_repair=1,use_good=0）。"
+                    "往復ごとに両方に返事を作らせ、話し相手には乱数で片方だけを見せる。見せた行を両方の会話の行にし、経験も両方に同じに入れる")
+    ap.add_argument("--pair_out", help="I48z: 対の比べの記録（JSONL、非公開）。往復ごとに相手の行・両方の返事と why・見せた方・相手の次の行")
+    ap.add_argument("--skip_script", action="store_true", help="I48z: 台本の行を、前の返事への相手の反応（指摘・受け・褒めの段・経験）として数えない（既定は数える）")
     ap.add_argument("--script", help="I45a: 話し相手の行を、決まった会話・往復で差し替える台本（JSON {\"会話:往復\": \"行\"}、または default）")
     ap.add_argument("--rehearse", action="store_true", help="I44a: 思い出しで読み出した項目・記憶板で引っかかった鍵を再記憶する（残りやすくする）")
     ap.add_argument("--learn_w", action="store_true", help="I43a: 自分の板の掛け目（軽い語 0.3・項目 0.8・時 0.5）と近さの下限（0.15・6 割）を手で置かず、言って指摘された数から")
     ap.add_argument("--learn_marks", action="store_true", help="I41k: 大事な板の目印を見込みの記号にし、種類ごとに後で聞かれた割合で入れるか決める")
     ap.add_argument("--imp_p", type=float, default=0.9, help="I41e: 目印なしの行を、学んだ見込みで大事な板に入れる P の下限。負なら I41i: 経験から（目印のある行と同じくらい後で聞かれる帯だけ）")
+    ap.add_argument("--wave", help="I48: 意味の波の板を作る会話の資料（解析済み JSON）。行づくりの場の板に、波ですくった行を入れる")
+    ap.add_argument("--wave_D", type=int, default=2048, help="I48: 波の長さ")
+    ap.add_argument("--wave_store", default="c64", choices=("c128", "c64", "p8"), help="I48: 数の持ち方")
+    ap.add_argument("--wave_board", help="I48: 作った板の保存先（拡張子なし）。あれば読み込み、無ければ作って保存する。昼の足しを使う時は --wave_day を付けて作った板を使う")
+    ap.add_argument("--wave_day", help="I48: 昼の足し。会話の行を今の語の波のまま板に足し、この JSONL に書く")
+    ap.add_argument("--particle", help="I48c: 助詞の波の板を作る会話の資料（解析済み JSON）。主語・目的語・補語の選び方に、助詞の明るさから読んだ役らしさを入れる")
+    ap.add_argument("--uke", help="I48l: 保存した受けの板（i48l_uke_flow.py --board の名前）。相槌の受けと、行づくりの頭の受けを、相手の前の行から選ぶ")
+    ap.add_argument("--slide", help="I48o: 保存した状況のスライドの板（i48o_slide_board.py --board の名前）。行づくりの返事の述語の語尾を、相手の今の行と自分の前の行から読んだ状況で選ぶ")
+    ap.add_argument("--tail", help="I48p: 保存した終助詞の板（i48p_tail_board.py --board の .json）。言い切りだけの行づくりの返事に、資料の割合で終助詞を付ける")
+    ap.add_argument("--explore", action="store_true", help="I35t（I48q で chat_partner にも）: 作り直しが直らない時、相槌で黙らず、いちばん指摘の見込みの小さい行を言ってみる")
+    ap.add_argument("--dark_base", action="store_true", help="I48r: 行のまるごとの暗さの線を 0.5 でなく全体の指摘の割合にし、会話の中で暗くするのは相手の指摘・聞き返しの行だけにする")
+    ap.add_argument("--bind", action="store_true", help="I48t: 返事の点に P(結び→受けた)（別々の行の語を結んだ返事を、相手が受けて続けた経験の割合）を足す")
+    ap.add_argument("--gate", action="store_true", help="I48x: 深刻な相談の門（目印の行には固定の返事。学びに入れない）")
+    ap.add_argument("--silver", action="store_true", help="I48x: 白銀律の門（相手に指摘・拒まれた時の相手の行の所を、自分が言う前に暗くする）")
+    ap.add_argument("--partner_mood", action="store_true", help="I48v: 話し相手に会話の初めの気分の設定を足し、往復ごとに自分の気分（4 つの対の両側の強さ 8 つ）をログと stats に書かせる（bot には渡さない）")
+    ap.add_argument("--teacher_prompt", default="old", choices=("old", "p2a", "p2b", "p2c"), help="I48u: 先生の型。old = 今の型、p2a・p2b・p2c = 促しの型（i48u_teacher.py）")
+    ap.add_argument("--relation", help="I48f: 保存した関係の板（i48f_relation_board.py --out の名前）。--particle の代わりに、語板 v3 の L3 から役らしさと助詞を読む")
+    ap.add_argument("--relation_device", default=None, help="I48f: 関係の板の置き場（cuda:1 など。無ければ PC のメモリ）")
+    ap.add_argument("--particle_mode", default="light", choices=("light", "move"), help="I48c: light = 合わない役の点を下げる。move = 場の板の役の明るさを置き直し、助詞も波から選ぶ")
+    ap.add_argument("--wave_devices", default="auto", help="I48: 置き場（auto / numpy / cuda:0,cuda:1）")
+    ap.add_argument("--wave_only", action="store_true", help="I48c: 行づくりの場の板に、語板の属性の行（本の似た行の代わり）を入れず、波ですくった行だけにする（人の行は残る）")
     ap.add_argument("--rev", action="store_true", help="I42e: 述語の形を、本で見ていない印の組は逆引き（意味の組 → 繋ぎの語と並び、i42_fused_flow）で作る")
     ap.add_argument("--learn_imp", action="store_true", help="I41a: 大事かどうかを、後で「覚えてる？」と聞かれたかから学び、目印に当たらない行も P(大事) が高ければ大事な板に入れる")
     ap.add_argument("--recall", action="store_true", help="I40d: 「覚えてる？」に大事な板・記憶板で答える（--important が要る）")
@@ -212,7 +244,8 @@ def main():
     import chat_bot3 as B3
 
     def praise(ev, stage, streak):
-        bot.taught(False, "", "" if a.no_model_reply else ev.get("suggested_reply", ""))
+        for b_ in [bot] + ([bot2] if bot2 is not None else []):
+            b_.taught(False, "", "" if a.no_model_reply else ev.get("suggested_reply", ""))
         streak += 1
         if stage in UP and streak >= UP[stage]:
             stage, streak = stage + 1, 0
@@ -232,6 +265,7 @@ def main():
         bot.enable_rev(works)
     bot.use_good = a.good
     bot.use_restate = a.restate
+    bot.keep_repair = a.keep_repair
     bot.use_flow = a.flow
     bot.use_base = a.base
     if a.novelty:
@@ -249,6 +283,51 @@ def main():
         bot.sb.learn_w = a.learn_w
     if a.attrs:
         bot.attr_field, bot.use_book, bot.conv_share = True, False, 0.2
+    if a.uke:
+        import i48l_uke_flow as U48l
+        bot.uke = U48l.UkeBoard.load(a.uke)
+        bot._uke_rng = random.Random(f"uke:{a.seed}")
+    if a.slide:
+        bot.load_slide(a.slide, works)
+    if a.tail:
+        bot.load_tail(a.tail, works, random.Random(f"tail:{a.seed}"))
+    bot.explore = a.explore
+    bot.dark_base = a.dark_base
+    bot.bind = a.bind
+    bot.gate, bot.silver = a.gate, a.silver
+    if a.relation:
+        import i48f_relation_board as W48f
+        import i27s_fused_generate as S27
+        bot.particle = W48f.RelationLight(W48f.RelationBoard.load(a.relation, a.relation_device))
+        if a.particle_mode == "move":
+            S27.role_move, S27.role_particle = bot.particle.lifts, bot.particle.particle
+        else:
+            S27.role_light = bot.particle
+    if a.particle:
+        import i48c_particle_wave as W48c
+        import i27s_fused_generate as S27
+        pw = json.load(open(a.particle, encoding="utf-8"))
+        bot.particle = W48c.ParticleLight(pw["works"] if isinstance(pw, dict) else pw)
+        if a.particle_mode == "move":
+            S27.role_move, S27.role_particle = bot.particle.lifts, bot.particle.particle
+        else:
+            S27.role_light = bot.particle
+    if a.wave:
+        import i48_wave_board as W48
+        ww = json.load(open(a.wave, encoding="utf-8"))
+        wb = W48.WaveBoard(D=a.wave_D, store=a.wave_store, devices=W48.parse_devices(a.wave_devices), keep_dir=False,
+                           spare=4096 if a.wave_day else 0)
+        ww = ww["works"] if isinstance(ww, dict) else ww
+        if a.wave_board and os.path.exists(a.wave_board + ".npz"):   # 保存した板があれば読み込む（学びと層づくりをしない）
+            wb = W48.WaveBoard.load(a.wave_board, ww, devices=W48.parse_devices(a.wave_devices))
+        else:
+            wb.fit(ww)
+            if a.wave_board:
+                wb.save(a.wave_board)
+        bot.wave = W48.WaveSource(wb)
+        bot.wave_day = a.wave_day
+        if a.wave_only:                                     # I48c: 場の板は波の行と人の行だけ（--attrs の属性の行も、本の似た行も入れない）
+            bot.attr_field, bot.use_book = False, False
     bot.use_chain = a.no_one_clause
     mem = None
     if a.memory:
@@ -275,14 +354,40 @@ def main():
     if a.script:                                            # I45a: {"会話:往復": "行"}（往復は 1 から。1 は始めの行なので 2 から使う）
         src = SCRIPT if a.script == "default" else json.load(open(a.script, encoding="utf-8"))
         script = {tuple(int(x) for x in k.split(":")): v for k, v in src.items()}
+        if a.skip_script:                                   # I48z
+            bot.skip_lines = frozenset(v.strip().strip("「」") for v in script.values())
+    bot2, pair_rng, pair_recs = None, random.Random(f"pair:{a.seed}"), []
+    if a.pair_set:                                          # I48z: 対の比べ。重い読むだけの物（読み手・本・波・大事な板・記憶板）は分け合い、学ぶ物は写す
+        import copy
+        import types
+        copy._deepcopy_dispatch.setdefault(types.ModuleType, lambda x, memo: x)   # 持っているモジュールは写さない
+        share =[nlp, works, getattr(bot, "wave", None), imp, mem, getattr(bot, "uptake", None), getattr(bot, "attrs", None),
+                 getattr(bot, "particle", None), getattr(bot, "uke", None), getattr(bot, "slide", None), getattr(bot, "tail", None)]
+        bot2 = copy.deepcopy(bot, {id(x): x for x in share if x is not None})
+        for kv in a.pair_set.split(","):
+            k_, v_ = kv.split("=", 1)
+            try:
+                v_ = json.loads(v_)
+            except ValueError:
+                pass
+            if not hasattr(bot2, k_.strip()):
+                raise SystemExit(f"--pair_set: bot に {k_} が無い")
+            setattr(bot2, k_.strip(), v_)
     openers = [x.strip() for x in open(a.openers, encoding="utf-8") if x.strip()]
     rng = random.Random(a.seed)
     log = [f"# 話し相手との会話（非公開）", "", f"- 話し相手: {a.model}、先生: {a.teacher or 'なし'}、会話 {a.convs} × {a.turns} 往復", ""]
     stage, streak = 1, 0
+    moods = None
+    if a.partner_mood:                                      # I48v
+        import i48v_mood as V48
+        moods = V48.order(a.convs, a.seed)
     for ci in range(a.convs):
         bot.conv_no = ci + 1
         bot.conv["lines"] = []                              # 会話の行は会話ごとに空にする（経験・自覚・自分の板は持ち越す）
         bot.asked, bot.trial, bot._asked_attr = None, [], None
+        if bot2 is not None:
+            bot2.conv_no, bot2.conv["lines"] = ci + 1, []
+            bot2.asked, bot2.trial, bot2._asked_attr = None, [], None
         human = rng.choice(openers)
         sys_c = system
         if a.persona and not script and ci % 5 == 2:                       # I41b: 誕生日を 3 回続けて言わなかったので、5 会話に 1 回は必ず言わせる
@@ -290,17 +395,28 @@ def main():
         if a.persona and not script and ci % 5 == 4:                       # I41c: 誕生日・猫の名前を一度も聞かなかったので、5 会話に 1 回は聞かせる
             ask = {4: "私の誕生日、知ってる？", 9: "うちの猫の名前、覚えてる？", 14: "私の名前、みさきって覚えてる？"}.get(ci, "私の誕生日、覚えてる？")   # I44e
             sys_c += "\n今回の会話のどこかで、必ず「" + ask + "」と聞く。"
+        if moods:                                           # I48v: 会話の初めの気分の設定（bot には渡さない）
+            sys_c += "\n" + V48.MOODS[moods[ci]]
         msgs = [dict(role="system", content=sys_c), dict(role="assistant", content=human)]
         c = dict(会話=ci + 1, 往復=0, 指摘=0, 受け=0, 中身なし=0, 先生の指摘=0, 先生の段=stage, 先生の見立てを捨てた=0, 相手の空=0,
                  繰り返し=0, 語の繰り返し=0, 新規性=0.0, 自分の板=0)
+        mood_log = None
+        if moods:
+            c["気分の設定"], c["気分"] = moods[ci], []
+            mood_log = lambda: (c["気分"].append(V48.rate(ollama_chat, a.host, a.model, msgs)), log.append(f"  - 相手の気分: {json.dumps(c['気分'][-1], ensure_ascii=False)}"))
         said = []                                           # I38a: この会話の自分の行（繰り返しを数える）
         hist = [f"相手: {human}"]
         log += [f"## 会話 {ci + 1}", ""]
+        if mood_log is not None:                            # I48v: 気分の設定と、始めの行の後の気分
+            log.append(f"  - 相手の気分の設定: {moods[ci]}")
+            mood_log()
         prev_bot = None
         prev_recall = False                                 # I46b: 前のボットの返事が思い出しの答えだったか
         pending = None
         for ti in range(a.turns):
-            if prev_bot is not None:                        # 話し相手の行が、前の返事への指摘か・受けか（ボットの見分けと同じ物差し）
+            if prev_bot is not None and a.skip_script and human.strip().strip("「」") in bot.skip_lines:   # I48z: 台本の行は相手の反応として数えない
+                pending = None
+            elif prev_bot is not None:                      # 話し相手の行が、前の返事への指摘か・受けか（ボットの見分けと同じ物差し）
                 ta = bot.conv["lines"][-1]["toks"]
                 A_ = dict(text="「" + prev_bot + "」", toks=ta)
                 B_ = dict(text="「" + human + "」", toks=B3.CB.to_toks(nlp(human)))
@@ -323,6 +439,20 @@ def main():
                     mem.result("指摘" if pointed else ("良" if bot.uptake is not None and R.uptake_score(bot.uptake, A_, B_) > 0 else None))
             t0 = time.time()
             r = bot.reply(human)
+            if bot2 is not None:                            # I48z: 対の比べ。もう一方にも返事を作らせ、乱数で片方を見せる
+                r2 = bot2.reply(human)
+                show2 = pair_rng.random() < 0.5
+                pair_recs.append(dict(会話=ci + 1, 往復=ti + 1, 相手=human, A=dict(line=r["line"], why=r["why"]),
+                                      B=dict(line=r2["line"], why=r2["why"]), 見せた="B" if show2 else "A"))
+                src_, dst_ = (bot2, bot) if show2 else (bot, bot2)
+                dst_.conv["lines"] = [dict(x) for x in src_.conv["lines"]]   # 見せた行を両方の会話の行に（次の相手の行の経験は、見せた行に入る）
+                dst_.trial, dst_.asked = [], None           # 見せなかった行の言ってみた所・問いは、確かめない
+                for k_ in ("_last_form", "_last_bind", "_last_pair", "_last_src"):
+                    if k_ in dst_.__dict__:
+                        dst_.__dict__[k_] = None
+                if show2:
+                    r = r2
+                log.append(f"  - 対の比べ: 見せた {'B' if show2 else 'A'}。A「{pair_recs[-1]['A']['line']}」／B「{pair_recs[-1]['B']['line']}」")
             line = r["line"]
             c["往復"] += 1
             if imp is not None:                             # I40c: 人の行の大事なこと／覚えているかの問いに、大事な板で答えられたか
@@ -399,7 +529,7 @@ def main():
             said.append((line, lt))
             log += [f"- 相手: {human}", f"- ボット: **{line}** （{r['why']}、{time.time() - t0:.1f} 秒）"]
             if a.teacher:                                   # 先生の見立て（話し相手とは別）
-                ev, bad = teacher_eval(a.host, a.teacher, hist, line, stage)
+                ev, bad = teacher_eval(a.host, a.teacher, hist, line, stage, a.teacher_prompt)
                 if ev is not None and ev["has_error"] and ev["suggested_reply"]:   # 変と言った所を、お手本でも言っている（同じ所に両方の経験が入る）
                     key = lambda t: {(p["ns"], p["c"], p["ps"]) for p in bot.pb.pieces(B3.CB.to_toks(nlp(t)))}
                     if key(ev["odd_part"]) & key(ev["suggested_reply"]):
@@ -407,6 +537,10 @@ def main():
                 if bad:
                     c["先生の見立てを捨てた"] += 1
                     log.append(f"  - 先生（段 {stage}）: 見立てを捨てた（{bad}）")
+                if ev is not None and ev.get("verdict") == "そのまま":   # I48u: 促しの型の「そのまま」は、何も言わない（経験に入れない）
+                    c["先生のそのまま"] = c.get("先生のそのまま", 0) + 1
+                    log.append(f"  - 先生（段 {stage}）［そのまま］")
+                    ev = None
                 if ev is not None and ev["has_error"]:
                     kind = str(ev.get("kind") or "").strip()
                     c.setdefault("先生の種類", {})
@@ -414,12 +548,14 @@ def main():
                     # I37e: 所（名詞+助詞+述語）のせいにするのは、文法・言い方の指摘だけ。つながり・足りないは行のまるごとの経験にだけ入れる
                     odd = ev.get("odd_part", "") if kind in ("文法", "言い方") else ""
                     got = bot.taught(True, odd, "" if a.no_model_reply else ev.get("suggested_reply", ""))
+                    if bot2 is not None:                    # I48z: 対の比べ。先生の見立ても両方に同じに入れる
+                        bot2.taught(True, odd, "" if a.no_model_reply else ev.get("suggested_reply", ""))
                     c["先生の指摘"] += 1
                     streak = 0
-                    log.append(f"  - 先生（段 {stage}）: {ev.get('intervention_message', '')} ／ 経験: {'・'.join(k + ':' + w for k, w in got) or 'なし'}")
+                    log.append(f"  - 先生（段 {stage}）［{kind or 'なし'}］: {ev.get('intervention_message', '')} ／ 経験: {'・'.join(k + ':' + w for k, w in got) or 'なし'}")
                 elif ev is not None:                        # 褒めは、話し相手の次の行を見てから経験に入れる
                     pending = ev
-                    log.append(f"  - 先生（段 {stage}）: {ev.get('intervention_message', '')} ／ 経験: 相手の次の行を見てから")
+                    log.append(f"  - 先生（段 {stage}）［{kind or 'なし'}］: {ev.get('intervention_message', '')} ／ 経験: 相手の次の行を見てから")
             hist.append(f"ボット: {line}")
             msgs.append(dict(role="user", content=line))
             human = ollama_chat(a.host, a.model, msgs) if a.model != "echo" else "うん、そうなんだ。"   # echo: 試し用
@@ -431,7 +567,11 @@ def main():
                 break
             msgs.append(dict(role="assistant", content=human))
             hist.append(f"相手: {human}")
+            if bot2 is not None and pair_recs:
+                pair_recs[-1]["相手の次の行"] = human
             prev_bot = line
+            if mood_log is not None:
+                mood_log()
         if pending is not None:                             # 会話の終わり: 相手の指摘が無かったので褒めを入れる
             stage, streak = praise(pending, stage, streak)
         c["新規性"] = round(c["新規性"] / max(1, c["往復"]), 3)
@@ -444,12 +584,25 @@ def main():
         if getattr(bot, "rev_log", None) is not None:
             c["逆引き"] = {k: v for k, v in bot.rev_log.items() if not k.startswith("作った:")}
             c["逆引きの形"] = sorted((k[4:] for k in bot.rev_log if k.startswith("作った:")))[:30]
+        if getattr(bot, "slide", None) is not None:
+            c["スライド"] = dict(bot.slide_log)                 # I48o: 会話をまたいだ累計（同じ・替えた・出ない・出どころ）
+        if getattr(bot, "tail", None) is not None:
+            c["終助詞"] = dict(bot.tail_log)                    # I48p: 会話をまたいだ累計（付けた・付けない・付く表記が無い …）
+        if getattr(bot, "gate", False) or getattr(bot, "silver", False):
+            c["門"] = dict(bot.__dict__.get("gate_log", {}))     # I48x: 会話をまたいだ累計（深刻な相談・白銀律で暗くした）
+        if getattr(bot, "bind", False):
+            c["結び"] = dict(bot.__dict__.get("bind_log", {}))   # I48t: 会話をまたいだ累計（言った・結び・結び→受けた）
         if imp is not None:
             imp.save()
         if mem is not None:
             mem.end_conv()
             c["記憶板"] = mem.summary()    # 返事 1 つあたりの新規性の点の平均
         log += ["", f"- 数: {json.dumps(c, ensure_ascii=False)}", ""]
+        if bot2 is not None and a.pair_out:                 # I48z: 対の比べの記録（会話ごとに書き足す）
+            with open(a.pair_out, "a", encoding="utf-8") as f:
+                for x in pair_recs:
+                    f.write(json.dumps(x, ensure_ascii=False) + "\n")
+            pair_recs = []
         print(c, flush=True)
         if a.stats:
             with open(a.stats, "a", encoding="utf-8") as f:
