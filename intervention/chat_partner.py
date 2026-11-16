@@ -196,6 +196,9 @@ def main():
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
     ap.add_argument("--keep_repair", action="store_true", help="I48z（A-1）: 聞き返しへの言い直しを、後の段（点の比べ・繰り返しの替え・暗い行の作り直し）で替えない（--restate が要る）")
+    ap.add_argument("--pair_set", help="I48z: 対の比べ。同じ設定の bot をもう 1 つ作り、この属性だけ替える（例 keep_repair=1,use_good=0）。"
+                    "往復ごとに両方に返事を作らせ、話し相手には乱数で片方だけを見せる。見せた行を両方の会話の行にし、経験も両方に同じに入れる")
+    ap.add_argument("--pair_out", help="I48z: 対の比べの記録（JSONL、非公開）。往復ごとに相手の行・両方の返事と why・見せた方・相手の次の行")
     ap.add_argument("--skip_script", action="store_true", help="I48z: 台本の行を、前の返事への相手の反応（指摘・受け・褒めの段・経験）として数えない（既定は数える）")
     ap.add_argument("--script", help="I45a: 話し相手の行を、決まった会話・往復で差し替える台本（JSON {\"会話:往復\": \"行\"}、または default）")
     ap.add_argument("--rehearse", action="store_true", help="I44a: 思い出しで読み出した項目・記憶板で引っかかった鍵を再記憶する（残りやすくする）")
@@ -241,7 +244,8 @@ def main():
     import chat_bot3 as B3
 
     def praise(ev, stage, streak):
-        bot.taught(False, "", "" if a.no_model_reply else ev.get("suggested_reply", ""))
+        for b_ in [bot] + ([bot2] if bot2 is not None else []):
+            b_.taught(False, "", "" if a.no_model_reply else ev.get("suggested_reply", ""))
         streak += 1
         if stage in UP and streak >= UP[stage]:
             stage, streak = stage + 1, 0
@@ -352,6 +356,23 @@ def main():
         script = {tuple(int(x) for x in k.split(":")): v for k, v in src.items()}
         if a.skip_script:                                   # I48z
             bot.skip_lines = frozenset(v.strip().strip("「」") for v in script.values())
+    bot2, pair_rng, pair_recs = None, random.Random(f"pair:{a.seed}"), []
+    if a.pair_set:                                          # I48z: 対の比べ。重い読むだけの物（読み手・本・波・大事な板・記憶板）は分け合い、学ぶ物は写す
+        import copy
+        import types
+        copy._deepcopy_dispatch.setdefault(types.ModuleType, lambda x, memo: x)   # 持っているモジュールは写さない
+        share =[nlp, works, getattr(bot, "wave", None), imp, mem, getattr(bot, "uptake", None), getattr(bot, "attrs", None),
+                 getattr(bot, "particle", None), getattr(bot, "uke", None), getattr(bot, "slide", None), getattr(bot, "tail", None)]
+        bot2 = copy.deepcopy(bot, {id(x): x for x in share if x is not None})
+        for kv in a.pair_set.split(","):
+            k_, v_ = kv.split("=", 1)
+            try:
+                v_ = json.loads(v_)
+            except ValueError:
+                pass
+            if not hasattr(bot2, k_.strip()):
+                raise SystemExit(f"--pair_set: bot に {k_} が無い")
+            setattr(bot2, k_.strip(), v_)
     openers = [x.strip() for x in open(a.openers, encoding="utf-8") if x.strip()]
     rng = random.Random(a.seed)
     log = [f"# 話し相手との会話（非公開）", "", f"- 話し相手: {a.model}、先生: {a.teacher or 'なし'}、会話 {a.convs} × {a.turns} 往復", ""]
@@ -364,6 +385,9 @@ def main():
         bot.conv_no = ci + 1
         bot.conv["lines"] = []                              # 会話の行は会話ごとに空にする（経験・自覚・自分の板は持ち越す）
         bot.asked, bot.trial, bot._asked_attr = None, [], None
+        if bot2 is not None:
+            bot2.conv_no, bot2.conv["lines"] = ci + 1, []
+            bot2.asked, bot2.trial, bot2._asked_attr = None, [], None
         human = rng.choice(openers)
         sys_c = system
         if a.persona and not script and ci % 5 == 2:                       # I41b: 誕生日を 3 回続けて言わなかったので、5 会話に 1 回は必ず言わせる
@@ -415,6 +439,20 @@ def main():
                     mem.result("指摘" if pointed else ("良" if bot.uptake is not None and R.uptake_score(bot.uptake, A_, B_) > 0 else None))
             t0 = time.time()
             r = bot.reply(human)
+            if bot2 is not None:                            # I48z: 対の比べ。もう一方にも返事を作らせ、乱数で片方を見せる
+                r2 = bot2.reply(human)
+                show2 = pair_rng.random() < 0.5
+                pair_recs.append(dict(会話=ci + 1, 往復=ti + 1, 相手=human, A=dict(line=r["line"], why=r["why"]),
+                                      B=dict(line=r2["line"], why=r2["why"]), 見せた="B" if show2 else "A"))
+                src_, dst_ = (bot2, bot) if show2 else (bot, bot2)
+                dst_.conv["lines"] = [dict(x) for x in src_.conv["lines"]]   # 見せた行を両方の会話の行に（次の相手の行の経験は、見せた行に入る）
+                dst_.trial, dst_.asked = [], None           # 見せなかった行の言ってみた所・問いは、確かめない
+                for k_ in ("_last_form", "_last_bind", "_last_pair", "_last_src"):
+                    if k_ in dst_.__dict__:
+                        dst_.__dict__[k_] = None
+                if show2:
+                    r = r2
+                log.append(f"  - 対の比べ: 見せた {'B' if show2 else 'A'}。A「{pair_recs[-1]['A']['line']}」／B「{pair_recs[-1]['B']['line']}」")
             line = r["line"]
             c["往復"] += 1
             if imp is not None:                             # I40c: 人の行の大事なこと／覚えているかの問いに、大事な板で答えられたか
@@ -510,6 +548,8 @@ def main():
                     # I37e: 所（名詞+助詞+述語）のせいにするのは、文法・言い方の指摘だけ。つながり・足りないは行のまるごとの経験にだけ入れる
                     odd = ev.get("odd_part", "") if kind in ("文法", "言い方") else ""
                     got = bot.taught(True, odd, "" if a.no_model_reply else ev.get("suggested_reply", ""))
+                    if bot2 is not None:                    # I48z: 対の比べ。先生の見立ても両方に同じに入れる
+                        bot2.taught(True, odd, "" if a.no_model_reply else ev.get("suggested_reply", ""))
                     c["先生の指摘"] += 1
                     streak = 0
                     log.append(f"  - 先生（段 {stage}）［{kind or 'なし'}］: {ev.get('intervention_message', '')} ／ 経験: {'・'.join(k + ':' + w for k, w in got) or 'なし'}")
@@ -527,6 +567,8 @@ def main():
                 break
             msgs.append(dict(role="assistant", content=human))
             hist.append(f"相手: {human}")
+            if bot2 is not None and pair_recs:
+                pair_recs[-1]["相手の次の行"] = human
             prev_bot = line
             if mood_log is not None:
                 mood_log()
@@ -556,6 +598,11 @@ def main():
             mem.end_conv()
             c["記憶板"] = mem.summary()    # 返事 1 つあたりの新規性の点の平均
         log += ["", f"- 数: {json.dumps(c, ensure_ascii=False)}", ""]
+        if bot2 is not None and a.pair_out:                 # I48z: 対の比べの記録（会話ごとに書き足す）
+            with open(a.pair_out, "a", encoding="utf-8") as f:
+                for x in pair_recs:
+                    f.write(json.dumps(x, ensure_ascii=False) + "\n")
+            pair_recs = []
         print(c, flush=True)
         if a.stats:
             with open(a.stats, "a", encoding="utf-8") as f:
