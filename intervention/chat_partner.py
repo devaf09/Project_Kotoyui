@@ -195,7 +195,10 @@ def main():
     ap.add_argument("--good", action="store_true", help="I37b: 褒めの板と好奇心の点で返事を選ぶ")
     ap.add_argument("--profile", help="I39a: プロフィールの「自分のこと」から自分の板を始め、自分への問いに答える")
     ap.add_argument("--memory", help="I40a: 記憶板の置き場（JSON、非公開）。行の板と 話題・会話・日・週 の段を書く（あれば続きから）")
-    ap.add_argument("--keep_repair", action="store_true", help="I48z（A-1）: 聞き返しへの言い直しを、後の段（点の比べ・繰り返しの替え・暗い行の作り直し）で替えない（--restate が要る）")
+    ap.add_argument("--keep_repair", action="store_true", default=True,
+                    help="I48z（A-1）: 聞き返しへの言い直しを、後の段（点の比べ・繰り返しの替え・暗い行の作り直し）で替えない（--restate が要る）。"
+                         "PAIR s0〜s2 の結果から既定で有効（docs/i48_wave_board.md 4.39）")
+    ap.add_argument("--no_keep_repair", dest="keep_repair", action="store_false", help="I48z: 言い直しを後の段で替えてよい（keep_repair を切る。前の既定）")
     ap.add_argument("--pair_set", help="I48z: 対の比べ。同じ設定の bot をもう 1 つ作り、この属性だけ替える（例 keep_repair=1,use_good=0）。"
                     "往復ごとに両方に返事を作らせ、話し相手には乱数で片方だけを見せる。見せた行を両方の会話の行にし、経験も両方に同じに入れる")
     ap.add_argument("--pair_out", help="I48z: 対の比べの記録（JSONL、非公開）。往復ごとに相手の行・両方の返事と why・見せた方・相手の次の行")
