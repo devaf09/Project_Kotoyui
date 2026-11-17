@@ -9,7 +9,7 @@
   diff_s1_s3                      : 文 1 と文 3 の差
   stats.json                      : 絵ごとの 強さの最大・99 パーセンタイル・「99 パーセンタイルの 1 割を超える帯の割合」
 帯（B・C・D・E・G）は属性の名前を f_of で D 全体に散らすので、帯ごとのまとまった範囲は無い（属性の周波数は名前の順 × step mod D）。
-python intervention/i48_wave_map.py --content ... --func ... --out <フォルダ>   （PNG を書くのに Pillow が要る）
+python intervention/i48_wave_map.py --content ... --func ... --out <フォルダ>   （PNG は標準ライブラリだけで書く）
 """
 from __future__ import annotations
 
