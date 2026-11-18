@@ -85,7 +85,7 @@ class UModel(AO.OModel):
         xs = AK.made_items(self.S, keys, gaps, ("過去",)) if xs is None else xs
         for x in xs:
             c = self.cid(x["y"])
-            if c == self.nc - 1:
+            if c == self.nc - 1 and not G.OTHER:
                 continue
             f, v = self.feat(x)
             v = np.asarray(v, dtype=np.float64)
