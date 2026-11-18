@@ -251,7 +251,8 @@ class Model:
         pg = self.pg
         tot = pg.W.sum(1, keepdims=True)
         pg.logp = np.log((pg.W + G.ALPHA) / (tot + G.ALPHA * pg.D))
-        pg.logp[-1] = -1e9
+        if not G.OTHER:
+            pg.logp[-1] = -1e9
         pg.prior = np.log((self.pr + 1) / (self.pr.sum() + len(self.pr)))
         self.Wn = pg.W / np.maximum(1e-9, np.linalg.norm(pg.W, axis=1, keepdims=True))
         self.who.build(self.beta["R1"])
@@ -268,7 +269,8 @@ class Model:
         s = s - s.max()
         p = np.exp(s)
         p /= p.sum()
-        p[-1] = 0
+        if not G.OTHER:
+            p[-1] = 0
         parts = [self.rR.score(*S.attrs(*keys[i]))]
         if not last:
             parts.append(self.rL.score(*S.attrs(*keys[i + 1])))
@@ -290,8 +292,9 @@ class Model:
             r3 = self.gram.score(self.gram.state(ups, placed, x["last"]))
             three = g["R1"] + g["R2"] + r3
             both = g["今"] + three
-            three[-1] = both[-1] = -1e9
-            cand = (set(np.argsort(-g["今"])[:K]) | set(np.argsort(-three)[:K])) - {self.nc - 1}
+            if not G.OTHER:
+                three[-1] = both[-1] = -1e9
+            cand = (set(np.argsort(-g["今"])[:K]) | set(np.argsort(-three)[:K])) - (set() if G.OTHER else {self.nc - 1})
             pick = max(cand, key=lambda c: both[c])
             out.append(dict(候補=cand, 選び=int(pick), 今=g["今"], 三つ=three, **{"今×三つ": both}))
             placed.append(gold[x["i"]] if gold is not None else self.pg.cls[pick])

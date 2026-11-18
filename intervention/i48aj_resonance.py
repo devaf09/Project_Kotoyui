@@ -78,7 +78,8 @@ class Ratio:
         tot = self.W.sum(1, keepdims=True)
         self.beta = beta
         self.L = (np.log((self.W + beta * pd) / (tot + beta)) - np.log(pd)).astype(np.float32)
-        self.L[-1] = -1e9
+        if not G.OTHER:
+            self.L[-1] = -1e9
         return self
 
     def score(self, f, v):
@@ -214,7 +215,8 @@ class Whole:
         m_all = float(np.real(np.vdot(self.Ball, Xi))) / self.N
         m = (np.real(self.B.conj() @ Xi) + self.beta * m_all) / (self.n + self.beta)
         r = np.log(np.maximum(R1_FLOOR, m / m_all)) if m_all > 0 else np.zeros(len(m))
-        r[-1] = -1e9
+        if not G.OTHER:
+            r[-1] = -1e9
         return r.astype(np.float32)
 
 

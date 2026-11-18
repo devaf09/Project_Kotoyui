@@ -31,6 +31,7 @@ FUNC_DEP = ("fixed", "aux")
 MARKS = {"テンス": "過去", "否定": "否定", "丁寧": "丁寧", "アスペクト": "進行"}   # 機能語の板の「機能」 → 意味の印（か・？ は問い）
 TOPK = 4
 ALPHA = 0.1
+OTHER = False                                           # True なら「その他」（候補の組の外）も答えとして選べる（I48at の「無いが有る」）
 
 
 def read_conllu(path, limit=None):
@@ -240,7 +241,8 @@ class PairGrain:
         self.prior = np.log((pr + 1) / (pr.sum() + len(pr)))
         tot = self.W.sum(1, keepdims=True)
         self.logp = np.log((self.W + ALPHA) / (tot + ALPHA * self.D))
-        self.logp[other] = -1e9                             # 「その他」は言わない
+        if not OTHER:
+            self.logp[other] = -1e9                         # 「その他」は言わない
         return self
 
     def predict(self, f, v, k=1, prior_w=1.0):
@@ -276,7 +278,7 @@ class Surface:
 
     @staticmethod
     def _head(g):
-        return g[:1]
+        return (g or "")[:1]
 
     def add(self, lemma, form, upos, nxt):
         h = self._head(nxt)
