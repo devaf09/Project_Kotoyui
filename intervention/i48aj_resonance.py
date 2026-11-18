@@ -185,8 +185,9 @@ class Whole:
         M = np.stack([self.bag(k) for k in all_keys])
         self.M = M / np.maximum(1e-9, np.linalg.norm(M, axis=1, keepdims=True))
         self.fict = []
-        for b in range(0, len(M), 1000):
-            sim = self.M[b:b + 1000] @ self.M.T
+        bs = max(50, min(1000, int(2e7 // max(1, len(M)))))   # 似た度の表を 2,000 万要素ずつ（全学習で数 GB にしない。答えは変わらない）
+        for b in range(0, len(M), bs):
+            sim = self.M[b:b + bs] @ self.M.T
             sim[np.arange(len(sim)), np.arange(b, b + len(sim))] = -9
             self.fict.extend(int(j) for j in np.argmax(sim, axis=1))
 
