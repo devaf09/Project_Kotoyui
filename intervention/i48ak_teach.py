@@ -75,6 +75,7 @@ class Model:
         self.S, self.fill, self.r1 = S, fill, r1
         self.feat = lambda x: AE.feats(S, x, MODE)
         self.extras = []                                    # 差し込み: 今の点に点を足す部品（score・refresh・clone を持つ）
+        self.other = None                                   # 「その他」を選べるか（None なら G.OTHER に従う）
 
     # ---- 学び（普通の数え） ----
     def fit(self, tr, hold):
@@ -83,7 +84,9 @@ class Model:
         TR = [x for _, xs in TRs for x in xs]
         cnt = Counter(x["y"] for x in TR)
         self.pair_n = Counter((x["l"], x["r"]) for x in TR if not x["last"])
-        self.pg = G.PairGrain(S.D).fit(((*self.feat(x), x["y"]) for x in TR), cnt)
+        self.pg = G.PairGrain(S.D)
+        self.pg.other = self.other
+        self.pg.fit(((*self.feat(x), x["y"]) for x in TR), cnt)
         nc = self.nc = len(self.pg.cls)
         self.ci = {y: i for i, y in enumerate(self.pg.cls) if y is not None}
         self.pr = np.zeros(nc)
@@ -253,7 +256,10 @@ class Model:
         pg = self.pg
         tot = pg.W.sum(1, keepdims=True)
         pg.logp = np.log((pg.W + G.ALPHA) / (tot + G.ALPHA * pg.D))
-        if not G.OTHER:
+        ok = G.other_ok(self)
+        for b in (pg, self.who, self.rR, self.rL, self.rP, self.gram.R):
+            b.other = ok                                    # 板にも同じ扱いを渡す
+        if not ok:
             pg.logp[-1] = -1e9
         pg.prior = np.log((self.pr + 1) / (self.pr.sum() + len(self.pr)))
         self.Wn = pg.W / np.maximum(1e-9, np.linalg.norm(pg.W, axis=1, keepdims=True))
@@ -273,7 +279,7 @@ class Model:
         s = s - s.max()
         p = np.exp(s)
         p /= p.sum()
-        if not G.OTHER:
+        if not G.other_ok(self):
             p[-1] = 0
         parts = [self.rR.score(*S.attrs(*keys[i]))]
         if not last:
@@ -298,9 +304,10 @@ class Model:
             r3 = self.gram.score(self.gram.state(ups, placed, x["last"]))
             three = g["R1"] + g["R2"] + r3
             both = g["今"] + three
-            if not G.OTHER:
+            ok = G.other_ok(self)
+            if not ok:
                 three[-1] = both[-1] = -1e9
-            cand = (set(np.argsort(-g["今"])[:K]) | set(np.argsort(-three)[:K])) - (set() if G.OTHER else {self.nc - 1})
+            cand = (set(np.argsort(-g["今"])[:K]) | set(np.argsort(-three)[:K])) - (set() if ok else {self.nc - 1})
             pick = max(cand, key=lambda c: both[c])
             out.append(dict(候補=cand, 選び=int(pick), 今=g["今"], 三つ=three, **{"今×三つ": both}))
             placed.append(gold[x["i"]] if gold is not None else self.pg.cls[pick])

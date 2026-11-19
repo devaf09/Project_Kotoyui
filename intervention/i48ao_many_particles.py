@@ -136,7 +136,7 @@ def measure(m, te, surf):
                 continue
             inc("間")
             inc("間当たり", g == y or (g is None and y not in known))
-            if G.OTHER:
+            if G.other_ok(m):
                 if y not in known:
                     inc("その他n")
                     inc("その他当たり", g is None)
@@ -154,7 +154,7 @@ def measure(m, te, surf):
     return dict(間=d("間当たり", "間"), 文末=d("文末当たり", "文"), 文=d("文当たり", "文"),
                 助詞={p: dict(数=c.get(p + "n", 0), 当たり=d(p + "当たり", p + "n"), 害=c.get(p + "害", 0)) for p in PARTICLES},
                 例={k: v["順位"] for k, v in AM.ranks_of(m).items()},
-                **(dict(その他=dict(数=c.get("その他n", 0), 当たり=d("その他当たり", "その他n"), 害=c.get("その他害", 0))) if G.OTHER else {}))
+                **(dict(その他=dict(数=c.get("その他n", 0), 当たり=d("その他当たり", "その他n"), 害=c.get("その他害", 0))) if G.other_ok(m) else {}))
 
 
 def main():

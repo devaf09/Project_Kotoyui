@@ -61,9 +61,14 @@ intervention/i48a*_*.py   試し（main と、その試しだけの差し込み�
      - 単位の板: `AP.UnitScore`（`init_units` で入り、Q は外す。前と同じ）。
    - 重ねた板（RModel）と二段（SModel）は、`gap_scores` を上書きする代わりに `unit_term` を替える形にした。上書きの `gap_scores` は本体の 1 つだけになった。
    - 答え合わせで 2 回とも「同じ」。
-3. **実装を `i48core` へ移す**。試しのファイルは `i48core` から読む形にして、古い名前は残す（古い試しも回る）。
+3. **実装を `i48core` へ移す**（一部済み）。試しのファイルは `i48core` から読む形にして、古い名前は残す（古い試しも回る）。
+   - 済み: 文・要点・間（`i48core.text`: read_conllu・split・Func・Surface・norm）と、語板の属性の空間（`i48core.space`: AttrSpace）。`i48ab_long_grain` は同じ名前で見せる。答え合わせで「同じ」。
+   - まだ: 板（PairGrain・Ratio・Whole・Gram）、選びの本体、学び、測り。読み込みの輪を避けるため、まだ移していない名前は使う時に読む形（`__getattr__`）にしている。
 4. **効果の薄い物を外す**。効果の表（`docs/i48_effects.md`）で「効かない・下がった」の物は、差し込みのまま既定では入れない。
-5. `OTHER` を本体の持ち物にする。
+5. `OTHER` を本体の持ち物にする（済み）。
+   - `m.other = True / False` で決める。None なら `G.OTHER` に従う（前と同じ）。
+   - 本体の `refresh` で、板（PairGrain・R1・R2・R3）にも同じ扱いを渡す。
+   - 判定は `G.other_ok(obj)` 1 つにまとめた。
 
 - 今の差し込みの形（段 2 の後）:
 
