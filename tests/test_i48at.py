@@ -43,3 +43,24 @@ def test_other_switch_unmasks_and_restores():
         assert all(np.isfinite(r["今×三つ"][-1]) and r["今×三つ"][-1] > -1e8 for r in rs)
     finally:
         G.OTHER = False
+
+
+def test_other_as_model_setting():
+    """「その他」の扱いは本体の持ち物（m.other）でも決められ、G.OTHER より勝つ。"""
+    S = G.AttrSpace(CB, G.Func(FB), 256, bands=("B", "C", "D"))
+    fill = AD.Fill(S)
+    tr = [sent(n) for n in ("犬", "猫", "友達", "先生") * 3]
+    for s in tr:
+        fill.see(s)
+    assert G.OTHER is False
+    m = AP.UModel(S, fill, "基準").fit(tr, tr[:4]).init_units("C")
+    m.other = True
+    m.refresh()
+    assert m.pg.logp[-1].max() > -1e8 and m.rR.L[-1].max() > -1e8 and m.rR.other is True
+    s = tr[0]
+    rs, _ = m.walk(AK.keys_of(s), AE.items(S, s, "節"))
+    assert all(r["今×三つ"][-1] > -1e8 for r in rs)
+    m2 = m.clone()
+    m2.other = False
+    m2.refresh()
+    assert m2.pg.logp[-1].max() <= -1e8 and m.pg.logp[-1].max() > -1e8

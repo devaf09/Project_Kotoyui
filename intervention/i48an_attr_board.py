@@ -90,13 +90,28 @@ class FillerLeft:
         return r
 
 
+class QScore:
+    """差し込み: Q の板の点（QModel.q_score）を今の点に足す。"""
+
+    def score(self, m, keys, x, f, v):
+        return m.q_score(keys, x["i"])
+
+    def refresh(self, m):
+        pass
+
+    def clone(self):
+        return self
+
+
 class QModel(AK.Model):
-    """AK.Model に (Q) 属性の板を足した物。"""
+    """AK.Model に (Q) 属性の板を足した物（点は差し込み QScore で足す）。"""
 
     def init_q(self, how="掛け算"):
         self.Q = {r: np.zeros_like(self.rR.W, dtype=np.float32) for r in ROLES}
         self.nq = {r: np.zeros(self.nc) for r in ROLES}
         self.Lq, self.how = None, how
+        if not any(isinstance(e, QScore) for e in self.extras):
+            self.extras.append(QScore())
         return self
 
     def board(self, r):
@@ -136,11 +151,6 @@ class QModel(AK.Model):
         if self.how == "掛け算":
             return P.sum(0)
         return np.log(np.exp(P).mean(0))
-
-    def gap_scores(self, keys, x, fic):
-        g = super().gap_scores(keys, x, fic)
-        g["今"] = g["今"] + self.q_score(keys, x["i"])
-        return g
 
     def teach_q(self, keys, x, c, qw, FL, text):
         info = {}
