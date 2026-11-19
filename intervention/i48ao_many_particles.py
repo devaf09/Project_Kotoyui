@@ -32,7 +32,7 @@ import i48am_attr_weight as AM  # noqa: E402
 import i48an_attr_board as AN  # noqa: E402
 
 N, V, P_ = "NOUN", "VERB", "PRON"
-PARTICLES = ("と", "で", "に", "を", "が", "へ", "から", "も")
+from i48core.measure import PARTICLES  # noqa: E402,F401
 
 
 def s2(a, ua, b, p, end="た。"):
@@ -116,45 +116,7 @@ class OModel(AN.QModel):
         return P.sum(0) / np.maximum(1, (P != 0).sum(0))       # 鳴った役だけの点の平均
 
 
-def measure(m, te, surf):
-    c = {}
-
-    def inc(k, v=1):
-        c[k] = c.get(k, 0) + v
-    for s in te:
-        xs = AE.items(m.S, s, "節")
-        if not xs:
-            continue
-        cont, gaps, head = G.split(s)
-        rs, _ = m.walk(AK.keys_of(s), xs)
-        seq = [m.pg.cls[r["選び"]] for r in rs]
-        known = set(m.pg.cls[:-1])
-        inc("文")
-        for i, (g, y) in enumerate(zip(seq, gaps)):
-            if i + 1 == len(gaps):
-                inc("文末当たり", g == y)
-                continue
-            inc("間")
-            inc("間当たり", g == y or (g is None and y not in known))
-            if G.other_ok(m):
-                if y not in known:
-                    inc("その他n")
-                    inc("その他当たり", g is None)
-                elif g is None:
-                    inc("その他害")
-            for p in PARTICLES:
-                if y == p:
-                    inc(p + "n")
-                    inc(p + "当たり", g == p)
-                elif g == p:
-                    inc(p + "害")
-        sent = "".join(surf.form(l, u, g) + ("□" if g is None else g) for (l, f_, u), g in zip(cont, seq))
-        inc("文当たり", G.norm(head + sent) == G.norm(s["text"]))
-    d = lambda a, b: round(c.get(a, 0) / max(1, c.get(b, 0)), 4)
-    return dict(間=d("間当たり", "間"), 文末=d("文末当たり", "文"), 文=d("文当たり", "文"),
-                助詞={p: dict(数=c.get(p + "n", 0), 当たり=d(p + "当たり", p + "n"), 害=c.get(p + "害", 0)) for p in PARTICLES},
-                例={k: v["順位"] for k, v in AM.ranks_of(m).items()},
-                **(dict(その他=dict(数=c.get("その他n", 0), 当たり=d("その他当たり", "その他n"), 害=c.get("その他害", 0))) if G.other_ok(m) else {}))
+from i48core.measure import measure  # noqa: E402,F401  （実装は i48core.measure へ移した）
 
 
 def main():

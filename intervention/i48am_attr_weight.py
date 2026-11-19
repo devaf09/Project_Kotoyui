@@ -35,15 +35,7 @@ import i48al_teach_one as AL  # noqa: E402
 
 N, V, P_ = "NOUN", "VERB", "PRON"
 TEACH5 = ("友達と散歩に行った", "先生と学校に行った", "友達と遊んだ", "傘と帽子を買った", "行くと言った")
-WANT = [("広げたい", "昨日・友達・散歩・行く", [("昨日", N), ("友達", N), ("散歩", N), ("行く", V)], 1),
-        ("広げたい", "先生・学校・行く", [("先生", N), ("学校", N), ("行く", V)], 0),
-        ("広げたい", "母・買い物・行く", [("母", N), ("買い物", N), ("行く", V)], 0),
-        ("広げたい", "彼・映画・行く", [("彼", P_), ("映画", N), ("行く", V)], 0),
-        ("広げたい", "友達・公園・遊ぶ", [("友達", N), ("公園", N), ("遊ぶ", V)], 0),
-        ("広げたくない", "傘・帽子・買う の 2 つ目", [("傘", N), ("帽子", N), ("買う", V)], 1),
-        ("広げたくない", "昨日・公園・犬・散歩・する の「で」の間", [("昨日", N), ("公園", N), ("犬", N), ("散歩", N), ("する", V)], 1),
-        ("広げたくない", "本・机・置く の 1 つ目", [("本", N), ("机", N), ("置く", V)], 0),
-        ("広げたくない", "本・机・置く の 2 つ目", [("本", N), ("机", N), ("置く", V)], 1)]
+from i48core.measure import WANT  # noqa: E402,F401
 SHOW_PRED = (("行く", V), ("遊ぶ", V), ("買う", V), ("言う", V))
 TYPES = ("0 同じ重さ", "1 述語で左の語", "2 述語で左と右の語", "3 詰め物の板の重点")
 
@@ -167,14 +159,7 @@ def teach(m, LA, item, typ):
     m.refresh()
 
 
-def ranks_of(m):
-    out = {}
-    wc = m.cid("と")
-    for kind, name, keys, gi in WANT:
-        res, _ = m.walk(keys, AK.made_items(m.S, keys, None))
-        sc = res[gi]["今×三つ"]
-        out[name] = dict(種類=kind, 順位=int(AJ.ranks(sc)[wc]) + 1, 点の差=round(float(sc[wc] - np.max(np.delete(sc, wc))), 3), 選び=m.pg.cls[res[gi]["選び"]])
-    return out
+from i48core.measure import ranks_of  # noqa: E402,F401  （実装は i48core.measure へ移した）
 
 
 def main():

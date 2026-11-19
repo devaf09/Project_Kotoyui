@@ -61,10 +61,30 @@ intervention/i48a*_*.py   試し（main と、その試しだけの差し込み�
      - 単位の板: `AP.UnitScore`（`init_units` で入り、Q は外す。前と同じ）。
    - 重ねた板（RModel）と二段（SModel）は、`gap_scores` を上書きする代わりに `unit_term` を替える形にした。上書きの `gap_scores` は本体の 1 つだけになった。
    - 答え合わせで 2 回とも「同じ」。
-3. **実装を `i48core` へ移す**（一部済み）。試しのファイルは `i48core` から読む形にして、古い名前は残す（古い試しも回る）。
-   - 済み: 文・要点・間（`i48core.text`: read_conllu・split・Func・Surface・norm）と、語板の属性の空間（`i48core.space`: AttrSpace）。`i48ab_long_grain` は同じ名前で見せる。答え合わせで「同じ」。
-   - まだ: 板（PairGrain・Ratio・Whole・Gram）、選びの本体、学び、測り。読み込みの輪を避けるため、まだ移していない名前は使う時に読む形（`__getattr__`）にしている。
-4. **効果の薄い物を外す**。効果の表（`docs/i48_effects.md`）で「効かない・下がった」の物は、差し込みのまま既定では入れない。
+3. **実装を `i48core` へ移す**（済み）。試しのファイルは `i48core` から読む形にして、古い名前は残す（古い試しも回る）。
+
+| 部品 | 移した物 | 元のファイル（同じ名前で見せる） |
+|---|---|---|
+| `i48core.text` | read_conllu・split・Func・Surface・norm | i48ab_long_grain |
+| `i48core.space` | AttrSpace | i48ab_long_grain |
+| `i48core.boards` | PairGrain・WordTable・Ratio・Whole・Gram・ranks | i48ab_long_grain・i48aj_resonance |
+| `i48core.model` | Model・keys_of・made_items・sep_ratio | i48ak_teach |
+| `i48core.learn` | WModel・monitor・BLOCK | i48at_surprise |
+| `i48core.measure` | measure・PARTICLES・ranks_of・WANT | i48ao_many_particles・i48am_attr_weight |
+
+   - 設定（ALPHA・OTHER・other_ok）は `i48ab_long_grain` に置いたまま。試しが `G.OTHER` を書き換えるので、板は使う時に読む。
+   - 読み込みの輪を避けるため、まだ試しのファイルにある名前は、使う時に読む形（`__getattr__`）にした。
+   - 介入の単位の板（UModel・RModel・SModel）と Q の板（QModel・OModel）は、試しのファイルに置いたまま。どちらも差し込み（QScore・UnitScore）で本体につながる。
+   - 段ごとに答え合わせで「同じ」。
+   - 試しのファイルから定数を書き換えると、移した先には届かない。今そうしているのは `G.OTHER`（`i48ab_long_grain` に置いたまま）と、テストの `BLOCK`（`i48core.learn` を書き換える形に直した）だけ。
+4. **効果の薄い物を外す**（済み）。効果の表（`docs/i48_effects.md`）で「効かない・下がった」の物は、差し込みのまま既定では入れない。
+   - 一覧は `i48core.registry.EXPERIMENTS`（判定・既定で入るか・入れ方）。
+   - 本体に既定で入っているのは次の 4 つだけ:
+     - 節ごとの意味の印
+     - 三つの共振（光の器の部品なので外さない）
+     - prior の強さ
+     - 介入の別の板（教えなければ点は 0）
+   - 暗い側（4.37、効かない）は、本体で毎回数えていた。介入で選びが外れた時だけ数える形にした（使わない時は前と同じ数）。
 5. `OTHER` を本体の持ち物にする（済み）。
    - `m.other = True / False` で決める。None なら `G.OTHER` に従う（前と同じ）。
    - 本体の `refresh` で、板（PairGrain・R1・R2・R3）にも同じ扱いを渡す。

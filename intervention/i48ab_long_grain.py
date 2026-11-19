@@ -40,53 +40,9 @@ def other_ok(obj):
     return OTHER if v is None else bool(v)
 
 
-class PairGrain:
-    """詰め物の選び方の数え上げ（多項、足すだけ）。クラスは学びの上位 n_cls の詰め物と「その他」。"""
-
-    def __init__(self, D, n_cls=300):
-        self.D, self.n_cls = D, n_cls
-        self.cls, self.W, self.prior = None, None, None
-
-    def fit(self, rows, counts):
-        """rows: (f, v, 詰め物) を順に出す物（一度だけ読む）。counts: 詰め物の数（クラスを決める）。"""
-        self.cls = [y for y, _ in counts.most_common(self.n_cls)]
-        ci = {y: i for i, y in enumerate(self.cls)}
-        other = len(self.cls)
-        self.cls.append(None)
-        self.W = np.zeros((len(self.cls), self.D), dtype=np.float64)
-        pr = np.zeros(len(self.cls))
-        for f, v, y in rows:
-            i = ci.get(y, other)
-            np.add.at(self.W[i], f, v)
-            pr[i] += 1
-        self.prior = np.log((pr + 1) / (pr.sum() + len(pr)))
-        tot = self.W.sum(1, keepdims=True)
-        self.logp = np.log((self.W + ALPHA) / (tot + ALPHA * self.D))
-        if not other_ok(self):
-            self.logp[other] = -1e9                         # 「その他」は言わない
-        return self
-
-    def predict(self, f, v, k=1, prior_w=1.0):
-        s = prior_w * self.prior + self.logp[:, f] @ v
-        o = np.argsort(-s)[:k]
-        return [self.cls[i] for i in o]
-
-
-class WordTable:
-    def __init__(self):
-        self.t2, self.t1, self.t0 = defaultdict(Counter), defaultdict(Counter), Counter()
-
-    def fit(self, rows):
-        """rows: [(原形 i, 原形 i+1 または印の組, 詰め物)]"""
-        for a, b, y in rows:
-            self.t2[(a, b)][y] += 1
-            self.t1[a][y] += 1
-            self.t0[y] += 1
-        return self
-
-    def predict(self, a, b):
-        for c in (self.t2.get((a, b)), self.t1.get(a)):
-            if c:
-                return c.most_common(1)[0][0]
-        return self.t0.most_common(1)[0][0]
-
+def __getattr__(name):
+    """PairGrain・WordTable は i48core.boards へ移した（読み込みの輪を避けて、使う時に読む）。"""
+    if name in ("PairGrain", "WordTable"):
+        import i48core.boards as B
+        return getattr(B, name)
+    raise AttributeError(name)

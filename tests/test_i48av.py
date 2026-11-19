@@ -12,6 +12,7 @@ import i48ae_marks as AE  # noqa: E402
 import i48ak_teach as AK  # noqa: E402
 import i48at_surprise as AW  # noqa: E402
 import i48av_local_surprise as AV  # noqa: E402
+import i48core.learn as LN  # noqa: E402
 from test_i48ab_long_grain import CB, FB, sent  # noqa: E402
 
 
@@ -31,7 +32,7 @@ def test_norm_keeps_class_sums():
 
 
 def test_all_hows_fit_small(monkeypatch):
-    monkeypatch.setattr(AW, "BLOCK", 4)
+    monkeypatch.setattr(LN, "BLOCK", 4)
     S = G.AttrSpace(CB, G.Func(FB), 256, bands=("B", "C", "D"))
     fill = AD.Fill(S)
     tr = [sent(n) for n in ("犬", "猫", "友達", "先生") * 3]
@@ -64,7 +65,7 @@ def small_model():
 
 def test_add_more_keeps_mass_and_uniform_part(monkeypatch):
     """(4) 足し増し: 足す量の和は (0) と同じ。w ≤ 1 なら (0) と同じ形。"""
-    monkeypatch.setattr(AW, "BLOCK", 4)
+    monkeypatch.setattr(LN, "BLOCK", 4)
     S, fill, tr = small_model()
     m = AV.VModel(S, fill, "基準")
     m.fit_weighted(tr, tr[:4], "足し増し")
@@ -86,7 +87,7 @@ def test_add_more_keeps_mass_and_uniform_part(monkeypatch):
 
 def test_whole_norm_matches_counts(monkeypatch):
     """(5) 全体ならし: 詰め物ごとの prior の数えが、学び全体のその詰め物の数になる。"""
-    monkeypatch.setattr(AW, "BLOCK", 4)
+    monkeypatch.setattr(LN, "BLOCK", 4)
     S, fill, tr = small_model()
     m = AV.VModel(S, fill, "基準")
     info = m.fit_weighted(tr, tr[:4], "全体ならし")

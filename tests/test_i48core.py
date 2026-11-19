@@ -61,3 +61,10 @@ def test_extras_add_to_now_and_clone():
     m.extras.clear()
     m.refresh()
     assert np.allclose(m.gap_scores(keys, x, fic)["今"], g0)
+
+
+def test_registry_defaults():
+    from i48core import registry
+    assert all(len(e) == 5 for e in registry.EXPERIMENTS)
+    on = registry.on_by_default()
+    assert "三つの共振 R1・R2・R3" in on and "驚きを帯に寄せる・ならす" not in on and "暗い側（外した選びを下げる）" not in on
