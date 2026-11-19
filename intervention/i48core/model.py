@@ -60,6 +60,7 @@ class Model:
         self.feat = lambda x: AE.feats(S, x, MODE)
         self.extras = []                                    # 差し込み: 今の点に点を足す部品（score・refresh・clone を持つ）
         self.other = None                                   # 「その他」を選べるか（None なら G.OTHER に従う）
+        self.n_cls = 300                                    # 箱（詰め物の候補）の数。学びの上位 n_cls 個 ＋ その他（手で置く値、I48bb で比べる）
 
     # ---- 学び（普通の数え） ----
     def fit(self, tr, hold):
@@ -68,7 +69,7 @@ class Model:
         TR = [x for _, xs in TRs for x in xs]
         cnt = Counter(x["y"] for x in TR)
         self.pair_n = Counter((x["l"], x["r"]) for x in TR if not x["last"])
-        self.pg = G.PairGrain(S.D)
+        self.pg = G.PairGrain(S.D, getattr(self, "n_cls", 300))
         self.pg.other = self.other
         self.pg.fit(((*self.feat(x), x["y"]) for x in TR), cnt)
         nc = self.nc = len(self.pg.cls)
