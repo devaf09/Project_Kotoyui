@@ -74,6 +74,7 @@ class Model:
     def __init__(self, S, fill, r1):
         self.S, self.fill, self.r1 = S, fill, r1
         self.feat = lambda x: AE.feats(S, x, MODE)
+        self.extras = []                                    # 差し込み: 今の点に点を足す部品（score・refresh・clone を持つ）
 
     # ---- 学び（普通の数え） ----
     def fit(self, tr, hold):
@@ -135,6 +136,7 @@ class Model:
         m.gram = copy.copy(self.gram)
         m.gram.R = copy.copy(self.gram.R)
         m.gram.R.W = self.gram.R.W.copy()
+        m.extras = [e.clone() for e in self.extras]
         return m
 
     def undo(self, numbers):
@@ -259,6 +261,8 @@ class Model:
         self.rR.build(self.beta["R2右向き"]), self.rL.build(self.beta["R2左向き"]), self.rP.build(self.beta["R2述語"])
         self.gram.R.build(self.beta["R3"])
         self.Li = sep_ratio(self.Wi, self.ni, pg.logp) if self.ni.any() else None
+        for e in self.extras:
+            e.refresh(self)
 
     # ---- 点 ----
     def gap_scores(self, keys, x, fic):
@@ -280,6 +284,8 @@ class Model:
         now = np.log(np.maximum(p, 1e-30)).astype(np.float32)
         if self.Li is not None:
             now = now + self.Li[:, f] @ (v / max(1e-9, float(v.sum())))
+        for e in self.extras:
+            now = now + e.score(self, keys, x, f, v)
         return dict(今=now, R1=self.who.score(self.who.gap(keys, i, fic)), R2=np.mean(parts, axis=0))
 
     def walk(self, keys, xs, gold=None):

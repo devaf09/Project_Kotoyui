@@ -205,18 +205,16 @@ def compare(st, gaps_in):
 class RModel(AP.UModel):
     """当てた単位の点で選ぶ（(3)）。"""
 
-    def gap_scores(self, keys, x, fic):
-        g = AK.Model.gap_scores(self, keys, x, fic)
+    def unit_term(self, keys, x, f, v):
+        add = np.zeros(self.nc, dtype=np.float32)
         st = getattr(self, "stack", None)
         if st is None:
-            return g
+            return add
         xP, xQ = gap_inputs(self, keys, x)
         L, X = st.light(xP, xQ), st.exact(xP, xQ)
-        add = np.zeros(self.nc, dtype=np.float32)
         for c, (z, d, _) in L.items():
             add[c] = X[c][int(np.argmax(d))]
-        g["今"] = g["今"] + add
-        return g
+        return add
 
 
 def main():

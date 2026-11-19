@@ -54,11 +54,25 @@ def pack(f, w):
     return ub, uw
 
 
+class UnitScore:
+    """差し込み: 介入の単位の点（UModel.unit_term）を今の点に足す。"""
+
+    def score(self, m, keys, x, f, v):
+        return m.unit_term(keys, x, f, v)
+
+    def refresh(self, m):
+        pass
+
+    def clone(self):
+        return self
+
+
 class UModel(AO.OModel):
-    """単位ごとの介入の板（B・C）と、帯ごとの単位の数で割る板（D）。本体と P・Q の今の板（A）は使わない。"""
+    """単位ごとの介入の板（B・C）と、帯ごとの単位の数で割る板（D）。本体と P・Q の今の板（A）は使わない（差し込みは UnitScore だけ）。"""
 
     def init_units(self, kind):
         self.init_q("中間")
+        self.extras = [e for e in self.extras if not isinstance(e, (AN.QScore, UnitScore))] + [UnitScore()]
         self.kind, self.units = kind, []
         self.Pd = np.zeros_like(self.pg.W, dtype=np.float32)          # D: 足した重さ
         self.Pn = np.zeros_like(self.pg.W, dtype=np.float32)          # D: 帯ごとの単位の数
@@ -189,12 +203,10 @@ class UModel(AO.OModel):
                 out[c] = float((ov / ov.sum()) @ sc) if ov.sum() > 0 else 0.0
         return out
 
-    def gap_scores(self, keys, x, fic):
-        g = AK.Model.gap_scores(self, keys, x, fic)               # 本体の点（A の板 Li・Q は使わない）
-        f, v = self.feat(x)
+    def unit_term(self, keys, x, f, v):
+        """今の点に足す介入の単位の点（RModel・SModel はここを替える）。"""
         v = np.asarray(v, dtype=np.float64)
-        g["今"] = g["今"] + self.unit_scores(keys, x["i"], f, v / max(1e-9, float(v.sum())))
-        return g
+        return self.unit_scores(keys, x["i"], f, v / max(1e-9, float(v.sum())))
 
 
 def measure(m, te, surf):

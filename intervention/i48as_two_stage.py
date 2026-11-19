@@ -72,14 +72,12 @@ class SModel(AP.UModel):
                 out[c] = float((o / o.sum()) @ sc) if o.sum() > 0 else 0.0
         return out
 
-    def gap_scores(self, keys, x, fic):
-        g = AP.AK.Model.gap_scores(self, keys, x, fic)
+    def unit_term(self, keys, x, f, v):
         xP, xQ = AR.gap_inputs(self, keys, x)
         add = np.zeros(self.nc, dtype=np.float32)
-        for c, v in self.class_scores(xP, xQ).items():
-            add[c] = v
-        g["今"] = g["今"] + add
-        return g
+        for c, s in self.class_scores(xP, xQ).items():
+            add[c] = s
+        return add
 
 
 def unexpected(m, gaps_in, J, n):
