@@ -33,6 +33,20 @@ BLOCK = 1000
 
 
 class WModel(AK.Model):
+    def weight(self, how, p):
+        """正解の確からしさ p から、その間の重さ。"""
+        return 1.0 - p if how == "1-p" else -np.log(max(p, 1e-12))
+
+    def adjust_block(self, items, how):
+        """束の中の重さを足す前に直す所（ここでは何もしない。I48av で使う）。"""
+
+    def finish_weights(self, ws, cs, how):
+        """全部を足し終えた後に、板と重さ（ws、R3 の作り直しに使う）を直す所（ここでは何もしない。I48aw で使う）。"""
+
+    def add_gap(self, keys, x, c, w, fic, prev, d, how):
+        """1 つの間を重さ w で全部の板に足す。d = (f, v, logp, sc) は足す前の点（I48av で使う）。"""
+        self.add_boards(keys, x, c, w, fic, prev, base=True)
+
     def fit_weighted(self, tr, hold, how):
         """学びの文を BLOCK 文ずつ、驚きの重さで足す。AK.Model.fit と同じ板を作る。"""
         S = self.S
@@ -54,13 +68,14 @@ class WModel(AK.Model):
         self.gram = AJ.Gram(nc, self.fill)
         TRK = [AK.keys_of(s) for s, _ in TRs]
         self.who.index(TRK)
-        ws = []
+        ws, cs = [], []
         for b in range(0, len(TRs), BLOCK):
             if b > 0 and how != "同じ":                             # それまでの板で、今の点の分布を出す
                 tot = self.pg.W.sum(1, keepdims=True)
                 logp = np.log((self.pg.W + G.ALPHA) / (tot + G.ALPHA * S.D))
                 logp[-1] = -1e9
                 prior = np.log((self.pr + 1) / (self.pr.sum() + len(self.pr)))
+            items = []
             for j in range(b, min(b + BLOCK, len(TRs))):
                 s, xs = TRs[j]
                 keys = TRK[j]
@@ -71,16 +86,21 @@ class WModel(AK.Model):
                 for x in xs:
                     c = self.cid(x["y"])
                     if b == 0 or how == "同じ":
-                        w = 1.0
+                        w, d = 1.0, None
                     else:
                         f, v = self.feat(x)
                         sc = prior + logp[:, f] @ v
                         sc = sc - sc.max()
                         p = np.exp(sc)
                         p = float(p[c] / p.sum())
-                        w = 1.0 - p if how == "1-p" else -np.log(max(p, 1e-12))
-                    ws.append(w)
-                    self.add_boards(keys, x, c, w, fic, gaps[:x["i"]], base=True)
+                        w, d = self.weight(how, p), (f, v, logp, sc)
+                    items.append([keys, x, c, w, fic, gaps[:x["i"]], d])
+            self.adjust_block(items, how)
+            for keys, x, c, w, fic, prev, d in items:
+                ws.append(w)
+                cs.append(c)
+                self.add_gap(keys, x, c, w, fic, prev, d, how)
+        self.finish_weights(ws, cs, how)
         # R3 の行は Gram.add（重さ 1）で入るので、重さつきで作り直す
         self.gram = AJ.Gram(nc, self.fill)
         k = 0
