@@ -91,6 +91,7 @@ class UsageBoard:
         self.p = np.array([(pc[c] + 1) / (tot + m.nc) for c in range(m.nc)], dtype=np.float64)
         self.floor_n = 2 * np.log(m.nc)
         self.cnt = {k: {key: c for key, c in cnt[k].items() if sum(c.values()) >= self.floor_n} for k in self.KINDS}   # 比べ用に数えも残す
+        self.cnt_all = cnt                                         # 床に届かない語の数えも残す（I48be の借りる試し用）
         for k in self.KINDS:
             for key, c in cnt[k].items():
                 N = sum(c.values())
