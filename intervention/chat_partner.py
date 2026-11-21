@@ -74,22 +74,53 @@ PERSONA = (                                                  # I40c: --persona�
 UP = {1: 3, 2: 5}                                            # 続けて褒められた回数で段を上げる（持ち主の案）
 
 
-def teacher_eval(host, model, history, reply, stage, prompt="old"):
-    """prompt = old（今の型）か、I48u の促しの型（i48u_teacher.PROMPTS の p2a・p2b・p2c）。"""
+# I48bj: 先生の判定に「私では判定できない」を足す（持ち主の案）。指示文は 2 通り（u1・u2）。出た時は学びに入れず、別のファイルに集める。
+UNSURE = {
+    "u1": "追加の決まり: 会話の流れやボットの返事の意味が分からず、あなたには良し悪しを決められない時は、無理に決めず、cannot_judge を true にし、"
+          "reason に理由を一言書く（その時 has_error は false）。\n",
+    "u2": "追加の決まり: 次の時は「あなたには判定できない」とする。会話の流れが分からない時、返事がどちらとも取れる時、日本語として正しいか自信が無い時。"
+          "その時は cannot_judge を true にし、reason に理由を一言書く（その時 has_error は false）。少し迷っただけの時は、ふつうに決めてよい。\n",
+}
+UNSURE_FIELDS = '出力の JSON には、次の 2 つの欄も足す: "cannot_judge": true または false、"reason": "判定できない理由（無ければ空）"。\n'
+
+
+def unsure_ev(r):
+    """先生の答えが「判定できない」なら、その印の見立て（学びには入れない）。"""
+    if r.get("cannot_judge") in (True, "true", "True"):
+        return dict(verdict="判定できない", has_error=False, kind="", odd_part="", suggested_reply="",
+                    reason=str(r.get("reason") or "").strip(), intervention_message="先生には分からない")
+    return None
+
+
+def teacher_eval(host, model, history, reply, stage, prompt="old", unsure="off", temperature=0.2):
+    """prompt = old（今の型）か、I48u の促しの型（i48u_teacher.PROMPTS の p2a・p2b・p2c）。unsure = off・u1・u2（I48bj）。"""
     hist = "\n".join(history[-6:])
+    extra = (UNSURE[unsure] + UNSURE_FIELDS) if unsure != "off" else ""
     if prompt != "old":
         import i48u_teacher as U48
-        msgs = [dict(role="system", content=U48.PROMPTS[prompt] + STAGES[stage]),
+        msgs = [dict(role="system", content=U48.PROMPTS[prompt] + extra + STAGES[stage]),
                 dict(role="user", content=f"会話の流れ:\n{hist}\n\nボットの返事:\n{reply}")]
-        return U48.parse(ollama_chat(host, model, msgs, temperature=0.2, first_line=False, num_predict=2048, fmt="json"), reply)
-    msgs = [dict(role="system", content=TEACHER + STAGES[stage]),
+        text = ollama_chat(host, model, msgs, temperature=temperature, first_line=False, num_predict=2048, fmt="json")
+        if extra:
+            try:
+                u = unsure_ev(json.loads(text[text.find("{"): text.rfind("}") + 1]))
+                if u is not None:
+                    return u, ""
+            except Exception:
+                pass
+        return U48.parse(text, reply)
+    msgs = [dict(role="system", content=TEACHER + extra + STAGES[stage]),
             dict(role="user", content=f"会話の流れ:\n{hist}\n\nボットの返事:\n{reply}")]
-    text = ollama_chat(host, model, msgs, temperature=0.2, first_line=False, num_predict=2048, fmt="json")
+    text = ollama_chat(host, model, msgs, temperature=temperature, first_line=False, num_predict=2048, fmt="json")
     j = text[text.find("{"): text.rfind("}") + 1] if "{" in text else ""
     try:
         r = json.loads(j)
     except Exception:
         return None, "読めない"
+    if extra:
+        u = unsure_ev(r)
+        if u is not None:
+            return u, ""
     r["has_error"] = r.get("has_error") in (True, "true", "True")
     odd, sug = str(r.get("odd_part") or "").strip("「」。 "), str(r.get("suggested_reply") or "").strip()
     r["odd_part"], r["suggested_reply"] = odd, sug
@@ -223,6 +254,9 @@ def main():
     ap.add_argument("--gate", action="store_true", help="I48x: 深刻な相談の門（目印の行には固定の返事。学びに入れない）")
     ap.add_argument("--silver", action="store_true", help="I48x: 白銀律の門（相手に指摘・拒まれた時の相手の行の所を、自分が言う前に暗くする）")
     ap.add_argument("--partner_mood", action="store_true", help="I48v: 話し相手に会話の初めの気分の設定を足し、往復ごとに自分の気分（4 つの対の両側の強さ 8 つ）をログと stats に書かせる（bot には渡さない）")
+    ap.add_argument("--unsure", default="off", choices=("off", "u1", "u2"), help="I48bj: 先生の判定に「判定できない」を足す指示文（off = 今まで）")
+    ap.add_argument("--unsure_out", default=None, help="I48bj: 判定できないの記録（jsonl）の置き場。リポジトリの外に置く")
+    ap.add_argument("--teacher_twice", action="store_true", help="I48bj: 同じ行を 2 回判定させ、割れた物も判定できないに入れる")
     ap.add_argument("--teacher_prompt", default="old", choices=("old", "p2a", "p2b", "p2c"), help="I48u: 先生の型。old = 今の型、p2a・p2b・p2c = 促しの型（i48u_teacher.py）")
     ap.add_argument("--relation", help="I48f: 保存した関係の板（i48f_relation_board.py --out の名前）。--particle の代わりに、語板 v3 の L3 から役らしさと助詞を読む")
     ap.add_argument("--relation_device", default=None, help="I48f: 関係の板の置き場（cuda:1 など。無ければ PC のメモリ）")
@@ -532,7 +566,29 @@ def main():
             said.append((line, lt))
             log += [f"- 相手: {human}", f"- ボット: **{line}** （{r['why']}、{time.time() - t0:.1f} 秒）"]
             if a.teacher:                                   # 先生の見立て（話し相手とは別）
-                ev, bad = teacher_eval(a.host, a.teacher, hist, line, stage, a.teacher_prompt)
+                ev, bad = teacher_eval(a.host, a.teacher, hist, line, stage, a.teacher_prompt, a.unsure)
+                split = False
+                if a.teacher_twice and ev is not None and ev.get("verdict") != "判定できない":   # I48bj: 同じ行を 2 回判定させ、割れたら判定できないに入れる
+                    ev2, _ = teacher_eval(a.host, a.teacher, hist, line, stage, a.teacher_prompt, a.unsure, temperature=0.7)
+                    if ev2 is not None and (ev2.get("verdict") == "判定できない" or bool(ev2["has_error"]) != bool(ev["has_error"])):
+                        split = True
+                        ev = dict(verdict="判定できない", has_error=False, kind="", odd_part="", suggested_reply="",
+                                  reason="二度の判定が割れた" if ev2.get("verdict") != "判定できない" else ev2.get("reason", ""),
+                                  intervention_message="先生には分からない")
+                if ev is not None and ev.get("verdict") == "判定できない":   # I48bj: 学びに入れず、会話は続け、別のファイルに集める
+                    c["先生の判定できない"] = c.get("先生の判定できない", 0) + 1
+                    src = "割れた" if split else "先生"
+                    c.setdefault("判定できないの元", {})
+                    c["判定できないの元"][src] = c["判定できないの元"].get(src, 0) + 1
+                    why = str(r.get("why", "")).split("（")[0][:20]
+                    c.setdefault("判定できない_行の作り", {})
+                    c["判定できない_行の作り"][why] = c["判定できない_行の作り"].get(why, 0) + 1
+                    log.append(f"  - 先生（段 {stage}）［判定できない］: 先生には分からない（{ev.get('reason', '')}）")
+                    if a.unsure_out:
+                        with open(a.unsure_out, "a", encoding="utf-8") as fo:
+                            fo.write(json.dumps(dict(会話=ci + 1, 往復=ti + 1, 段=stage, 元=src, 先生の理由=ev.get("reason", ""), ボットの行=line,
+                                                     行の作り=r.get("why", ""), 流れ=hist[-6:]), ensure_ascii=False) + "\n")
+                    ev, bad = None, ""
                 if ev is not None and ev["has_error"] and ev["suggested_reply"]:   # 変と言った所を、お手本でも言っている（同じ所に両方の経験が入る）
                     key = lambda t: {(p["ns"], p["c"], p["ps"]) for p in bot.pb.pieces(B3.CB.to_toks(nlp(t)))}
                     if key(ev["odd_part"]) & key(ev["suggested_reply"]):
