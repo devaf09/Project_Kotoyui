@@ -17,6 +17,12 @@ I49c では、指揮者が感情・状態の量（動きの量・感度）だけ
                  材料が少ない（ベクトルを持つ材料が 2 つ未満）、もう言った（前に出した行と同じ顔ぶれ）。
                  「もう言った」のまま次の語が来たら、読む前に入れ物を空にする（言ったばかりの物を持ち越さない）。
 
+  違和感の波 OddWave  違和感を波で持つ置き場（持つだけ。どこにもつながず、動きは変えない）。種類ごとに 1 本の向き、強さは振幅、
+                 時間で薄れる。波の速さは器と同じ。tally() で、どの動きの後に下がるか、器のどの波と一緒に動くかを数える。
+
+  組立の口 Scored  行は外の行づくり（tools/i49d_odd.OddScorer と同じ形の物）で詰め物を入れて作る。行づくりの違和感は流れに使わず、波で持つだけ。
+  数の付いた印   読み手が印に数（float）を付けて渡すと（展開②の「まだ続けそうか」など）、その歩の違和感として波へ渡す（持つだけ）。
+
 流れ（1 歩に 1 つ）:
   連想   入れ物か内面に近い物のうち、「材料が不足」をいちばん減らす物を 1 つ足す。減らす物が無ければ、次の段へ。
   組立   連想で減らなくなったら（= 不足が消えたら）組み立てる。
@@ -123,6 +129,89 @@ class Plain:
         return line, odd
 
 
+class Pick:
+    """選ぶ口の見本（持ち主と話した「どれを選ぶか」、未確定）: 入れ物の材料から、重さの大きい順に k 個だけ残す。
+    weight_of(名前) → 数（例: 会話の数えから出した「拾われやすさ」）。重さの無い語は、いちばん後ろ。k は手で置く数。"""
+
+    def __init__(self, weight_of, k=3):
+        self.weight_of, self.k = weight_of, int(k)
+
+    def pick(self, mats):
+        def w(it):
+            v = self.weight_of(it["名前"])
+            return -np.inf if v is None else float(v)
+        keep = sorted(range(len(mats)), key=lambda i: (-w(mats[i]), i))[: self.k]
+        return [mats[i] for i in sorted(keep)]
+
+
+class Scored:
+    """組立の口の 2 つ目: 仮の組立（Plain）の違和感で流れを決め、行は外の行づくり（scorer.line）で詰め物を入れて作る。
+    scorer.line(keys, marks) → 間ごとの dict（詰め物、割合 = 種類 → いつもの値の並びの中の順位の割合 0〜1）。tools/i49d_odd.OddScorer と同じ形。
+    行づくりが出す違和感（迷い・自信のなさ など）は、流れには使わない。felt（種類 → 行の中でいちばん大きい割合）に置き、
+    思考のループが違和感の波へ渡す（持つだけ）。切る線（上位 1 割 など）は置かない。
+    pick（選ぶ口）を渡すと、行づくりに渡す前に材料を選ぶ。語の順番は、聞いた順（連想で入った語は後ろ）。品詞は pos_of（名前 → 品詞）から。品詞の分からない語は行づくりに渡さない。"""
+
+    def __init__(self, scorer, pos_of, mark_names=("過去", "否定", "丁寧", "進行", "問い"), pick=None):
+        self.scorer, self.pos_of, self.mark_names = scorer, pos_of, tuple(mark_names)
+        self.pick = pick                                  # 選ぶ口（無ければ全部使う）
+        self.plain = Plain()
+        self.felt = {}
+
+    def build(self, tray, vessel, said):
+        _, odd = self.plain.build(tray, vessel, said)
+        mats = sorted(tray.vecs(), key=lambda it: (it["種類"] != "語", it["歩"]))
+        mats = [it for it in mats if self.pos_of.get(it["名前"])]
+        if self.pick is not None:
+            mats = self.pick.pick(mats)                   # 並びは聞いた順のまま、選んだ物だけ残す
+        keys = [(it["名前"], self.pos_of[it["名前"]]) for it in mats]
+        rows = self.scorer.line(keys, [m for m in self.mark_names if tray.has_mark(m)]) if keys else []
+        fill = {int(r["間"]): r["詰め物"] for r in rows}
+        line = []
+        for i, (w, _) in enumerate(keys):
+            line.append(w)
+            if fill.get(i):
+                line.append(fill[i])
+        self.felt = {}
+        for r in rows:
+            for k, v in r["割合"].items():
+                self.felt[k] = max(self.felt.get(k, 0.0), float(v))
+        if said and said[-1][1] == line:
+            odd["もう言った"] = "前に出した行と同じ"
+        return line, odd
+
+
+class OddWave:
+    """違和感を波で持つ置き場（持ち主の案、未確定）。持つだけで、どこにもつながない（動きは変えない）。
+    種類ごとに 1 本の向き（出て来た順に、互いに直交する向きを割り当てる）。強さ = 振幅。起きた時に足し、時間で薄れる。
+    波の速さ（半減期）は、感情・状態の器と同じ物を使う（新しい数を置かない）。速い波 = 今気になった、遅い波 = ずっと引っかかっている。"""
+
+    def __init__(self, a):
+        self.a = np.asarray(a, dtype=np.float32)          # 1 刻みで入れ替わる割合（器と同じ）
+        self.kinds = []
+        self.S = np.zeros((len(self.a), 0), dtype=np.float32)
+        self.raw, self.hist = [], []
+
+    def feel(self, odd):
+        """odd: 名前 → 強さ（0〜1）。この 1 歩の違和感。無い種類は 0。"""
+        for k in odd:
+            if k not in self.kinds:
+                self.kinds.append(k)
+                self.S = np.concatenate([self.S, np.zeros((len(self.a), 1), dtype=np.float32)], axis=1)
+        x = np.array([float(odd.get(k, 0.0)) for k in self.kinds], dtype=np.float32)
+        self.S = (1.0 - self.a)[:, None] * self.S + self.a[:, None] * x[None, :]
+        self.raw.append(dict(odd))
+        self.hist.append(self.S.copy())
+
+    def arrays(self):
+        """(歩, 波, 種類) の振幅と、(歩, 種類) の元の強さ。途中で増えた種類は、前の歩を 0 で埋める。"""
+        K = len(self.kinds)
+        H = np.zeros((len(self.hist), len(self.a), K), dtype=np.float32)
+        for t, h in enumerate(self.hist):
+            H[t, :, : h.shape[1]] = h
+        R = np.array([[float(r.get(k, 0.0)) for k in self.kinds] for r in self.raw], dtype=np.float32).reshape(len(self.raw), K)
+        return H, R
+
+
 class Thinker:
     def __init__(self, vessel, words=None, near=None, builder=None):
         self.v = vessel                                   # 感情・状態のループ
@@ -135,6 +224,8 @@ class Thinker:
         self.n = 0
         self.said = []                                    # 外へ出した物: (歩, 行)
         self.tried = False                                # 今の入れ物で、連想がもう減らせないと分かっているか
+        self.felt = {}
+        self.odd = OddWave(vessel.a)                      # 違和感の波（持つだけ）
         self.log = dict(act=[], lack=[], tray=[], odd=[], word=[], knob=[])
 
     # ---- 実験用の口 ----
@@ -188,12 +279,14 @@ class Thinker:
         for m, on in marks.items():
             if on:
                 self.tray.add(m, None, "印", self.n)
+        self.felt = {m: float(v) for m, v in marks.items() if isinstance(v, float)}   # 数の付いた印（展開② など）は、違和感の波へ
         rec.update(した事="読む", 語=name, 印=marks, 違和感=odd or {}, _x=x)
         self.tried = False
 
     # ---- 1 歩 ----
     def step(self):
         rec = dict(歩=self.n, した事=None, 不足=None, 語=None, 印={}, 足した物=None, 行=None, 違和感={})
+        self.felt = {}
         heard = None
         best = None if self.tried else self._best_assoc()
         if best is not None:                              # 連想で不足が減るうちは回す
@@ -208,6 +301,7 @@ class Thinker:
             line, odd = self.builder.build(self.tray, self.v, self.said)
             rec.update(した事="組立", 行=line, 違和感=odd)
             self.pending = (line, odd)
+            self.felt = dict(getattr(self.builder, "felt", {}))     # 組立の口が出した違和感の強さ（流れには使わず、波で持つだけ）
         else:
             line, odd = self.pending
             if not odd:                                   # 違和感なし → 出力
@@ -237,6 +331,8 @@ class Thinker:
         self.log["tray"].append(len(self.tray.items))
         self.log["odd"].append(sorted(rec["違和感"]))
         self.log["word"].append(rec["語"])
+        rec["感じた物"] = dict(self.felt)
+        self.odd.feel(dict(self.felt, **{k: 1.0 for k in rec["違和感"]}, 材料が不足=rec["不足"]))
         self.n += 1
         for node in self.nodes:
             node.after(self, rec)
@@ -253,8 +349,29 @@ class Thinker:
         a = np.array(self.log["act"], dtype=np.int64)
         return {name: int((a == i).sum()) for i, name in enumerate(ACTS)}
 
+    def tally(self):
+        """違和感の波が、何と一緒に動くかの数え（つなぐ前の下調べ）。
+        下がり方: した事ごとに、その歩での違和感（元の強さ）の変わり方の平均。負なら、その動きの後に下がった。
+        器との動き: 違和感の元の強さと、感情・状態の器の波ごとの動きの量（同じ歩）の相関。動かない物は nan。"""
+        H, R = self.odd.arrays()
+        act = np.array(self.log["act"], dtype=np.int64)
+        dR = np.diff(R, axis=0, prepend=R[:1])
+        drop = {k: {n: (float(dR[act == i, j].mean()) if (act == i).any() else float("nan")) for i, n in enumerate(ACTS)}
+                for j, k in enumerate(self.odd.kinds)}
+        va = np.array(self.v.log["act"], dtype=np.float32)[-len(R):]
+        co = {}
+        for j, k in enumerate(self.odd.kinds):
+            row = []
+            for b in range(va.shape[1]):
+                x, y = R[:, j], va[:, b]
+                row.append(float(np.corrcoef(x, y)[0, 1]) if x.std() > 0 and y.std() > 0 else float("nan"))
+            co[k] = row
+        return dict(下がり方=drop, 器との動き=co)
+
     def arrays(self):
         a = self.v.arrays()
+        H, R = self.odd.arrays()
+        a.update(odd_wave=H, odd_raw=R, odd_kinds=np.array(self.odd.kinds))
         a.update(think_act=np.array(self.log["act"], dtype=np.int8), lack=np.array(self.log["lack"], dtype=np.float32),
                  tray=np.array(self.log["tray"], dtype=np.int32), said_step=np.array([s for s, _ in self.said], dtype=np.int64))
         return a
@@ -313,6 +430,15 @@ def main():
     print("歩", th.n, "内訳", th.counts())
     print("流れ（+語 = 連想で足した、組[…] = 組立と違和感、出『…』 = 出力、待 = 待つ）:")
     print(" ".join(out))
+    t = th.tally()
+    print("違和感の波（持つだけ）。した事の後の変わり方（負 = 下がった）:")
+    for k, d in t["下がり方"].items():
+        print(" ", k, {n: round(v, 3) for n, v in d.items()})
+    print("違和感と、器の波ごとの動きの量の相関（速い波 → 遅い波）:")
+    for k, row in t["器との動き"].items():
+        print(" ", k, [round(v, 2) for v in row])
+    H, _ = th.odd.arrays()
+    print("終わりの時の振幅（速い波・まん中・遅い波）:", {k: [round(float(H[-1, b, j]), 3) for b in (0, H.shape[1] // 2, H.shape[1] - 1)] for j, k in enumerate(th.odd.kinds)})
     print("見張り", dict(張り付き=int(th.v.watch["張り付き"].sum()), 死んだ=th.v.watch["死んだ"], 刻み=th.v.watch["刻み"]))
     np.savez_compressed(a.demo, **th.arrays())
 

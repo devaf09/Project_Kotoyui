@@ -32,7 +32,7 @@ class Budget:
 
 
 def chat(url, model, messages, key_env, budget, temperature=0.2, max_tokens=2048, json_mode=True,
-         reasoning_effort=None, chat_template_kwargs=None, timeout=330, retries=4, wait=60):
+         reasoning_effort=None, chat_template_kwargs=None, timeout=330, retries=4, wait=60, extra=None):
     key = os.environ.get(key_env, "")
     if not key:
         raise RuntimeError(f"環境変数 {key_env} が空（鍵が入っていない）")
@@ -43,6 +43,8 @@ def chat(url, model, messages, key_env, budget, temperature=0.2, max_tokens=2048
         body["reasoning_effort"] = reasoning_effort
     if chat_template_kwargs:
         body["chat_template_kwargs"] = chat_template_kwargs
+    if extra:                                             # 口が受ける他の欄（例: seed）
+        body.update(extra)
     data = json.dumps(body, ensure_ascii=False).encode("utf-8")
     last = None
     for k in range(retries + 1):
