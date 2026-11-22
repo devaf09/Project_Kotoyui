@@ -10,7 +10,7 @@
   分からない時の返事が聞き返しの形（「？」で終わる）の割合、モデルどうしの「分かった」の一致、時間、呼んだ回数、空・切れた答えの数。
 手で置く物: 先生の役の文（ROLE）、温度 0.7、seed 7、答えの上限 2,048 トークン（考えを止められないモデルがあるため）、30 字、使うページ（声に出したページを先頭から --limit 個）。
 python tools/i49e_askback_compare.py --src ... --meta ... --log <three_ア.jsonl> --url <口の URL> --key_env <鍵の環境変数名>
-    --models <m1>,<m2>,... --raw <raw.jsonl> --out <stats.json> [--limit 60]
+    --models <m1>,<m2>,... --raw <raw.jsonl> --out <stats.json> [--limit 60] [--sleep 秒 --plain --reasoning_effort ...]
 """
 from __future__ import annotations
 
@@ -63,6 +63,10 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--max_tokens", type=int, default=2048)
+    ap.add_argument("--sleep", type=float, default=0.0, help="呼ぶ間の待ち（秒）。回数の上限が小さい口のため")
+    ap.add_argument("--plain", action="store_true", help="さくら向けの欄（enable_thinking・seed）を渡さない")
+    ap.add_argument("--reasoning_effort", default=None)
+    ap.add_argument("--stop_on_limit", action="store_true", help="回数の上限（429）に当たったら、そのモデルはそこで止める（再試行しない）")
     a = ap.parse_args()
     rows = [json.loads(l) for l in open(a.log, encoding="utf-8")]
     rows = [r for r in rows if "ページ" in r and r["こ"]["声に出した"]][: a.limit]
@@ -86,13 +90,21 @@ def main():
             msgs = [dict(role="system", content=ROLE), dict(role="user", content=ask_text(page, r["発言"]["B1"], ko))]
             t1 = time.time()
             o = OC.chat(a.url, model, msgs, a.key_env, budget, temperature=a.temperature, max_tokens=a.max_tokens, json_mode=False,
-                        chat_template_kwargs={"enable_thinking": False}, extra=dict(seed=a.seed))
+                        chat_template_kwargs=None if a.plain else {"enable_thinking": False},
+                        extra=None if a.plain else dict(seed=a.seed), reasoning_effort=a.reasoning_effort,
+                        retries=0 if a.stop_on_limit else 4, wait=1 if a.stop_on_limit else 60)
+            if a.sleep:
+                time.sleep(a.sleep)
             secs.append(time.time() - t1)
             fin.append(str(o["finish"]))
             p = parse(o["text"])
             ans.append(p)
             raw.write(json.dumps(dict(モデル=model, 作品=r["作品"], ページ=r["ページ"], 答え=o["text"], finish=o["finish"]), ensure_ascii=False) + "\n")
             raw.flush()
+            if a.stop_on_limit and "429" in str(o["finish"]):
+                print(model, "上限に当たって止めた", len(ans), "ページ目", flush=True)
+                break
+        ans += [None] * (len(rows) - len(ans))             # 止めた後のページは答え無し
         ok = [i for i, p in enumerate(ans) if p]
         rep_w = lem([ans[i]["返事"] for i in ok])
         mean_w = lem([ans[i]["意味の候補"] for i in ok])
@@ -100,14 +112,14 @@ def main():
         notu = [i for i in ok if not ans[i]["分かった"]]
         m = lambda xs: round(float(np.mean(xs)), 4) if len(xs) else None
         res["モデル"][model] = dict(
-            形が合った割合=m([p is not None for p in ans]), 分かったの割合=m([ans[i]["分かった"] for i in ok]),
+            形が合った割合=m([p is not None for p in ans[:len(fin)]]), 分かったの割合=m([ans[i]["分かった"] for i in ok]),
             返事の字の中央値=float(np.median([len(ans[i]["返事"]) for i in ok])) if ok else None,
             返事が30字以内=m([len(ans[i]["返事"]) <= LIMIT for i in ok]),
             返事がことゆいの語を使った=m([bool(rep_w[j] & ko_w[i]) for j, i in enumerate(ok)]),
             意味の候補がことゆいの語を使った=m([bool(mean_w[j] & ko_w[i]) for j, i in enumerate(ok)]),
             意味の候補の語のうち本文にある割合=m([len(mean_w[j] & page_w[i]) / len(mean_w[j]) for j, i in enumerate(ok) if mean_w[j]]),
             分からない時に聞き返しの形=m([ans[i]["返事"].rstrip().endswith(("？", "?")) for i in notu]),
-            秒の中央値=round(float(np.median(secs)), 2), 呼んだ回数=budget.used,
+            秒の中央値=round(float(np.median(secs)), 2), 呼んだ回数=budget.used, 答えたページ=len(fin),
             終わり方={f: fin.count(f) for f in sorted(set(fin))})
         got[model] = ans
         json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
