@@ -3,7 +3,7 @@
 ループ（I49d）はまだ座らせない。ここは先生 2 人だけ。本文はリポジトリにも報告にも入れない（記録 jsonl もリポジトリの外）。
 本の選び方（pick_book）: 青空文庫の目録で、分類 NDC K913（日本の子ども向けの物語）・新字新仮名・役割が著者・原題も副題も無い作品のうち、
   広く知られた作品の多い作者と、事件や冒険の筋の作者（EXCLUDE）を除き、文の数（tools/i49b_read_long.sentences_with_marks）が 200〜600 の物を、
-  作品 ID の crc32 の小さい順に並べた最初の 1 つ。
+  作品 ID の crc32 の小さい順に並べた --book 番目（1 から、既定 1）。
 1 ページ = PAGE_LEN 文。1 ページの流れ: 2 人ともそのページの本文と、それまでのページの 2 人の発言を見る（先のページは見せない）。
   A1「次に何が起きそうか」を一言 → B1（A1 を見て、自分の予想を一言。同じでも違ってもよい）→ A2（B1 を受けて一言）。
 先生: A = ollama（--host、think off）、B = OpenAI 互換の口（さくらの AI Engine。鍵は --key_env の環境変数からだけ読む。enable_thinking false）。
@@ -55,7 +55,7 @@ COPY = 8
 
 
 # ---- 本 ----
-def pick_book(src_dir, meta_csv, lo=200, hi=600):
+def pick_book(src_dir, meta_csv, lo=200, hi=600, rank=1):
     import i49b_read_long as RL
     files = {}
     for f in os.listdir(src_dir):
@@ -76,8 +76,8 @@ def pick_book(src_dir, meta_csv, lo=200, hi=600):
         if lo <= len(S) <= hi:
             cands.append((zlib.crc32(wid.encode()), wid, S))
     cands.sort()
-    _, wid, S = cands[0]
-    return dict(作品ID=wid, 候補の数=len(cands), 文の数=len(S)), S
+    _, wid, S = cands[rank - 1]
+    return dict(作品ID=wid, 並びの番号=rank, 候補の数=len(cands), 文の数=len(S)), S
 
 
 def pages_of(S, n=PAGE_LEN):
@@ -128,7 +128,7 @@ def prompt(page_no, page, said, who, ask):
 
 def run(a):
     import openai_chat as OC
-    info, S = pick_book(a.src, a.meta)
+    info, S = pick_book(a.src, a.meta, rank=a.book)
     P = pages_of(S)
     budget = OC.Budget(a.budget_b)
     said, t0 = [], time.time()
@@ -205,7 +205,7 @@ def count(a):
     import spacy
     rows = [json.loads(l) for l in open(a.log, encoding="utf-8")]
     head, pages, tail = rows[0], [r for r in rows if "ページ" in r], rows[-1]
-    info, S = pick_book(a.src, a.meta)
+    info, S = pick_book(a.src, a.meta, rank=a.book)
     P = pages_of(S)
     nlp = spacy.load("ja_ginza")
     pc, pp = content_of(nlp, P)
@@ -297,6 +297,7 @@ def main():
         p.add_argument("--src", required=True)
         p.add_argument("--meta", required=True)
         p.add_argument("--log", required=True)
+        p.add_argument("--book", type=int, default=1, help="本の選び方の並びの何番目か（1 から）")
     r.add_argument("--host", required=True)
     r.add_argument("--model_a", required=True)
     r.add_argument("--url_b", required=True)

@@ -42,3 +42,12 @@ def test_memory_fades_but_is_not_deleted():
         lp.hear("A" if i % 2 else "B", [(f"w{i}", N)])
     assert 0 < lp.heard[("猫", N)] < h * 0.01
     assert auc([0.1, 0.9], [False, True]) == 1.0 and auc([1, 2], [True, True]) is None
+
+
+def test_base_rate_is_kept_per_speaker_pair():
+    lp = LivePickup()
+    for _ in range(20):
+        lp.hear("本", [("山", N), ("川", N), ("海", N)])     # 本の語は、ほとんど拾われない
+        lp.hear("A", [("猫", N)])
+        lp.hear("B", [("猫", N)])                          # A の語は、B にいつも拾われる
+    assert lp._prior(("新しい語", N), ("本", "A")) < 0.1 < 0.9 < lp._prior(("新しい語", N), ("A", "B"))
