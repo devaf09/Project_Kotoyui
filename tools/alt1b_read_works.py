@@ -123,6 +123,7 @@ def main():
     vecs = load_vecs(a)
     assert len(vecs) >= 2 * a.known, "作品が足りない"
     a.dim = int(vecs[0].shape[1])
+    a.mix = None                                   # 本物の作品では使わない（alt1 の run が記録に書くだけ）
     res = A1.run(a, world=lambda rng: Works(rng, vecs, a.known))
     res.update(作品の文の数=[int(len(v)) for v in vecs], 向きの近さ=alike(vecs), 秒=round(time.time() - t0))
     print("作品", len(vecs), "文", res["作品の文の数"], "向きの近さ", res["向きの近さ"])

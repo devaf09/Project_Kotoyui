@@ -12,5 +12,5 @@
 | 番号 | 問い | 物 | 進み |
 |---|---|---|---|
 | alt1 | 自分が変わったことを自分で言えるか | `alt1_self_change.py`・`alt1_self_change.md` | 自作の入力で済み |
-| alt1b | 同じ問いを本物の作品で | `tools/alt1b_read_works.py` | 道具だけ（PC で回す） |
-| alt2 | 外れそうだと先に分かるか | `tools/alt2_foresee.py`（器の記録の npz から数える） | 道具だけ（本物の記録で回す） |
+| alt1b | 同じ問いを本物の作品で | `tools/alt1b_read_works.py`（まとめは alt1 の 8 節） | 青空文庫 20 作品で済み |
+| alt2 | 外れそうだと先に分かるか | `tools/alt2_foresee.py`・`alt2_foresee.md` | I49b の記録で済み |
