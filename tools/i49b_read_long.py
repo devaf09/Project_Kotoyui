@@ -262,13 +262,120 @@ def main_direction(a, works, seqs):
                 ずれの平均_全部=round(float(np.nanmean(gap)), 4), 張り付き=v.watch["張り付き"].tolist(), 死んだ刻み=int(v.watch["死んだ"]))
 
 
+PAUSES = (0, 10, 100, 1000)
+POST = 5
+
+
+def points_of(works, seqs):
+    """5 作品を続けた並びと、区切りの種類ごとの文の番号、同じ数の区切りでない所（種 0、区切りの直後 2 文を除く）。"""
+    cat, kinds = [], dict(見出し=[], 空き行=[], 作品の替わり目=[])
+    for wi, (w, s) in enumerate(zip(works, seqs)):
+        base = len(cat)
+        if wi > 0:
+            kinds["作品の替わり目"].append(base)
+        for i, (_, m) in enumerate(w):
+            if i == 0:
+                continue
+            if m["見出し"]:
+                kinds["見出し"].append(base + i)
+            elif m["空き行"]:
+                kinds["空き行"].append(base + i)
+        cat += s
+    brk = set(i for v_ in kinds.values() for i in v_)
+    near = set(j for i in brk for j in range(i, i + 3))
+    cand = [i for i in range(1, len(cat) - KS[-1]) if i not in near]
+    ctrl = sorted(random.Random(0).sample(cand, len(brk)))
+    return cat, dict(kinds, 区切りでない所=ctrl)
+
+
+def pause_run(cat, points, L):
+    """points の各文の前に L 刻みの間（tick）を差し込んで読ませる。器のコードは変えず、張り付きの数の増え方を刻みごとに見る。"""
+    v = Vessel(2048, bands=20, longest=1024)
+    kind_of = {i: nm for nm, idx in points.items() for i in idx}
+    N = v.N
+    pin_post, pin_other, pin_pause = np.zeros(N, np.int64), np.zeros(N, np.int64), np.zeros(N, np.int64)
+    pin_post_kind = {nm: np.zeros(N, np.int64) for nm in points}
+    gain_end = {nm: [] for nm in points}
+    sur_first = {nm: [] for nm in points}
+    sur_all = []
+    post_left, post_kind = 0, None
+
+    def step(fn, *x):
+        before = v.watch["張り付き"].copy()
+        out = fn(*x)
+        return out, v.watch["張り付き"] - before
+    for i, x in enumerate(cat):
+        nm = kind_of.get(i)
+        if nm is not None and L > 0:
+            for _ in range(L):
+                _, d = step(v.tick)
+                pin_pause += d
+            gain_end[nm].append(v.gain.copy())
+        if nm is not None:
+            post_left, post_kind = POST, nm
+        if x is None:
+            _, d = step(v.tick)
+            sur = None
+        else:
+            sur, d = step(v.hear, x)
+            sur_all.append(sur)
+        if post_left > 0:
+            pin_post += d
+            pin_post_kind[post_kind] += d
+            if post_left == POST and sur is not None:
+                sur_first[post_kind].append(sur)
+            post_left -= 1
+        else:
+            pin_other += d
+    n_post = sum(len(v_) for v_ in points.values()) * POST
+    n_other = len(cat) - n_post
+    res = dict(間の長さ=L, 刻み=int(v.watch["刻み"]), 死んだ刻み=int(v.watch["死んだ"]),
+               張り付き_間の直後5文=pin_post.tolist(), 張り付き_それ以外の文=pin_other.tolist(), 張り付き_間の中=pin_pause.tolist(),
+               張り付き_直後5文あたり=round(float(pin_post.sum()) / max(1, n_post), 4), 張り付き_それ以外1文あたり=round(float(pin_other.sum()) / max(1, n_other), 4),
+               種類ごと={})
+    sa = np.array(sur_all)
+    res["外れの平均_全部"] = round(float(sa.mean()), 4)
+    for nm in points:
+        g = np.array(gain_end[nm]) if gain_end[nm] else None
+        sf = np.array(sur_first[nm]) if sur_first[nm] else None
+        res["種類ごと"][nm] = dict(
+            数=len(points[nm]), 張り付き_直後5文=pin_post_kind[nm].tolist(),
+            張り付き_直後5文の1か所あたり=round(float(pin_post_kind[nm].sum()) / max(1, len(points[nm])), 3),
+            間の終わりの感度_中央値=np.round(np.median(g, 0), 3).tolist() if g is not None else None,
+            間の終わりの感度_上限の割合=np.round((g >= v.gmax * 0.999).mean(0), 3).tolist() if g is not None else None,
+            直後の文の外れ_波ごと=np.round(sf.mean(0), 4).tolist() if sf is not None else None,
+            直後の文の外れ_平均=round(float(sf.mean()), 4) if sf is not None else None)
+    return res
+
+
 def main():
     ap = argparse.ArgumentParser()
     for k in ("src", "conllu", "content", "func", "wave", "out"):
         ap.add_argument("--" + k, required=True)
     ap.add_argument("--npz", default=None)
     ap.add_argument("--direction", action="store_true", help="b の測り直しだけ（B の入力、区切りの前後の状態の向き）")
+    ap.add_argument("--pause", action="store_true", help="区切りと区切りでない所に黙る刻みを差し込み、張り付きを数える（B の入力）")
     a = ap.parse_args()
+    if a.pause:
+        t0 = time.time()
+        works = pick_works(a.src, a.conllu)
+        import spacy
+        nlp = spacy.load("ja_ginza")
+        vec = Vecs(a)
+        seqs = [[vec.B(d) for d in nlp.pipe([s for s, _ in w], batch_size=256)] for w in works]
+        cat, points = points_of(works, seqs)
+        res = dict(間=[], 直後の文の数=POST)
+        for L in PAUSES:
+            t1 = time.time()
+            r = pause_run(cat, points, L)
+            r["秒"] = round(time.time() - t1)
+            res["間"].append(r)
+            print("間", L, r["秒"], "秒", flush=True)
+            json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        res["秒"] = round(time.time() - t0)
+        json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        print("済み", res["秒"], "秒", flush=True)
+        return
     if a.direction:
         t0 = time.time()
         works = pick_works(a.src, a.conllu)
