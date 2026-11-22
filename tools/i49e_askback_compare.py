@@ -1,0 +1,128 @@
+"""I49e: 聞き返し役の先生を選ぶ小さな比べ（持ち主の案「先生が理解できない時は聞き返すか、ゆっくり言うよう促す」の下ごしらえ、未確定）。
+
+ことゆいを座らせた試し（tools/i49e_three_run.py の記録 jsonl）の、ことゆいが声に出したページを使う。
+先生役（やさしい大人）に、そのページの本文・B1・ことゆいの行を見せ、次の JSON だけで答えてもらう:
+  {"分かった": true/false, "意味の候補": "ことゆいが言いたそうな事（分からなければ空でなく、いちばんありそうな物）", "返事": "ことゆいへの一言"}
+分かった時の返事はふつうに返す一言、分からない時の返事は「〇〇のこと？」の聞き返しか「ゆっくり言ってみて」の促し。
+モデルを替えて、同じページに同じ問いを出す（OpenAI 互換の口、さくらの AI Engine。鍵は環境変数からだけ）。
+数える物（数だけ）: 答えの形が合った割合（JSON・欄がそろう）、分かったの割合、返事の字の中央値と 30 字以内の割合、
+  返事と意味の候補が、ことゆいの行の内容語を使った割合（拾った）、意味の候補の内容語のうち、そのページの本文にある語の割合（話に沿っているか）、
+  分からない時の返事が聞き返しの形（「？」で終わる）の割合、モデルどうしの「分かった」の一致、時間、呼んだ回数、空・切れた答えの数。
+手で置く物: 先生の役の文（ROLE）、温度 0.7、seed 7、答えの上限 2,048 トークン（考えを止められないモデルがあるため）、30 字、使うページ（声に出したページを先頭から --limit 個）。
+python tools/i49e_askback_compare.py --src ... --meta ... --log <three_ア.jsonl> --url <口の URL> --key_env <鍵の環境変数名>
+    --models <m1>,<m2>,... --raw <raw.jsonl> --out <stats.json> [--limit 60]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+import time
+
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "intervention"))
+sys.path.insert(0, HERE)
+
+ROLE = ("あなたは、やさしい大人の先生です。ことゆいという子と、お話を 1 ページずつ読んでいます。"
+        "ことゆいは、まだ赤ちゃんくらいの話し方しかできません。言うのは 2〜3 語で、変な並びの事もあります。直したり点を付けたりはしません。"
+        "ことゆいが言いたい事が分かったら、その語を使って短く返します。分からない時は「〇〇のこと？」と意味の候補を 1 つ挙げて聞き返すか、"
+        "「ゆっくり言ってみて」と促します。返事は 1 文、30 字くらいまで。"
+        '答えは次の JSON だけ: {"分かった": true か false, "意味の候補": "ことゆいが言いたそうな事", "返事": "ことゆいへの一言"}')
+LIMIT = 30
+
+
+def ask_text(page, b1, ko):
+    return f"今のページ:\n{page}\n\n友だちは「{b1}」と言いました。\nことゆいは「{ko}」と言いました。"
+
+
+def parse(text):
+    """答えの中の、欄のそろった最後の JSON（考えを本文に書くモデルは、考えの後ろに答えを置く）。"""
+    for m in reversed(list(re.finditer(r"\{[^{}]*\}", (text or "").strip()))):
+        try:
+            d = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(d, dict) and all(k in d for k in ("分かった", "意味の候補", "返事")):
+            return dict(分かった=bool(d["分かった"]), 意味の候補=str(d["意味の候補"] or ""), 返事=str(d["返事"] or ""))
+    return None
+
+
+def main():
+    import spacy
+    import i49e_listen_count as LC
+    import i49e_read_together as RT
+    import openai_chat as OC
+    ap = argparse.ArgumentParser()
+    for k in ("src", "meta", "log", "url", "key_env", "models", "raw", "out"):
+        ap.add_argument("--" + k, required=True)
+    ap.add_argument("--limit", type=int, default=60)
+    ap.add_argument("--temperature", type=float, default=0.7)
+    ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--max_tokens", type=int, default=2048)
+    a = ap.parse_args()
+    rows = [json.loads(l) for l in open(a.log, encoding="utf-8")]
+    rows = [r for r in rows if "ページ" in r and r["こ"]["声に出した"]][: a.limit]
+    pages = {}
+    for rk in sorted({r["作品"] for r in rows}):
+        _, S = RT.pick_book(a.src, a.meta, rank=rk)
+        pages[rk] = RT.pages_of(S)
+    nlp = spacy.load("ja_ginza")
+    lem = lambda texts: [{l for l, _ in x} for x in LC.words_of(nlp, texts)]
+    page_w = lem([pages[r["作品"]][r["ページ"] - 1] for r in rows])
+    ko_w = [set(r["こ"]["内容語"]) for r in rows]
+    raw = open(a.raw, "w", encoding="utf-8")
+    res = dict(ページ=len(rows), モデル={})
+    got = {}
+    for model in a.models.split(","):
+        budget = OC.Budget(len(rows) * 5)
+        ans, secs, fin = [], [], []
+        for r in rows:
+            page = pages[r["作品"]][r["ページ"] - 1]
+            ko = "".join(r["こ"]["行"])
+            msgs = [dict(role="system", content=ROLE), dict(role="user", content=ask_text(page, r["発言"]["B1"], ko))]
+            t1 = time.time()
+            o = OC.chat(a.url, model, msgs, a.key_env, budget, temperature=a.temperature, max_tokens=a.max_tokens, json_mode=False,
+                        chat_template_kwargs={"enable_thinking": False}, extra=dict(seed=a.seed))
+            secs.append(time.time() - t1)
+            fin.append(str(o["finish"]))
+            p = parse(o["text"])
+            ans.append(p)
+            raw.write(json.dumps(dict(モデル=model, 作品=r["作品"], ページ=r["ページ"], 答え=o["text"], finish=o["finish"]), ensure_ascii=False) + "\n")
+            raw.flush()
+        ok = [i for i, p in enumerate(ans) if p]
+        rep_w = lem([ans[i]["返事"] for i in ok])
+        mean_w = lem([ans[i]["意味の候補"] for i in ok])
+        und = [i for i in ok if ans[i]["分かった"]]
+        notu = [i for i in ok if not ans[i]["分かった"]]
+        m = lambda xs: round(float(np.mean(xs)), 4) if len(xs) else None
+        res["モデル"][model] = dict(
+            形が合った割合=m([p is not None for p in ans]), 分かったの割合=m([ans[i]["分かった"] for i in ok]),
+            返事の字の中央値=float(np.median([len(ans[i]["返事"]) for i in ok])) if ok else None,
+            返事が30字以内=m([len(ans[i]["返事"]) <= LIMIT for i in ok]),
+            返事がことゆいの語を使った=m([bool(rep_w[j] & ko_w[i]) for j, i in enumerate(ok)]),
+            意味の候補がことゆいの語を使った=m([bool(mean_w[j] & ko_w[i]) for j, i in enumerate(ok)]),
+            意味の候補の語のうち本文にある割合=m([len(mean_w[j] & page_w[i]) / len(mean_w[j]) for j, i in enumerate(ok) if mean_w[j]]),
+            分からない時に聞き返しの形=m([ans[i]["返事"].rstrip().endswith(("？", "?")) for i in notu]),
+            秒の中央値=round(float(np.median(secs)), 2), 呼んだ回数=budget.used,
+            終わり方={f: fin.count(f) for f in sorted(set(fin))})
+        got[model] = ans
+        json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        print(model, json.dumps(res["モデル"][model], ensure_ascii=False), flush=True)
+    ms = list(got)
+    agree = {}
+    for i, x in enumerate(ms):
+        for y in ms[i + 1:]:
+            both = [k for k in range(len(rows)) if got[x][k] and got[y][k]]
+            agree[f"{x} と {y}"] = round(float(np.mean([got[x][k]["分かった"] == got[y][k]["分かった"] for k in both])), 4) if both else None
+    res["分かったの一致"] = agree
+    json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    raw.close()
+
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")
+    main()
