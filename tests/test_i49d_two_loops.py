@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "intervention"))
 from i49a_inner_vessel import Vessel  # noqa: E402
 from i49c_think_loop import Node, Words  # noqa: E402
-from i49d_two_loops import ACTS, Near, OddWave, Plain, Thinker, Tray, demo_world  # noqa: E402
+from i49d_two_loops import ACTS, Near, OddWave, Plain, Scored, Thinker, Tray, demo_world  # noqa: E402
 
 
 def make(talk_idx=(0,)):
@@ -159,3 +159,27 @@ def test_odd_wave_does_not_change_behaviour_and_is_tallied():
     assert len(t["器との動き"]["材料が不足"]) == 8
     arr = a.arrays()
     assert arr["odd_wave"].shape[0] == 150 and list(arr["odd_kinds"]) == kinds
+
+
+class FakeScorer:
+    def line(self, keys, marks):
+        self.seen = (list(keys), list(marks))
+        return [dict(間=i, 詰め物="が" if i == 0 else "", 割合=dict(迷い=0.2 + 0.1 * i, 組の珍しさ=0.9 - 0.1 * i)) for i in range(len(keys))]
+
+
+def test_scored_builder_fills_line_and_feeds_wave_without_changing_flow():
+    vocab, talk = demo_world()
+    words = [(n, v, dict(m, 過去=True) if m.get("文の終わり") else m) for n, v, m in talk[0]]
+    words[-1] = (words[-1][0], words[-1][1], dict(words[-1][2], 展開=0.25))
+    fs = FakeScorer()
+    th = Thinker(Vessel(64, bands=8), Words(words), None, Scored(fs, {n: "NOUN" for n in vocab}))
+    th.run(20)
+    assert th.said[0][1] == ["A0", "が", "A1", "A2"]      # 聞いた順に並べ、詰め物が入る
+    assert fs.seen[1] == ["過去"]
+    plain = Thinker(Vessel(64, bands=8), Words(talk[0]))
+    plain.run(20)
+    assert th.log["act"] == plain.log["act"]              # 行づくりの違和感は、流れを変えない
+    H, R = th.odd.arrays()
+    k = th.odd.kinds
+    assert np.isclose(R[:, k.index("迷い")].max(), 0.4) and np.isclose(R[:, k.index("組の珍しさ")].max(), 0.9)
+    assert np.isclose(R[:, k.index("展開")].max(), 0.25)
