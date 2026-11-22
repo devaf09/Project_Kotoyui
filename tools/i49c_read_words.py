@@ -76,14 +76,38 @@ class WordReader:
         return len(self.items)
 
     @classmethod
-    def from_tokens(cls, sents, vec_of, mode="skip"):
-        """sents: [(語の並び [(原形, 品詞)], 区切りの印の dict)]。vec_of(原形, 品詞) → ベクトル か None。mode: skip か none。"""
-        assert mode in MODES
+    def from_tokens(cls, sents, vec_of, mode="skip", mark_mode="prev"):
+        """sents: [(語の並び [(原形, 品詞) か (原形, 品詞, 語の印の集合)], 区切りの印の dict)]。vec_of(原形, 品詞) → ベクトル か None。
+        mode: skip か none。mark_mode（語の印の移し方、I49d）: prev = 直前のベクトルを持つ語へ移す（無ければ落とす）、
+        sent = 文の印としてまとめ、文の初めの語に付ける。語の印の無い並びなら、どちらでも同じ。"""
+        assert mode in MODES and mark_mode in ("prev", "sent")
         out, carry = [], {}
         for toks, marks in sents:
-            row = [(w, vec_of(w, p)) for w, p in toks]
-            if mode == "skip":
-                row = [(w, v) for w, v in row if v is not None]
+            row, wm, sent_m = [], [], set()
+            for tk in toks:
+                w, p = tk[0], tk[1]
+                ms = set(tk[2]) if len(tk) > 2 else set()
+                v = vec_of(w, p)
+                sent_m |= ms
+                if mode == "skip" and v is None:
+                    if mark_mode == "prev" and ms and wm:
+                        wm[-1] |= ms                       # 飛ばす語の印は、直前の残る語へ移す
+                    continue
+                row.append((w, v))
+                wm.append(set(ms))
+            if mode == "none" and mark_mode == "prev":
+                for k in range(len(row)):                  # ベクトル無しの語の印も、直前のベクトルを持つ語へ移す
+                    if row[k][1] is None and wm[k]:
+                        j = next((j for j in range(k - 1, -1, -1) if row[j][1] is not None), None)
+                        if j is not None:
+                            wm[j] |= wm[k]
+                        wm[k] = set()
+            if mark_mode == "sent":
+                wm = [set() for _ in row]
+                if row:
+                    wm[0] = set(sent_m)
+            if not row and mark_mode == "sent" and sent_m:
+                carry = dict(carry, **{m: True for m in sent_m})
             here = dict(carry)
             here.update({kk: True for kk, vv in marks.items() if vv})
             if not row:                                   # 語が全部飛ばされた文の区切りの印は、次の文の初めの語へ持ち越す
@@ -97,6 +121,7 @@ class WordReader:
                     m["文頭"] = True
                 if k == len(row) - 1:
                     m["文の終わり"] = True
+                m.update({x: True for x in wm[k]})
                 out.append((w, v, m))
         return cls(out)
 
@@ -105,7 +130,7 @@ def counts(sents, vec_of):
     n_tok = n_vec = 0
     per_all, per_vec, zero = [], [], 0
     for toks, _ in sents:
-        k = sum(vec_of(w, p) is not None for w, p in toks)
+        k = sum(vec_of(tk[0], tk[1]) is not None for tk in toks)
         n_tok += len(toks)
         n_vec += k
         per_all.append(len(toks))
@@ -162,8 +187,8 @@ def trial(sents, wv, mode):
     from i49a_inner_vessel import Vessel
     pos_of = {}
     for toks, _ in sents:
-        for w, p in toks:
-            pos_of.setdefault(w, p)
+        for tk in toks:
+            pos_of.setdefault(tk[0], tk[1])
     rd = WordReader.from_tokens(sents, wv.of, mode)
     loop = TL.Loop(Vessel(2048, bands=20, longest=1024), rd)
     tr = loop.attach(Trace(pos_of, sum(v is not None for _, v, _ in rd.items), 2048))
