@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "intervention"))
 from i49a_inner_vessel import Vessel  # noqa: E402
 from i49c_think_loop import Node, Words  # noqa: E402
-from i49d_two_loops import ACTS, Near, Plain, Thinker, Tray, demo_world  # noqa: E402
+from i49d_two_loops import ACTS, Near, OddWave, Plain, Thinker, Tray, demo_world  # noqa: E402
 
 
 def make(talk_idx=(0,)):
@@ -134,3 +134,28 @@ def test_plain_builder_oddness():
     assert not odd
     _, odd = Plain().build(t, v, [(0, line)])
     assert set(odd) == {"もう言った"}
+
+
+def test_odd_wave_holds_and_fades_fast_before_slow():
+    w = OddWave(Vessel(4, bands=6).a)
+    for _ in range(5):
+        w.feel({"x": 1.0})
+    up = w.S[:, 0].copy()
+    assert up[0] > up[-1] > 0                             # 速い波が先に立つ
+    for _ in range(40):
+        w.feel({"y": 0.5})                                # 途中で種類が増えてもよい
+    assert w.S[0, 0] < w.S[-1, 0]                         # 速い波は先に消え、遅い波に残る
+    H, R = w.arrays()
+    assert H.shape == (45, 6, 2) and R.shape == (45, 2) and H[0, :, 1].max() == 0
+
+
+def test_odd_wave_does_not_change_behaviour_and_is_tallied():
+    a, _, _ = make((0, 1, 2, 3))
+    a.run(150)
+    kinds = a.odd.kinds
+    assert "材料が不足" in kinds and "もう言った" in kinds
+    t = a.tally()
+    assert t["下がり方"]["材料が不足"]["連想"] < 0           # 連想は、不足が減る時だけ足す
+    assert len(t["器との動き"]["材料が不足"]) == 8
+    arr = a.arrays()
+    assert arr["odd_wave"].shape[0] == 150 and list(arr["odd_kinds"]) == kinds
