@@ -38,3 +38,18 @@ def test_easy_case_is_answered_right_after_reading():
     res = A.run(args())
     assert res["new/drop/0"]["all"] == 1.0                 # はっきりした作品を読んだ直後は、前の自分と比べれば当たる
     assert res["new/turn_auc"][-1] > 0.9                   # 初めての物を読むと、遅い波の向きが、いつもより大きく替わる
+
+
+def test_real_works_tool_runs_on_made_up_vectors(tmp_path):
+    """alt1b（本物の作品用の道具）を、自作のベクトルの置き場で通す。作品の読み込みは PC だけなので、ここでは通さない。"""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
+    import alt1b_read_works as B
+    rng = np.random.default_rng(0)
+    wd = A.World(rng, 64, 4, 1.0)
+    vecs = [wd.sent(w, 300) for w in range(8)]
+    ws = B.Works(np.random.default_rng(1), vecs, 3)
+    assert ws.usual(130).shape == (130, 64) and ws.work(4, 60).shape == (60, 64) and ws.probe(5, 20).shape == (20, 64)
+    res = A.run(args(trials=4), world=lambda r: B.Works(r, vecs, 3))
+    assert res["new/drop/0"]["all"] >= 0.75
+    near = B.alike(vecs)
+    assert near["同じ作品の前と後ろ"] > near["別の作品"]

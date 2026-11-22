@@ -46,10 +46,12 @@ def unit(x):
 
 
 class World:
-    """作品の中心と、共通の向き。sent(w, n) で作品 w の文を n 本作る。"""
+    """作品の中心と、共通の向き。sent(w, n) で作品 w の文を n 本作る。作品 0〜K−1 が知っている物、K〜2K−1 が初めての物。
+    one() が使う口は usual(n)（いつもの混ぜ物）・work(w, n)（作品 w を読む）・probe(w, n)（読んでいない文）の 3 つ。"""
 
-    def __init__(self, rng, dim, works, mix):
-        self.rng, self.D, self.mix = rng, dim, float(mix)
+    def __init__(self, rng, dim, known, mix):
+        self.rng, self.D, self.K, self.mix = rng, dim, int(known), float(mix)
+        works = 2 * self.K
         self.common = unit(cvec(rng, dim))
         self.center = unit(cvec(rng, works, dim))
 
@@ -57,6 +59,11 @@ class World:
         w = np.broadcast_to(np.asarray(w), (n,))
         noise = unit(cvec(self.rng, n, self.D))
         return unit(self.common[None] + self.mix * self.center[w] + noise).astype(np.complex64)
+
+    def usual(self, n):
+        return self.sent(self.rng.integers(0, self.K, n), n)
+
+    work = probe = sent
 
 
 def sur_of(S, X):
@@ -75,29 +82,30 @@ def turn(S0, S1):
     return 1.0 - d / np.maximum(n, 1e-30)
 
 
-def one(seed, kind, a):
-    """1 回分。kind: new（初めての作品）・re（知っている作品の読み直し）・usual（いつもの混ぜ物）。"""
+def one(seed, kind, a, world=None):
+    """1 回分。kind: new（初めての作品）・re（知っている作品の読み直し）・usual（いつもの混ぜ物）。
+    world(rng) で入力の作り手を替えられる（本物の作品は tools/alt1b_read_works.py）。"""
     rng = np.random.default_rng(seed)
     K = a.known
-    wd = World(rng, a.dim, 2 * K, a.mix)
+    wd = world(rng) if world else World(rng, a.dim, K, a.mix)
     v = V.Vessel(a.dim, a.bands, a.longest)
-    for x in wd.sent(rng.integers(0, K, a.base), a.base):
+    for x in wd.usual(a.base):
         v.hear(x)
     S0 = v.S.copy()
     o = V.Vessel(a.dim, a.bands, a.longest)                                        # 別の個体: 同じ作品の、別の文を読んだ
-    for x in wd.sent(rng.integers(0, K, a.base), a.base):
+    for x in wd.usual(a.base):
         o.hear(x)
     target = int(rng.integers(K, 2 * K)) if kind == "new" else int(rng.integers(0, K)) if kind == "re" else -1
-    read = wd.sent(target, a.read) if target >= 0 else wd.sent(rng.integers(0, K, a.read), a.read)
+    read = wd.work(target, a.read) if target >= 0 else wd.usual(a.read)
     for x in read:
         v.hear(x)
-    probes = [wd.sent(w, a.probe) for w in range(2 * K)]
+    probes = [wd.probe(w, a.probe) for w in range(2 * K)]
     s0 = np.stack([sur_of(S0, p).mean(axis=1) for p in probes], axis=1)            # （波, 候補）
     so = np.stack([sur_of(o.S, p).mean(axis=1) for p in probes], axis=1)
     out = dict(target=target, turn=turn(S0, v.S), drop=[], now=[], other=[])
     done = 0
     for d in DELAYS:
-        for x in wd.sent(rng.integers(0, K, d - done), d - done):
+        for x in wd.usual(d - done):
             v.hear(x)
         done = d
         s1 = np.stack([sur_of(v.S, p).mean(axis=1) for p in probes], axis=1)
@@ -112,10 +120,10 @@ def auc(pos, neg):
     return float(((pos[:, None] > neg[None]).sum() + 0.5 * (pos[:, None] == neg[None]).sum()) / (len(pos) * len(neg)))
 
 
-def run(a):
+def run(a, world=None):
     half = V.Vessel(a.dim, a.bands, a.longest).half
     res = dict(half=[round(float(h), 1) for h in half], mix=a.mix, trials=a.trials, chance=1.0 / (2 * a.known))
-    runs = {k: [one(a.seed + i, k, a) for i in range(a.trials)] for k in ("new", "re", "usual")}
+    runs = {k: [one(a.seed + i, k, a, world) for i in range(a.trials)] for k in ("new", "re", "usual")}
     for kind in ("new", "re"):
         t = np.array([r["target"] for r in runs[kind]])
         for name in ("drop", "now", "other"):
@@ -127,6 +135,16 @@ def run(a):
         tp, tn = np.stack([r["turn"] for r in runs[kind]]), np.stack([r["turn"] for r in runs["usual"]])
         res[f"{kind}/turn_auc"] = [round(auc(tp[:, k], tn[:, k]), 3) for k in range(len(half))]
     return res
+
+
+def show(res, bands):
+    pick = [0, 4, 8, 12, 16, bands - 1]
+    print("半減期", [res["half"][k] for k in pick], "/ でたらめ", res["chance"])
+    for key, val in res.items():
+        if isinstance(val, dict) and "band" in val:
+            print(f"{key:14s} 全部の波 {val['all']:.2f}  波ごと", [val["band"][k] for k in pick])
+        elif key.endswith("turn_auc"):
+            print(f"{key:14s} 波ごと", [val[k] for k in pick])
 
 
 def main():
@@ -144,13 +162,8 @@ def main():
     ap.add_argument("--out")
     a = ap.parse_args()
     res = run(a)
-    pick = [0, 4, 8, 12, 16, a.bands - 1]
-    print("半減期", [res["half"][k] for k in pick], "/ でたらめ", res["chance"], "/ mix", a.mix)
-    for key, val in res.items():
-        if isinstance(val, dict):
-            print(f"{key:14s} 全部の波 {val['all']:.2f}  波ごと", [val["band"][k] for k in pick])
-        elif key.endswith("turn_auc"):
-            print(f"{key:14s} 波ごと", [val[k] for k in pick])
+    print("mix", a.mix)
+    show(res, a.bands)
     if a.out:
         with open(a.out, "w", encoding="utf-8") as f:
             json.dump(res, f, ensure_ascii=False, indent=1)
