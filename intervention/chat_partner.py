@@ -92,6 +92,24 @@ def unsure_ev(r):
     return None
 
 
+# 先生を OpenAI 互換の口（クラウドなど）でも呼べるようにする（--teacher_api openai）。既定は今まで通り ollama。
+# 鍵は --teacher_key_env の環境変数から読むだけで、コードにもログにも書かない。呼ぶ回数は --teacher_max_calls で止める（越えたら BudgetOver で止まる）。
+TEACHER_API = None          # None = ollama。dict(url, key_env, budget, max_tokens, reasoning_effort, chat_template_kwargs)
+TEACHER_LAST = {}           # 最後の呼び出しの finish・返ったモデル名（本文が空で length なら「考えで切れた」）
+
+
+def teacher_chat(host, model, msgs, temperature):
+    TEACHER_LAST.clear()
+    if TEACHER_API is None:
+        return ollama_chat(host, model, msgs, temperature=temperature, first_line=False, num_predict=2048, fmt="json")
+    import openai_chat as OC
+    o = OC.chat(TEACHER_API["url"], model, msgs, TEACHER_API["key_env"], TEACHER_API["budget"], temperature=temperature,
+                max_tokens=TEACHER_API["max_tokens"], reasoning_effort=TEACHER_API.get("reasoning_effort"),
+                chat_template_kwargs=TEACHER_API.get("chat_template_kwargs"))
+    TEACHER_LAST.update(finish=o["finish"], model=o["model"])
+    return o["text"]
+
+
 def teacher_eval(host, model, history, reply, stage, prompt="old", unsure="off", temperature=0.2):
     """prompt = old（今の型）か、I48u の促しの型（i48u_teacher.PROMPTS の p2a・p2b・p2c）。unsure = off・u1・u2（I48bj）。"""
     hist = "\n".join(history[-6:])
@@ -100,7 +118,7 @@ def teacher_eval(host, model, history, reply, stage, prompt="old", unsure="off",
         import i48u_teacher as U48
         msgs = [dict(role="system", content=U48.PROMPTS[prompt] + extra + STAGES[stage]),
                 dict(role="user", content=f"会話の流れ:\n{hist}\n\nボットの返事:\n{reply}")]
-        text = ollama_chat(host, model, msgs, temperature=temperature, first_line=False, num_predict=2048, fmt="json")
+        text = teacher_chat(host, model, msgs, temperature)
         if extra:
             try:
                 u = unsure_ev(json.loads(text[text.find("{"): text.rfind("}") + 1]))
@@ -111,8 +129,10 @@ def teacher_eval(host, model, history, reply, stage, prompt="old", unsure="off",
         return U48.parse(text, reply)
     msgs = [dict(role="system", content=TEACHER + extra + STAGES[stage]),
             dict(role="user", content=f"会話の流れ:\n{hist}\n\nボットの返事:\n{reply}")]
-    text = ollama_chat(host, model, msgs, temperature=temperature, first_line=False, num_predict=2048, fmt="json")
+    text = teacher_chat(host, model, msgs, temperature)
     j = text[text.find("{"): text.rfind("}") + 1] if "{" in text else ""
+    if not text and TEACHER_LAST.get("finish") == "length":
+        return None, "考えで切れた"
     try:
         r = json.loads(j)
     except Exception:
@@ -217,6 +237,13 @@ def main():
     ap.add_argument("--log")
     ap.add_argument("--stats")
     ap.add_argument("--no_one_clause", action="store_true")
+    ap.add_argument("--teacher_api", default="ollama", choices=("ollama", "openai"), help="先生の口。openai = OpenAI 互換の口（--teacher_url）")
+    ap.add_argument("--teacher_url", default=None, help="--teacher_api openai の口の URL（.../v1 まで）")
+    ap.add_argument("--teacher_key_env", default="", help="--teacher_api openai の鍵を入れた環境変数の名前（鍵そのものは渡さない）")
+    ap.add_argument("--teacher_max_calls", type=int, default=800, help="--teacher_api openai で 1 回の実行で先生を呼ぶ回数の上限")
+    ap.add_argument("--teacher_max_tokens", type=int, default=2048)
+    ap.add_argument("--teacher_reasoning", default=None, help="考える型の先生の考えの量（low など）")
+    ap.add_argument("--teacher_no_thinking", action="store_true", help="chat_template_kwargs に enable_thinking: false を渡す")
     ap.add_argument("--teacher", help="I35z: 先生役のモデル（Ollama の名前）。毎回の返事を見て、指摘をボットの経験に足す")
     ap.add_argument("--reader", default="ginza", choices=("ginza", "own"), help="I36: own = GiNZA を使わない読み手")
     ap.add_argument("--think", default="on", choices=("on", "off", "unset"), help="考える型のモデルの考え: on = 考えて本文だけ使う")
@@ -278,6 +305,11 @@ def main():
     ap.add_argument("--no_model_reply", action="store_true", help="先生のお手本の返事を経験に足さない")
     a = ap.parse_args()
     ollama_chat.__defaults__ = ollama_chat.__defaults__[:-1] + ({"on": True, "off": False, "unset": None}[a.think],)
+    if a.teacher_api == "openai":                           # 先生だけ OpenAI 互換の口で呼ぶ（話し相手は今まで通り ollama）
+        import openai_chat as OC
+        globals()["TEACHER_API"] = dict(url=a.teacher_url, key_env=a.teacher_key_env, budget=OC.Budget(a.teacher_max_calls),
+                                        max_tokens=a.teacher_max_tokens, reasoning_effort=a.teacher_reasoning,
+                                        chat_template_kwargs={"enable_thinking": False} if a.teacher_no_thinking else None)
     import chat_bot3 as B3
 
     def praise(ev, stage, streak):
