@@ -129,22 +129,41 @@ class Plain:
         return line, odd
 
 
+class Pick:
+    """選ぶ口の見本（持ち主と話した「どれを選ぶか」、未確定）: 入れ物の材料から、重さの大きい順に k 個だけ残す。
+    weight_of(名前) → 数（例: 会話の数えから出した「拾われやすさ」）。重さの無い語は、いちばん後ろ。k は手で置く数。"""
+
+    def __init__(self, weight_of, k=3):
+        self.weight_of, self.k = weight_of, int(k)
+
+    def pick(self, mats):
+        def w(it):
+            v = self.weight_of(it["名前"])
+            return -np.inf if v is None else float(v)
+        keep = sorted(range(len(mats)), key=lambda i: (-w(mats[i]), i))[: self.k]
+        return [mats[i] for i in sorted(keep)]
+
+
 class Scored:
     """組立の口の 2 つ目: 仮の組立（Plain）の違和感で流れを決め、行は外の行づくり（scorer.line）で詰め物を入れて作る。
     scorer.line(keys, marks) → 間ごとの dict（詰め物、割合 = 種類 → いつもの値の並びの中の順位の割合 0〜1）。tools/i49d_odd.OddScorer と同じ形。
     行づくりが出す違和感（迷い・自信のなさ など）は、流れには使わない。felt（種類 → 行の中でいちばん大きい割合）に置き、
     思考のループが違和感の波へ渡す（持つだけ）。切る線（上位 1 割 など）は置かない。
-    語の順番は、聞いた順（連想で入った語は後ろ）。品詞は pos_of（名前 → 品詞）から。品詞の分からない語は行づくりに渡さない。"""
+    pick（選ぶ口）を渡すと、行づくりに渡す前に材料を選ぶ。語の順番は、聞いた順（連想で入った語は後ろ）。品詞は pos_of（名前 → 品詞）から。品詞の分からない語は行づくりに渡さない。"""
 
-    def __init__(self, scorer, pos_of, mark_names=("過去", "否定", "丁寧", "進行", "問い")):
+    def __init__(self, scorer, pos_of, mark_names=("過去", "否定", "丁寧", "進行", "問い"), pick=None):
         self.scorer, self.pos_of, self.mark_names = scorer, pos_of, tuple(mark_names)
+        self.pick = pick                                  # 選ぶ口（無ければ全部使う）
         self.plain = Plain()
         self.felt = {}
 
     def build(self, tray, vessel, said):
         _, odd = self.plain.build(tray, vessel, said)
         mats = sorted(tray.vecs(), key=lambda it: (it["種類"] != "語", it["歩"]))
-        keys = [(it["名前"], self.pos_of[it["名前"]]) for it in mats if self.pos_of.get(it["名前"])]
+        mats = [it for it in mats if self.pos_of.get(it["名前"])]
+        if self.pick is not None:
+            mats = self.pick.pick(mats)                   # 並びは聞いた順のまま、選んだ物だけ残す
+        keys = [(it["名前"], self.pos_of[it["名前"]]) for it in mats]
         rows = self.scorer.line(keys, [m for m in self.mark_names if tray.has_mark(m)]) if keys else []
         fill = {int(r["間"]): r["詰め物"] for r in rows}
         line = []

@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "intervention"))
 from i49a_inner_vessel import Vessel  # noqa: E402
 from i49c_think_loop import Node, Words  # noqa: E402
-from i49d_two_loops import ACTS, Near, OddWave, Plain, Scored, Thinker, Tray, demo_world  # noqa: E402
+from i49d_two_loops import ACTS, Near, OddWave, Pick, Plain, Scored, Thinker, Tray, demo_world  # noqa: E402
 
 
 def make(talk_idx=(0,)):
@@ -183,3 +183,13 @@ def test_scored_builder_fills_line_and_feeds_wave_without_changing_flow():
     k = th.odd.kinds
     assert np.isclose(R[:, k.index("迷い")].max(), 0.4) and np.isclose(R[:, k.index("組の珍しさ")].max(), 0.9)
     assert np.isclose(R[:, k.index("展開")].max(), 0.25)
+
+
+def test_pick_keeps_top_k_in_heard_order():
+    vocab, talk = demo_world()
+    w = {"A0": 0.1, "A1": 0.9, "A2": 0.5}
+    fs = FakeScorer()
+    th = Thinker(Vessel(64, bands=8), Words(talk[0]), None, Scored(fs, {n: "NOUN" for n in vocab}, pick=Pick(w.get, 2)))
+    th.run(20)
+    assert [k for k, _ in fs.seen[0]] == ["A1", "A2"]
+    assert Pick(lambda n: None, 2).pick([dict(名前="x"), dict(名前="y"), dict(名前="z")]) == [dict(名前="x"), dict(名前="y")]
