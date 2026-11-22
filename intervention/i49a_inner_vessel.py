@@ -90,15 +90,27 @@ class Vessel:
         self._stop()
         self._record(0, self.last)
 
-    def hear(self, x, src=1):
+    def guess(self, x):
+        """今の状態で x を言い当てた時の外れ（波ごと）。状態は変えない。"""
         x = np.asarray(x, dtype=np.complex64).reshape(self.D)
         nx = float(np.linalg.norm(x))
         n = self.act()
         sur = np.ones(self.N, dtype=np.float32)
         ok = (n > 0) & (nx > 0)
-        if ok.any():                                                 # 聞く前の状態で言い当てる
+        if ok.any():
             dot = np.abs(self.S[ok] @ np.conj(x))
             sur[ok] = 1.0 - np.minimum(1.0, dot / (n[ok] * nx))
+        return sur
+
+    def whole(self):
+        """全部の波を足した向き（長さ 1）。全部 0 なら None。重みは掛けない（大きい波ほど多く入る）。"""
+        s = self.S.sum(axis=0)
+        n = float(np.linalg.norm(s))
+        return (s / n).astype(np.complex64) if n > 0 else None
+
+    def hear(self, x, src=1):
+        x = np.asarray(x, dtype=np.complex64).reshape(self.D)
+        sur = self.guess(x)                                          # 聞く前の状態で言い当てる
         self.gain *= 1.0 + self.a * (sur - self.usual)               # いつもより外れたら感度を上げる
         self.usual += self.a * (sur - self.usual)
         self._balance()
