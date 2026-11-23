@@ -28,8 +28,9 @@ BACK = {"次": "前", "前": "次", "同じ": "同じ"}
 
 
 class Shifter:
-    def __init__(self, rel, fill=False):
+    def __init__(self, rel, fill=False, back=True):
         self.rel = rel
+        self.back = bool(back)                            # 並びを逆向きに問えるか（「x の前」= 次が x になる語）。比べのために切れる
         self.fill = bool(fill)                            # 並びを自分で埋めるか
         self._mv = {}                                     # 次・前の引きの控え（並びが増えたら捨てる）
         self.filled = []                                  # 埋めた並び: (前の語, 後の語)
@@ -46,6 +47,8 @@ class Shifter:
         """w の 次（前）。並びを知らなければ None。数のいちばん多い物。"""
         if d == "同じ":
             return w
+        if d == "前" and not self.back:
+            return None
         if (w, d) in self._mv:
             return self._mv[(w, d)]
         si, so = (0, 2) if d == "次" else (2, 0)

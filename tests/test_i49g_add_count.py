@@ -74,3 +74,15 @@ def test_right_or_wrong_only_still_grows_with_the_song():
     y, n = AC.yes_no(True), AC.yes_no(False)
     assert y["二十五問ごと"][0]["言った答えの数の平均"] > y["二十五問ごと"][-1]["言った答えの数の平均"] == 1.0
     assert n["全体"]["一回目で当たり"] < 0.1 < y["全体"]["一回目で当たり"]
+
+
+def test_new_sign_is_found_after_one_search():
+    o = AC.new_sign()
+    assert o["足し算を 100 問"]["初めの十問の言った数"][0] > 10 and o["足し算を 100 問"]["初めの十問の言った数"][1:] == [1] * 9
+    assert o["足し算を 0 問"]["全体"]["言った答えの数の平均"] > o["足し算を 100 問"]["全体"]["言った答えの数の平均"]
+
+
+def test_subtraction_needs_the_song_read_backwards():
+    o = AC.subtract()
+    assert o["上りの数え歌だけ"]["二十五問ごと"][-1]["一回目で当たり"] == 1.0
+    assert o["上りの数え歌だけ・逆向きに問えない"]["全体"]["一回目で当たり"] == 0.0

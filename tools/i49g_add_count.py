@@ -33,6 +33,17 @@
    ことゆいは、違うと言われたら次の候補を言う。合ってると言われた答えだけを事実として覚える。
    候補の順: ずれを運んだ票の多い順 → 関係の表の点の多い順 → 残りは、最初に言った答えから数え歌で近い順（数え歌を知らなければ候補の並び順）。
    白紙から 1 桁の 100 問を 1 周。25 問ごとの、1 回目で当たった割合と、当たるまでに言った答えの数の平均。数え歌あり／なし。
+11. 引き算（持ち主の案「引き算の歌を知らなくても引き算ができるか」）。問いは足し算の 100 問を逆にした物（C − B = A）。先生は 合ってる／違う だけ返す。白紙から 1 周。
+   (ア) 聞いた数え歌は上りだけ（0 1 … 18）。「前」は、並びを逆向きに問って出す。引き算の事実を探り当てながら、ずれの決まりを数える。
+   (イ) (ア) で、並びを逆向きに問えなくした時。
+   (ウ) 足し算の 100 問を覚えた後。引き算の事実は 1 つも教わらない。席の入れ替え（intervention/i49g_flip.Flip）を数える。
+   25 問ごとの、1 回目で当たった割合と、言った答えの数の平均。
+12. 初めて見る印「−」（持ち主の案「初めて引き算の式をみて、− を正解不正解の答えだけでどう認識するか」）: 足し算（印「＋」）を覚えた後、印「−」の式を初めて出す。
+   先生は 合ってる／違う だけ。事実は印ごとに別に持つ。答えを言う順:
+     席の入れ替えの票（知っている印の事実から。まだ 1 つも探り当てていなければ票は無い）→ その印でのずれを運んだ票 →
+     知っている印（＋）として答えた物（知らない印なので、知っている印として言ってみる）→ その印の表の点 → 最初に言った答えから数え歌で近い順。
+   足し算を 100 問全部 ／ 80 問だけ ／ 0 問 覚えている時。問いの順は 2 問目から（1 問目の 0−0 は ＋ として答えても当たるため、後ろへ回す）。
+   初めの 3 問で言った答えの並び、25 問ごとの 1 回目の当たりと言った数、数えた入れ替え方と決まり。
 語の向き: なし ／ 数え歌（"0 1 2 … 18" を聞いた時の、隣どうしの出方を数えた向き。n の向き = n−1・n・n+1 の所が 1）。
 乱数は使わない。手で置く物: 問いの順（37 飛ばし）、取り分ける 20 問（(A + 2B) を 5 で割り切れる組）、数え歌の窓（隣 1 つ）、周の数。
 python tools/i49g_add_count.py --out <stats.json>
@@ -392,6 +403,95 @@ def yes_no(song=True):
                                      言った答えの数の平均=round(float(np.mean([n for n, _ in rows])), 2)))
 
 
+def subtract():
+    """11. 引き算を、当たり外れだけで。"""
+    from i49g_flip import Flip
+    from i49g_shift import Shifter
+    subs = [(c, b, a) for a, b, c in facts()]
+
+    def blocks(tries):
+        return dict(二十五問ごと=[dict(一回目で当たり=round(sum(1 for n in tries[i:i + 25] if n == 1) / 25, 4),
+                                    言った答えの数の平均=round(float(np.mean(tries[i:i + 25])), 2)) for i in range(0, 100, 25)],
+                    全体=dict(一回目で当たり=round(sum(1 for n in tries if n == 1) / 100, 4), 言った答えの数の平均=round(float(np.mean(tries)), 2)))
+
+    out = {}
+    for name, back in (("上りの数え歌だけ", True), ("上りの数え歌だけ・逆向きに問えない", False)):
+        sh = Shifter(Relation(lambda w: None), back=back)
+        sh.hear_song(CANDS)
+        tries = []
+        for t in subs:
+            order, _ = guess_order(sh, t[0], t[1], CANDS)
+            tries.append(order.index(t[2]) + 1)
+            sh.learn(t)
+        out[name] = blocks(tries)
+        out[name]["決まり"] = {f"{('左', '右')[si]}が{d}": dict(c) for (si, d), c in sorted(sh.rule.items())}
+    add = Relation(lambda w: None)
+    for t in facts():
+        add.learn(t)
+    fl, tries = Flip(add), []
+    for t in subs:
+        order = fl.ask(t[0], t[1], CANDS)["順"]
+        order = order + [c for c in CANDS if c not in order]
+        tries.append(order.index(t[2]) + 1)
+        fl.learn(t)
+    out["足し算を覚えた後・席の入れ替え"] = blocks(tries)
+    out["足し算を覚えた後・席の入れ替え"]["入れ替え方"] = {"".join("ABC"[i] for i in p): dict(有った=fl.hit[p], 無かった=fl.miss[p]) for p in fl.hit}
+    out["足し算を覚えた後・席の入れ替え"]["初めの十問の言った数"] = tries[:10]
+    return out
+
+
+def new_sign():
+    """12. 初めて見る印「−」を、当たり外れだけで。"""
+    from i49g_flip import Flip
+    from i49g_shift import Shifter
+    subs = [(c, b, a) for a, b, c in facts()]
+    subs = subs[1:] + subs[:1]
+    out = {}
+    for name, keep in (("足し算を 100 問", lambda t: True), ("足し算を 80 問", lambda t: not held(t)), ("足し算を 0 問", lambda t: False)):
+        add = Shifter(Relation(lambda w: None))
+        add.hear_song(CANDS)
+        for t in facts():
+            if keep(t):
+                add.learn(t)
+        sub = Shifter(Relation(lambda w: None))
+        sub.hear_song(CANDS)
+        fl, tries, said = Flip(add.rel), [], []
+        for t in subs:
+            order = list(fl.ask(t[0], t[1], CANDS)["順"])
+            o = sub.ask(t[0], t[1], CANDS)
+            if o["段"] == "ずれを運ぶ":
+                order += [c for c in sorted(o["点"], key=lambda c: (-o["点"][c], CANDS.index(c))) if c not in order]
+            if add.rel.tri:
+                as_plus = add.ask(t[0], t[1], CANDS)["答え"]
+                if as_plus is not None and as_plus not in order:
+                    order.append(as_plus)
+            if o["段"] != "ずれを運ぶ" and o["答え"] is not None:
+                order += [c for c in sorted(o["点"], key=lambda c: (-o["点"][c], CANDS.index(c))) if o["点"][c] > 0 and c not in order]
+            rest = [c for c in CANDS if c not in order]
+            if order:
+                lo = hi = order[0]
+                near = []
+                while lo is not None or hi is not None:
+                    hi = sub._move(hi, "次") if hi is not None else None
+                    lo = sub._move(lo, "前") if lo is not None else None
+                    near += [w for w in (hi, lo) if w is not None]
+                rest = [c for c in near if c in rest] + [c for c in rest if c not in near]
+            order += rest
+            n = order.index(t[2]) + 1
+            tries.append(n)
+            if len(said) < 3:
+                said.append(dict(問い=f"{t[0]}−{t[1]}", 言った答え=order[:n]))
+            sub.learn(t)
+            fl.learn(t)
+        out[name] = dict(初めの三問=said, 二十五問ごと=[dict(一回目で当たり=round(sum(1 for n in tries[i:i + 25] if n == 1) / 25, 4),
+                                                       言った答えの数の平均=round(float(np.mean(tries[i:i + 25])), 2)) for i in range(0, 100, 25)],
+                         全体=dict(一回目で当たり=round(sum(1 for n in tries if n == 1) / 100, 4), 言った答えの数の平均=round(float(np.mean(tries)), 2)),
+                         初めの十問の言った数=tries[:10],
+                         入れ替え方={"".join("ABC"[i] for i in p): dict(有った=fl.hit[p], 無かった=fl.miss[p]) for p in fl.hit},
+                         決まり={f"{('左', '右')[si]}が{d}": dict(c) for (si, d), c in sorted(sub.rule.items())})
+    return out
+
+
 def one_hot(w):
     x = np.zeros(TOP, dtype=np.complex64)
     x[int(w)] = 1.0
@@ -462,7 +562,7 @@ def main():
         res[name] = dict(一桁=stream(vec_of), 見せていない問い=holdout(vec_of), 二桁=two_digit(vec_of), 思考の波=w, 答える前の違和感=doubt_count(vec_of))
         if a.waves:
             np.savez_compressed(f"{a.waves}_{name}.npz", **arr)
-    res["ずれを運ぶ"] = dict(数え歌を聞いた=shift_count(True), 数え歌を聞いていない=shift_count(False), ほかの計算=other_ops(), 新しい数=new_number(), 五十より上=beyond(), 文字の数え歌=char_song(), 当たり外れだけ=dict(数え歌あり=yes_no(True), 数え歌なし=yes_no(False)))
+    res["ずれを運ぶ"] = dict(数え歌を聞いた=shift_count(True), 数え歌を聞いていない=shift_count(False), ほかの計算=other_ops(), 新しい数=new_number(), 五十より上=beyond(), 文字の数え歌=char_song(), 当たり外れだけ=dict(数え歌あり=yes_no(True), 数え歌なし=yes_no(False)), 引き算=subtract(), 初めて見る印=new_sign())
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 
