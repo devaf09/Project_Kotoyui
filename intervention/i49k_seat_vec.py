@@ -13,6 +13,7 @@
   回し方（席の違いを向きに残すため。席の組 =（自分の席, 相手の席））:
     bind="ずらす"  向きの並びを、席の組ごとに決まった数だけずらす（np.roll）
     bind="なし"    回さない。席を見ず、一緒に出た語をそのまま足す（行の語だけで作る形。hear_line で 1 行の語をまとめて聞かせられる）
+                   hear_line では center=True（たまたまの分を引く）と light=True（よく出る語を軽くして足す）も使える
     bind="位相"    周波数ごとに違う角度で位相を回す。角度は席の組ごとに決まった傾きで周波数に比例する（席の組ごとに決まった時間だけ遅らせるのと同じ）
   Unbind(sv, online=False)   語を鍵にした表をまったく持たずに答える形。問いの見せた 2 語を、隠した席から見た回し方で回して足し、
                              それに作った向きが近い候補を答える（作った向きの中に「この席でこの相手と座った」が入っているかを共振で見る）。
@@ -41,10 +42,11 @@ PAIRS = [(i, j) for i in range(3) for j in range(3) if i != j]
 
 
 class SeatVec:
-    def __init__(self, base_of, weight="偏り", bind="ずらす", center=False, pair=False):
+    def __init__(self, base_of, weight="偏り", bind="ずらす", center=False, pair=False, light=False):
         assert weight in ("数", "偏り") and bind in ("ずらす", "位相", "なし")
         assert not (center or pair) or weight == "数"
-        self.pair = pair
+        self.pair, self.light = pair, light
+        self.df, self.n_lines, self.m_add = {}, 0, {}     # hear_line 用: 語 → 出た行の数、聞いた行の数、語 → 足した重さの合計
         self.base_of, self.weight, self.bind, self.center = base_of, weight, bind, center
         self.n_add = {}                                   # 語 → 足した回数
         self.tot = None                                   # 全部の語に足した向きの合計
@@ -88,21 +90,34 @@ class SeatVec:
         self._v.clear()
 
     def hear_line(self, words):
-        """1 行の語（席は見ない。bind="なし"・weight="数" の時だけ）。行の中のそれぞれの語に、同じ行のほかの語の元の向きを全部足す。"""
+        """1 行の語（席は見ない。bind="なし"・weight="数" の時だけ）。行の中のそれぞれの語に、同じ行のほかの語の元の向きを全部足す。
+        light=True なら、よく出る語を軽くして足す: 重さ = log(1 + 聞いた行の数 ÷ その語が出た行の数)（その時までの数で決める。数えるだけ）。"""
         assert self.bind == "なし" and self.weight == "数"
         words = list(dict.fromkeys(words))
-        bs = [self._base(w) for w in words]
-        have = [b for b in bs if b is not None]
-        if len(words) < 2 or not have:
+        if len(words) < 2:
             return
-        swell = np.sum(have, axis=0)
-        for w, b in zip(words, bs):
-            k = len(have) - (b is not None)
+        self.n_lines += 1
+        g = []
+        for w in words:
+            self.df[w] = self.df.get(w, 0) + 1
+            g.append(math.log(1.0 + self.n_lines / self.df[w]) if self.light else 1.0)
+        bs = [self._base(w) for w in words]
+        if all(b is None for b in bs):
+            return
+        swell = np.sum([gi * b for gi, b in zip(g, bs) if b is not None], axis=0)
+        k_all = sum(1 for b in bs if b is not None)
+        m_all = sum(gi for gi, b in zip(g, bs) if b is not None)
+        for w, b, gi in zip(words, bs, g):
+            k = k_all - (b is not None)
             if k == 0:
                 continue
-            x = swell if b is None else swell - b
-            self.acc[w] = x.copy() if w not in self.acc else self.acc[w] + x
+            x = swell if b is None else swell - gi * b
+            m = m_all - (gi if b is not None else 0.0)
+            self.acc[w] = x.astype(np.complex64) if w not in self.acc else self.acc[w] + x
             self.n_add[w] = self.n_add.get(w, 0) + k
+            self.m_add[w] = self.m_add.get(w, 0.0) + m
+            self.tot = x.astype(np.complex128) if self.tot is None else self.tot + x
+            self.n_tot += m
 
     def both(self, si, tri):
         """隠す席 si から見た、ほかの 2 語を 1 つに束ねた向き（周波数ごとに掛け合わせて位相を足し、長さ 1 にそろえ、席ごとの回し方で回す）。"""
@@ -156,7 +171,7 @@ class SeatVec:
             v = self.acc.get(w)
             if v is None or not self.center:
                 return v
-            return (v - self.n_add[w] * (self.tot / self.n_tot)).astype(np.complex64)
+            return (v - self.m_add.get(w, self.n_add[w]) * (self.tot / self.n_tot)).astype(np.complex64)
         if w in self._v:
             return self._v[w]
         out = None
@@ -185,7 +200,7 @@ class Unbind:
 
     def learn(self, tri):
         if self.online:
-            self.sv.hear(tri)
+            (self.sv.hear_line if self.sv.bind == "なし" else self.sv.hear)(tri)
 
     def _from_shown(self, si, tri, cands):
         """見せた語の作った向きを回し戻して、隠した席に来る語の元の向きを言い当て、候補の元の向きと比べる（聞いた事の無い候補も比べられる）。"""
