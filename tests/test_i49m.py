@@ -70,3 +70,17 @@ def test_norm_choice_changes_who_wins():
         return u.ask(0, (None, "魚", "食べる"), ["犬", "猫"])["点"]
     c, r = ans("cos"), ans("なし")
     assert r["猫"] / r["犬"] > c["猫"] / c["犬"]             # 割らない方が、たくさん聞いた 猫 に有利
+
+
+def test_why_drop_trace_and_summary():
+    import i49m_why_drop as WD
+    ab = AttrBase(BOARD)
+    W = {(w["name"], "NOUN") for w in BOARD[:5]} | {("食べる", "VERB"), ("投げる", "VERB")}
+    tri = lambda a, b, c: ((a, "NOUN"), (b, "NOUN"), (c, "VERB"))
+    talks = [([tri("猫", "魚", "食べる")], W), ([tri("猫", "魚", "食べる"), tri("犬", "肉", "食べる")], W)]
+    rows = WD.trace(ab.of, talks, [tri("猫", "石", "投げる")])
+    assert len(rows) == 9 and all(r["nv"] <= r["n"] for r in rows)
+    assert rows[0]["heard"] >= 1 and any(r["hit"] for r in rows[3:6])       # 2 回目の同じ 3 つ組は当たる席がある
+    s = WD.summarize(rows, 2, every=1)
+    assert set(s["区切りごと"]) == {"1", "2"} and s["全体"]["問い"] == 9
+    assert sum(v["問い"] for v in s["正解が聞かれた回数ごと"].values()) == 9
