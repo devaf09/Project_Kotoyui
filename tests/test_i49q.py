@@ -27,3 +27,13 @@ def test_mix_tool_runs():
     get = lambda f, m: next(r["当て"] for r in rows if r["形"] == f and r["混ぜた語"] == m)
     assert get("元の波を足す", 0) > get("元の波を足す", 5)
     assert len(rows) == 2 * len(M.FORMS)
+
+
+def test_attr_and_gate_tools_run_on_a_tiny_world():
+    import i49q_small_world_attr as A
+    import i49q_small_world_gate as Gt
+    rows = A.run(T=16, Ms=(0,), passes=1)
+    get = lambda name: next(r["当て"] for r in rows if r["形"].startswith(name))
+    assert get("属性 19 本") >= get("属性 4 本（話 16 個で 1 つ）・聞かない")
+    assert any(r["足した本数"] for r in rows if "外れた時に足す" in r["形"])
+    assert len(Gt.run(T=16, Ms=(0,), passes=1)) == 20
