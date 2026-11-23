@@ -21,6 +21,8 @@
   pair=True（weight="数" の時だけ）: 一緒に座った 2 語を 1 つに束ねた向きも足す。束ね方 = 周波数ごとに掛け合わせる（位相を足す）。
                              足すだけでは「A とも B とも座った」と「A と B の組と座った」が区別できないので、組を 1 本の向きにして持つ。
                              Unbind は、pair=True の時は問いの 2 語を束ねた向きも足して探す。
+  mark=True（weight="数" の時だけ）: 席の印。席ごとに決まった 1 本の波を、その席で聞くたびに語の波へ足す。Unbind は隠した席の印も足して探す。
+                             関係の表は「その席によく座る語」を数えで持っているが、解く形には無かったので、波の足し算で同じ物を持たせる。
   Unbind の side: "候補" = 候補の作った向きの中に、見せた 2 語が入っているかを見る（今までの形。聞いた事の無い候補は比べられない）。
                   "見せた語" = 見せた語の作った向きを回し戻して、隠した席に来る語の元の向き（属性なら、属性の割合）を言い当て、
                                候補の元の向きと比べる。聞いた事の無い候補も、元の向きが有れば比べられる。
@@ -42,10 +44,11 @@ PAIRS = [(i, j) for i in range(3) for j in range(3) if i != j]
 
 
 class SeatVec:
-    def __init__(self, base_of, weight="偏り", bind="ずらす", center=False, pair=False, light=False):
+    def __init__(self, base_of, weight="偏り", bind="ずらす", center=False, pair=False, light=False, mark=False):
         assert weight in ("数", "偏り") and bind in ("ずらす", "位相", "なし")
         assert not (center or pair) or weight == "数"
-        self.pair, self.light = pair, light
+        self.pair, self.light, self.mark = pair, light, mark
+        self._mk = {}                                     # (席, 次元) → 席の印の波
         self.df, self.n_lines, self.m_add = {}, 0, {}     # hear_line 用: 語 → 出た行の数、聞いた行の数、語 → 足した重さの合計
         self.base_of, self.weight, self.bind, self.center = base_of, weight, bind, center
         self.n_add = {}                                   # 語 → 足した回数
@@ -80,6 +83,11 @@ class SeatVec:
                         self.n_add[w] = self.n_add.get(w, 0) + 1
                         self.tot = x.astype(np.complex128) if self.tot is None else self.tot + x
                         self.n_tot += 1
+            if self.mark and self.weight == "数":
+                x = self.seat_mark(si, w)
+                if x is not None:
+                    self.acc[w] = x.copy() if w not in self.acc else self.acc[w] + x
+                    self.n_add[w] = self.n_add.get(w, 0) + 1
             if self.pair and self.weight == "数":
                 x = self.both(si, t)
                 if x is not None:
@@ -118,6 +126,22 @@ class SeatVec:
             self.m_add[w] = self.m_add.get(w, 0.0) + m
             self.tot = x.astype(np.complex128) if self.tot is None else self.tot + x
             self.n_tot += m
+
+    def seat_mark(self, si, w=None, dim=None):
+        """席の印: 席ごとに決まった 1 本の波（長さ 1）。その席で聞くたびに語の波へ足しておくと、「この席によく座る語」が波に残る。"""
+        if dim is None:
+            b = self._base(w)
+            if b is None:
+                b = next((v for v in self._b.values() if v is not None), None)
+            if b is None:
+                return None
+            dim = len(b)
+        key = (si, dim)
+        if key not in self._mk:
+            k = np.arange(1, dim + 1, dtype=np.float64)
+            ph = ((si + 1) * 0.4142135623730951 * k * k + (si + 3) * 0.6180339887498949 * k) % 1.0
+            self._mk[key] = (np.exp(2j * np.pi * ph) / np.sqrt(dim)).astype(np.complex64)
+        return self._mk[key]
 
     def both(self, si, tri):
         """隠す席 si から見た、ほかの 2 語を 1 つに束ねた向き（周波数ごとに掛け合わせて位相を足し、長さ 1 にそろえ、席ごとの回し方で回す）。"""
@@ -247,6 +271,8 @@ class Unbind:
             if b is not None:
                 x = self.sv.rot(b, (si, sj))
                 aim = x if aim is None else aim + x
+        if self.sv.mark and aim is not None:
+            aim = aim + self.sv.seat_mark(si, dim=len(aim))
         if self.sv.pair:
             x = self.sv.both(si, tri)
             if x is not None:
