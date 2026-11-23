@@ -72,3 +72,59 @@ def test_tables_back_off_in_order():
     assert lv == "述語側の1語" and s[eat] == 2
     assert tb.scores(2, (("犬", "NOUN"), ("骨", "NOUN"), eat), [eat], backoff=True) == (None, "答えられない")
     assert TC.rank_by({cat: 1, bird: 1}, cat) == 2
+
+
+def test_talk_lines_drop_speaker_marks():
+    import i49e_make_talk as MT
+    assert MT.lines_of("子: 猫が魚を食べたよ。\n大人：そうなの。\n（場面）\n") == ["猫が魚を食べたよ。", "そうなの。"]
+
+
+def test_copy_tables_is_independent():
+    t = TC.Tables()
+    t.add((("猫", "NOUN"), ("魚", "NOUN"), ("食べる", "VERB")))
+    c = TC.copy_tables(t)
+    c.add((("猫", "NOUN"), ("魚", "NOUN"), ("食べる", "VERB")))
+    assert sum(t.t2[0].values()) == 1 and sum(c.t2[0].values()) == 2
+
+
+def test_hits_by_pair_splits_questions():
+    cat, fish, eat, sky = ("猫", "NOUN"), ("魚", "NOUN"), ("食べる", "VERB"), ("空", "NOUN")
+    vec = {w: e(i) for i, w in enumerate([cat, fish, eat, sky])}
+    tb = TC.Tables()
+    tb.add((cat, fish, eat))
+    pairs = {frozenset([(0, cat), (1, fish)])}
+    items = [dict(組=(cat, fish, eat), ページ={cat, fish, eat, sky})]
+    o = TC.hits_by_pair(items, tb, pairs, vec)
+    assert o["どうした"]["組があった"] == dict(問い=1, 一位=1.0) and o["だれが"]["組が無かった"]["問い"] == 1
+
+
+def test_share_borrows_from_similar_words():
+    cat, kitten, fish, eat, run, sky = (("猫", "NOUN"), ("子猫", "NOUN"), ("魚", "NOUN"), ("食べる", "VERB"), ("走る", "VERB"), ("空", "NOUN"))
+    vec = {cat: e(0), kitten: (e(0) + 0.1 * e(5)), fish: e(1), eat: e(2), run: e(3), sky: e(4)}
+    tris = [(cat, fish, eat)]
+    sh = TC.Share(tris, vec, [kitten, fish, eat, run, sky])
+    s = sh.scores("b", 2, (kitten, fish, None), [eat, run])   # 子猫 と 魚 は見た事が無い組 → 猫 と 魚 の数を借りる
+    assert s[eat] > 0.9 and s[run] == 0.0
+    rng = np.random.default_rng(0)                         # 波の板は、向きが散らばった（密な）ベクトルで確かめる
+    dv = {w: np.exp(1j * rng.uniform(0, 2 * np.pi, 256)).astype(np.complex64) for w in (cat, fish, eat, run, sky)}
+    dv[kitten] = dv[cat]
+    sh = TC.Share(tris, dv, [kitten, fish, eat, run, sky])
+    s = sh.scores("d", 2, (kitten, fish, None), [eat, run])
+    assert s[eat] > 5 * s[run]
+
+
+def test_chains_use_the_first_level_with_counts():
+    cat, kitten, fish, eat, run = ("猫", "NOUN"), ("子猫", "NOUN"), ("魚", "NOUN"), ("食べる", "VERB"), ("走る", "VERB")
+    vec = {cat: e(0), kitten: (e(0) + 0.1 * e(5)), fish: e(1), eat: e(2), run: e(3)}
+    tris = [(cat, fish, eat)]
+    tb = TC.Tables()
+    tb.add(tris[0])
+    sh = TC.Share(tris, vec, [kitten, fish, eat, run, cat])
+    q = (kitten, ("骨", "NOUN"), None)                     # どうしたを隠す: 2 語の表にも 1 語の表にも無い
+    s, lv = TC.chain_scores(tb, sh, 2, q, [eat, run], TC.CHAINS["a_今の表"])
+    assert lv == "答えられない"
+    s, lv = TC.chain_scores(tb, sh, 2, (kitten, fish, None), [eat, run], TC.CHAINS["e_2語の次に借りる"])
+    assert lv == "借りる" and s[eat] > s[run]
+    s, lv = TC.chain_scores(tb, sh, 2, (kitten, fish, None), [eat, run], TC.CHAINS["f_白紙の時だけ借りる"])
+    assert lv == "述語側"                                   # 魚 → 食べる の 1 語の表が先に答える
+    assert list(TC.inv_rank(np.array([0.1, 0.9, 0.5]))) == [1 / 3, 1.0, 0.5]
