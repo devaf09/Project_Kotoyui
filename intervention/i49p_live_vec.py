@@ -9,7 +9,9 @@
     of(語) → 今の波 か None
     far=True   ほかの語を遠ざける: 足した数と同じだけ、今までに出た全部の語の波（長さ 1）の平均を引く。
                近づけるだけだと全部の語が同じ向きに寄るので、行に居なかった語からは離す。足し算と引き算と数えだけ。
-  LiveAsk(lv, online=True)   3 つ組の 1 語を隠した問いに答える。点 = 候補の今の波と、見せた語の今の波の近さ（cos の実部）の合計。
+  LiveAsk(lv, online=True, skip_shown=False)   3 つ組の 1 語を隠した問いに答える。点 = 候補の今の波と、見せた語の今の波の近さ（cos の実部）の合計。
+               skip_shown=True なら、見せた語そのものは答えにしない。今の波は自分の元の向きを含むので、席を回さない時は、
+               見せた語そのものがいちばん近くなってしまう（初めの数えで見落としていた作りの穴。18 節）。
 手で置く物: 足す前に長さ 1 にそろえる事、遠ざける強さ（足した数と同じ）、元の向きを持たない語は 0 から始める事、回し方は I49k と同じ。乱数は置かない。
 小さい自作の世界での総当たり（docs の 16 節）では、語 1 つの位相が 4 本以上あれば潰れず、元の向きを足す形より良かった。
 """
@@ -102,8 +104,8 @@ class LiveVec:
 
 
 class LiveAsk:
-    def __init__(self, lv, online=True):
-        self.lv, self.online = lv, online
+    def __init__(self, lv, online=True, skip_shown=False):
+        self.lv, self.online, self.skip_shown = lv, online, skip_shown
         self.rec = []
 
     def tick(self, n=1):
@@ -127,8 +129,9 @@ class LiveAsk:
         if shown:
             aim = np.sum(shown, axis=0)
             s = {}
+            hide = {tri[sj] for sj in range(3) if sj != si} if self.skip_shown else ()
             for c in cands:
-                v = self.lv._get(c)
+                v = None if c in hide else self.lv._get(c)
                 u = None if v is None else _unit(v)
                 if u is not None:
                     s[c] = float(np.real(np.vdot(aim, u)))

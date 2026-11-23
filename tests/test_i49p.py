@@ -62,3 +62,10 @@ def test_run_tool():
     assert set(res) == {"白紙から", "青空の 3 つ組を先に", "本当の行 2 行に 1 行"}
     r = res["本当の行 2 行に 1 行"]
     assert "波に乗っている数" in r["今の波・属性・遠ざける"] and "Relation との違い" in r["今の波・属性・席"]
+
+
+def test_skip_shown_does_not_answer_with_a_shown_word():
+    lv = made()
+    cands = ["海", "魚", "釣る", "勉強"]
+    assert LiveAsk(lv).ask(2, ("海", "魚", None), cands)["答え"] in ("海", "魚")
+    assert LiveAsk(lv, skip_shown=True).ask(2, ("海", "魚", None), cands)["答え"] == "釣る"
