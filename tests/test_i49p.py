@@ -59,6 +59,6 @@ def test_run_tool():
     W = set(NAMES)
     talks = [([("友達", "魚", "釣る")], W), ([("先生", "ゲーム", "勉強")], W)]
     res = PR.run(V.get, V.get, talks, [("友達", "海", "泳ぐ")], LINES, step=2)
-    assert set(res) == {"白紙から", "青空の 3 つ組を先に", "本当の行 2 行に 1 行", "本当の行 全部"}
-    r = res["本当の行 全部"]
+    assert set(res) == {"白紙から", "青空の 3 つ組を先に", "本当の行 2 行に 1 行"}
+    r = res["本当の行 2 行に 1 行"]
     assert "波に乗っている数" in r["今の波・属性・遠ざける"] and "Relation との違い" in r["今の波・属性・席"]
