@@ -44,6 +44,11 @@
      知っている印（＋）として答えた物（知らない印なので、知っている印として言ってみる）→ その印の表の点 → 最初に言った答えから数え歌で近い順。
    足し算を 100 問全部 ／ 80 問だけ ／ 0 問 覚えている時。問いの順は 2 問目から（1 問目の 0−0 は ＋ として答えても当たるため、後ろへ回す）。
    初めの 3 問で言った答えの並び、25 問ごとの 1 回目の当たりと言った数、数えた入れ替え方と決まり。
+13. 足し算と引き算を混ぜて出す（持ち主の案。intervention/i49g_signs.Signs）: 白紙から、＋ の 100 問と − の 100 問を混ぜた 200 問を 1 問ずつ。先生は 合ってる／違う だけ。
+   混ぜ方は乱数（種は 0 に固定。持ち主の案が「ランダムに」のため）。50 問ごとの 1 回目の当たりと言った数を、印ごとにも出す。比べ: ＋ だけ、− だけを同じ道具で。
+14. 3 桁から 2 桁を引く 1 問（123 − 45）: 13 で 1 桁の ＋ と − を覚えた後に問う。数え歌をどこまで聞いているかで 3 通り:
+   0〜18 まで ／ 0〜50 まで聞き、先の名前を文字の決まりで自分で作る ／ 0〜130 まで聞いている。
+   言った答えの初めの 5 つ、当たるまでに言った数、どの手で答えたか、運んだ歩。
 語の向き: なし ／ 数え歌（"0 1 2 … 18" を聞いた時の、隣どうしの出方を数えた向き。n の向き = n−1・n・n+1 の所が 1）。
 乱数は使わない。手で置く物: 問いの順（37 飛ばし）、取り分ける 20 問（(A + 2B) を 5 で割り切れる組）、数え歌の窓（隣 1 つ）、周の数。
 python tools/i49g_add_count.py --out <stats.json>
@@ -265,7 +270,7 @@ def new_number(top=8, upto=16):
         return sh
 
     def known(sh):
-        return sorted({w for si in (0, 2) for w in sh.rel.by[si]} | {t[1] for t in sh.rel.tri if t[1] != STEP}, key=lambda w: (len(w), w))
+        return sorted({w for r in (sh.rel, sh.ord) for si in (0, 2) for w in r.by[si]} | {t[1] for t in sh.rel.tri}, key=lambda w: (len(w), w))
 
     def test(sh, n, shown=None):
         ps = [(str(a), str(n - a)) for a in range(n + 1) if (str(a), str(n - a)) != shown]
@@ -276,7 +281,7 @@ def new_number(top=8, upto=16):
     out = {}
     out["出る前"] = test(world(False), top + 1)
     sh = world(False)
-    sh.rel.learn((str(top), STEP, str(top + 1)))
+    sh.ord.learn((str(top), STEP, str(top + 1)))
     sh._mv.clear()
     out["並びとして 1 回"] = test(sh, top + 1)
     for name, fill in (("答えとして 1 回・埋めない", False), ("答えとして 1 回・埋める", True)):
@@ -461,7 +466,7 @@ def new_sign():
             o = sub.ask(t[0], t[1], CANDS)
             if o["段"] == "ずれを運ぶ":
                 order += [c for c in sorted(o["点"], key=lambda c: (-o["点"][c], CANDS.index(c))) if c not in order]
-            if add.rel.tri:
+            if add.rel.tri and not sub.rel.tri:
                 as_plus = add.ask(t[0], t[1], CANDS)["答え"]
                 if as_plus is not None and as_plus not in order:
                     order.append(as_plus)
@@ -489,6 +494,64 @@ def new_sign():
                          初めの十問の言った数=tries[:10],
                          入れ替え方={"".join("ABC"[i] for i in p): dict(有った=fl.hit[p], 無かった=fl.miss[p]) for p in fl.hit},
                          決まり={f"{('左', '右')[si]}が{d}": dict(c) for (si, d), c in sorted(sub.rule.items())})
+    return out
+
+
+def mixed(seed=0):
+    """13・14。足し算と引き算を混ぜて、当たり外れだけで。その後に 123 − 45。"""
+    import random
+    from i49g_digits import CharSong
+    from i49g_signs import Signs
+    plus = [("＋",) + t for t in facts()]
+    minus = [("−", c, b, a) for a, b, c in facts()]
+
+    def run(qs, song):
+        sg, rows = Signs(song), []
+        for sign, a, b, c in qs:
+            order, why = sg.order(sign, a, b, CANDS)
+            n = order.index(c) + 1
+            rows.append((sign, n, why[n - 1]))
+            sg.learn(sign, (a, b, c))
+        return sg, rows
+
+    def summary(rows, size):
+        out = []
+        for i in range(0, len(rows), size):
+            part = rows[i:i + size]
+            d = dict(一回目で当たり=round(sum(1 for _, n, _ in part if n == 1) / len(part), 4), 言った答えの数の平均=round(float(np.mean([n for _, n, _ in part])), 2))
+            for sign in ("＋", "−"):
+                ps = [n for s, n, _ in part if s == sign]
+                if ps and len(ps) != len(part):
+                    d[sign] = dict(問い=len(ps), 一回目で当たり=round(sum(1 for n in ps if n == 1) / len(ps), 4), 言った答えの数の平均=round(float(np.mean(ps)), 2))
+            out.append(d)
+        return out
+
+    both = plus + minus
+    random.Random(seed).shuffle(both)
+    sg, rows = run(both, CANDS)
+    out = dict(混ぜた200問=dict(五十問ごと=summary(rows, 50), 全体=summary(rows, 200)[0], 当たった時の手=dict(Counter(w for _, _, w in rows)),
+                             初めの二十問の言った数=[n for _, n, _ in rows[:20]]),
+               足し算だけ=summary(run(plus, CANDS)[1], 100)[0], 引き算だけ=summary(run(minus, CANDS)[1], 100)[0])
+    out["混ぜた200問"]["入れ替え方"] = {f"{a} を {b} から": {"".join("ABC"[i] for i in p): dict(有った=fl.hit[p], 無かった=fl.miss[p]) for p in fl.hit if fl.hit[p] > 20}
+                                 for (a, b), fl in sg.fl.items()}
+    q = ("123", "45", "78")
+    cs = CharSong()
+    cs.hear([str(i) for i in range(51)])
+    made = ["50"]
+    while len(made) < 100:
+        y = cs.next(made[-1])
+        if y is None:
+            break
+        made.append(y)
+    one = {}
+    for name, song in (("数え歌 0〜18", CANDS), ("数え歌 0〜50 ＋ 先の名前を文字の決まりで作る", [str(i) for i in range(50)] + made),
+                       ("数え歌 0〜130", [str(i) for i in range(131)])):
+        sg2, _ = run(both, song)                          # 1 桁の ＋ と − は同じ流れで覚える
+        order, why = sg2.order("−", q[0], q[1], song)
+        n = order.index(q[2]) + 1 if q[2] in order else None
+        steps = sg2.sh["−"].rec[-1][4]
+        one[name] = dict(知っている数の名前=len(song), 最後の名前=song[-1], 言った答えの初め=order[:5], 手=why[:5], 当たるまでに言った数=n, 運んだ歩=steps)
+    out["123−45"] = one
     return out
 
 
@@ -562,7 +625,7 @@ def main():
         res[name] = dict(一桁=stream(vec_of), 見せていない問い=holdout(vec_of), 二桁=two_digit(vec_of), 思考の波=w, 答える前の違和感=doubt_count(vec_of))
         if a.waves:
             np.savez_compressed(f"{a.waves}_{name}.npz", **arr)
-    res["ずれを運ぶ"] = dict(数え歌を聞いた=shift_count(True), 数え歌を聞いていない=shift_count(False), ほかの計算=other_ops(), 新しい数=new_number(), 五十より上=beyond(), 文字の数え歌=char_song(), 当たり外れだけ=dict(数え歌あり=yes_no(True), 数え歌なし=yes_no(False)), 引き算=subtract(), 初めて見る印=new_sign())
+    res["ずれを運ぶ"] = dict(数え歌を聞いた=shift_count(True), 数え歌を聞いていない=shift_count(False), ほかの計算=other_ops(), 新しい数=new_number(), 五十より上=beyond(), 文字の数え歌=char_song(), 当たり外れだけ=dict(数え歌あり=yes_no(True), 数え歌なし=yes_no(False)), 引き算=subtract(), 初めて見る印=new_sign(), 混ぜる=mixed())
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 

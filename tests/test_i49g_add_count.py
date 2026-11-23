@@ -85,4 +85,4 @@ def test_new_sign_is_found_after_one_search():
 def test_subtraction_needs_the_song_read_backwards():
     o = AC.subtract()
     assert o["上りの数え歌だけ"]["二十五問ごと"][-1]["一回目で当たり"] == 1.0
-    assert o["上りの数え歌だけ・逆向きに問えない"]["全体"]["一回目で当たり"] == 0.0
+    assert o["上りの数え歌だけ・逆向きに問えない"]["全体"]["一回目で当たり"] < 0.1

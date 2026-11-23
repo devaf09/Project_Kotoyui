@@ -4,7 +4,7 @@
 「4 は 3 の次」と「片方が次にずれると、答えも次にずれる」を数えて覚えていれば、「6 の次で 7」と運べる。
 
 覚える物は 2 つ。どちらも数えるだけ。
-  並び     数え歌（0 1 2 …）を聞いて、(n, 次, n+1) の 3 つ組として関係の表に入れる。「次」「前」はこの表を引く。
+  並び     数え歌（0 1 2 …）を聞いて、(n, 次, n+1) の 3 つ組として、事実とは別の関係の表に入れる。「次」「前」はこの表を引く。
   ずれの決まり  新しい事実 (A, B, C) を聞くたびに、もう聞いた事実のうち片方の席だけが違う物と比べる。
               その席のずれ（次・前）に対して、答えのずれ（次・前・同じ・ほか）が何だったかを数える。席ごとに別に数える。
 答え方:
@@ -23,13 +23,16 @@ from __future__ import annotations
 
 from collections import Counter
 
+from i49e_relation import Relation
+
 STEP = "次"
 BACK = {"次": "前", "前": "次", "同じ": "同じ"}
 
 
 class Shifter:
     def __init__(self, rel, fill=False, back=True):
-        self.rel = rel
+        self.rel = rel                                    # 事実の表
+        self.ord = Relation(lambda w: None)               # 並びの表（数え歌）。事実の表とは別に持つ（並びが事実の答えに混ざらないように）
         self.back = bool(back)                            # 並びを逆向きに問えるか（「x の前」= 次が x になる語）。比べのために切れる
         self.fill = bool(fill)                            # 並びを自分で埋めるか
         self._mv = {}                                     # 次・前の引きの控え（並びが増えたら捨てる）
@@ -40,7 +43,7 @@ class Shifter:
     # ---- 並び ----
     def hear_song(self, seq):
         for a, b in zip(seq, seq[1:]):
-            self.rel.learn((a, STEP, b))
+            self.ord.learn((a, STEP, b))
         self._mv.clear()
 
     def _move(self, w, d):
@@ -53,11 +56,10 @@ class Shifter:
             return self._mv[(w, d)]
         si, so = (0, 2) if d == "次" else (2, 0)
         best = None
-        for t in self.rel.by[si].get(w, ()):
-            if t[1] == STEP:
-                c = self.rel._count(t)
-                if best is None or c > best[0]:
-                    best = (c, t[so])
+        for t in self.ord.by[si].get(w, ()):
+            c = self.ord._count(t)
+            if best is None or c > best[0]:
+                best = (c, t[so])
         self._mv[(w, d)] = None if best is None else best[1]
         return self._mv[(w, d)]
 
@@ -83,13 +85,13 @@ class Shifter:
         lo, hi = (x, c) if dc == "次" else (c, x)
         if self._move(lo, "次") is not None or self._move(hi, "前") is not None:
             return None
-        self.rel.learn((lo, STEP, hi))
+        self.ord.learn((lo, STEP, hi))
         self._mv.clear()
         self.filled.append((lo, hi))
         return {lo, hi}
 
     def _facts(self, si, w):
-        return [t for t in self.rel.by[si].get(w, ()) if t[1] != STEP]
+        return list(self.rel.by[si].get(w, ()))
 
     # ---- 覚える ----
     def learn(self, tri):
@@ -130,18 +132,23 @@ class Shifter:
                 for f in self._facts(0, st[0]):
                     if f[1] != st[1]:
                         continue
-                    c, wgt, steps = f[2], self.rel._count(f), list(reversed(path))   # 事実から問いへ、戻った順の逆に運ぶ
-                    for k, (si, d) in enumerate(steps):
+                    c, wgt, net = f[2], self.rel._count(f), 0
+                    for si, d in path:                    # 運ぶ歩は順に寄らないので、次と前を差し引いてまとめて運ぶ（途中で並びの端を越えないように）
                         rule = self.rule.get((si, d))
-                        if not rule:
-                            c = None
+                        dc = max(rule, key=rule.get) if rule else None
+                        if dc not in ("次", "前", "同じ"):
+                            net = None
                             break
-                        dc = max(rule, key=rule.get)
                         wgt *= rule[dc] / sum(rule.values())
-                        c2 = self._move(c, dc) if dc != "ほか" else None
+                        net += 1 if dc == "次" else -1 if dc == "前" else 0
+                    if net is None:
+                        continue
+                    dc = "次" if net > 0 else "前"
+                    for k in range(abs(net)):
+                        c2 = self._move(c, dc)
                         if c2 is None:
-                            if dc != "ほか" and k == len(steps) - 1:
-                                ends[(c, dc)] += wgt
+                            if k == abs(net) - 1:
+                                ends[(c, dc)] += wgt      # 最後の 1 歩だけ運べなかった
                             c = None
                             break
                         c = c2
