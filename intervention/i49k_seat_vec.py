@@ -12,6 +12,7 @@
     weight="偏り"  たまたまより多く一緒に聞いた分だけを重さにする: max(0, log(一緒の数 × 全体 ÷ (語の数 × 相手の数)))
   回し方（席の違いを向きに残すため。席の組 =（自分の席, 相手の席））:
     bind="ずらす"  向きの並びを、席の組ごとに決まった数だけずらす（np.roll）
+    bind="なし"    回さない。席を見ず、一緒に出た語をそのまま足す（行の語だけで作る形。hear_line で 1 行の語をまとめて聞かせられる）
     bind="位相"    周波数ごとに違う角度で位相を回す。角度は席の組ごとに決まった傾きで周波数に比例する（席の組ごとに決まった時間だけ遅らせるのと同じ）
   Unbind(sv, online=False)   語を鍵にした表をまったく持たずに答える形。問いの見せた 2 語を、隠した席から見た回し方で回して足し、
                              それに作った向きが近い候補を答える（作った向きの中に「この席でこの相手と座った」が入っているかを共振で見る）。
@@ -41,7 +42,7 @@ PAIRS = [(i, j) for i in range(3) for j in range(3) if i != j]
 
 class SeatVec:
     def __init__(self, base_of, weight="偏り", bind="ずらす", center=False, pair=False):
-        assert weight in ("数", "偏り") and bind in ("ずらす", "位相")
+        assert weight in ("数", "偏り") and bind in ("ずらす", "位相", "なし")
         assert not (center or pair) or weight == "数"
         self.pair = pair
         self.base_of, self.weight, self.bind, self.center = base_of, weight, bind, center
@@ -86,6 +87,23 @@ class SeatVec:
                     self.n_tot += 1
         self._v.clear()
 
+    def hear_line(self, words):
+        """1 行の語（席は見ない。bind="なし"・weight="数" の時だけ）。行の中のそれぞれの語に、同じ行のほかの語の元の向きを全部足す。"""
+        assert self.bind == "なし" and self.weight == "数"
+        words = list(dict.fromkeys(words))
+        bs = [self._base(w) for w in words]
+        have = [b for b in bs if b is not None]
+        if len(words) < 2 or not have:
+            return
+        swell = np.sum(have, axis=0)
+        for w, b in zip(words, bs):
+            k = len(have) - (b is not None)
+            if k == 0:
+                continue
+            x = swell if b is None else swell - b
+            self.acc[w] = x.copy() if w not in self.acc else self.acc[w] + x
+            self.n_add[w] = self.n_add.get(w, 0) + k
+
     def both(self, si, tri):
         """隠す席 si から見た、ほかの 2 語を 1 つに束ねた向き（周波数ごとに掛け合わせて位相を足し、長さ 1 にそろえ、席ごとの回し方で回す）。"""
         o = [self._base(tri[j]) for j in range(3) if j != si]
@@ -96,6 +114,8 @@ class SeatVec:
         return None if n == 0 else self.rot(x / n, len(PAIRS) + si)
 
     def rot(self, b, pair):
+        if self.bind == "なし":
+            return b
         p = pair if isinstance(pair, int) else PAIRS.index(tuple(pair))
         if self.bind == "ずらす":
             return np.roll(b, (p + 1) * (len(b) // 7))
@@ -123,6 +143,8 @@ class SeatVec:
 
     def unrot(self, x, pair):
         """rot の逆（回し戻す）。"""
+        if self.bind == "なし":
+            return x
         p = pair if isinstance(pair, int) else PAIRS.index(tuple(pair))
         if self.bind == "ずらす":
             return np.roll(x, -(p + 1) * (len(x) // 7))
