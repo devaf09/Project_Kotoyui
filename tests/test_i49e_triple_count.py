@@ -85,3 +85,14 @@ def test_copy_tables_is_independent():
     c = TC.copy_tables(t)
     c.add((("猫", "NOUN"), ("魚", "NOUN"), ("食べる", "VERB")))
     assert sum(t.t2[0].values()) == 1 and sum(c.t2[0].values()) == 2
+
+
+def test_hits_by_pair_splits_questions():
+    cat, fish, eat, sky = ("猫", "NOUN"), ("魚", "NOUN"), ("食べる", "VERB"), ("空", "NOUN")
+    vec = {w: e(i) for i, w in enumerate([cat, fish, eat, sky])}
+    tb = TC.Tables()
+    tb.add((cat, fish, eat))
+    pairs = {frozenset([(0, cat), (1, fish)])}
+    items = [dict(組=(cat, fish, eat), ページ={cat, fish, eat, sky})]
+    o = TC.hits_by_pair(items, tb, pairs, vec)
+    assert o["どうした"]["組があった"] == dict(問い=1, 一位=1.0) and o["だれが"]["組が無かった"]["問い"] == 1

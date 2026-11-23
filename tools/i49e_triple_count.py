@@ -163,7 +163,10 @@ def main():
     ap.add_argument("--n_test", type=int, default=100)
     ap.add_argument("--learn_talks", default=None, help="四歩目: 覚える側の会話の jsonl（, 区切り、並べた順に 100・250・500 本で切る）")
     ap.add_argument("--test_talks", default=None, help="四歩目: 試し用の会話の jsonl")
+    ap.add_argument("--tests5", default=None, help="五歩目: 試し用の会話 <名前>=<会話.jsonl>,...（作り手ごと）。覚える側は --learn_talks")
     a = ap.parse_args()
+    if a.tests5:
+        return main5(a)
     if a.pick_words4:
         return pick_words4(a)
     if a.test_talks:
@@ -680,6 +683,80 @@ def main4(a):
             res[f"{tname}・会話だけ {n} 本"] = brief(only, items)
             res[f"{tname}・両方 {n} 本"] = brief(both, items)
         print(tname, round(time.time() - t0), flush=True)
+    res["秒"] = round(time.time() - t0)
+    json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
+
+# ---- 五歩目: 作り手の癖を覚えただけかを見る ----
+def hits_by_pair(items, tables, pairs, vec):
+    """席ごとに、見せた 2 語の組が覚える側にあった問い・無かった問いで分けた、数えた表（下がる込み）の 1 位の割合。"""
+    out = {}
+    for si, slot in enumerate(SLOTS):
+        shown = [j for j in range(3) if j != si]
+        g = {"組があった": [], "組が無かった": []}
+        for it in items:
+            tri, hid = it["組"], it["組"][si]
+            show = {tri[j] for j in shown}
+            cands = sorted({w for w in it["ページ"] if w in vec and w not in show} | {hid}, key=str)
+            if len(cands) < 2:
+                continue
+            s, _ = tables.scores(si, tri, cands, True)
+            hit = bool(s) and rank_by(s, hid) == 1
+            key = frozenset([(shown[0], tri[shown[0]]), (shown[1], tri[shown[1]])])
+            g["組があった" if key in pairs else "組が無かった"].append(hit)
+        out[slot] = {k: dict(問い=len(v), 一位=round(float(np.mean(v)), 4) if v else None) for k, v in g.items()}
+    return out
+
+
+def main5(a):
+    import spacy
+    import i49c_read_words as Rw
+    t0 = time.time()
+    nlp = spacy.load("ja_ginza")
+    wv = Rw.WordVecs.load(a.wave)
+    dou, learn, _ = prepare(a, nlp, wv, t0)
+    rows = [json.loads(l) for f in a.learn_talks.split(",") for l in open(f, encoding="utf-8")]
+    rows = [r for r in rows if r["語"]["選び方"] in ("い", "覚える側")]
+    learned = []
+    for r in rows:
+        for d in nlp.pipe(r["発言"], batch_size=64):
+            learned += [ws for kind, _, _, ws in triples2(toks_of_doc(d)) if kind == "三つ組"]
+    pairs = {frozenset([(i, tri[i]), (j, tri[j])]) for tri in learned for i in range(3) for j in range(i + 1, 3)}
+    aoz, only = Tables(), Tables()
+    for L in learn.values():
+        for tri in L:
+            aoz.add(tri)
+    for tri in learned:
+        only.add(tri)
+    both = copy_tables(aoz)
+    for tri in learned:
+        both.add(tri)
+    res = dict(覚える会話=len(rows), 覚える会話の三つ組=len(learned), 試し={})
+    for spec in a.tests5.split(","):
+        name, path = spec.split("=", 1)
+        trows = [json.loads(l) for l in open(path, encoding="utf-8")]
+        kai, kinds = talk_items(nlp, trows, wv)
+        vec = vec_of_items(kai, wv)
+        o = dict(会話=len(trows), 答えでない物=sum(1 for r in trows if not r["発言"]), 取れた数=dict(kinds), 使えた=len(kai),
+                 ベクトルが無くて落ちた割合=round(kinds["ベクトルが無い"] / max(1, kinds["三つ組"]), 4))
+        o["同じ2語の組が覚える側にある割合"] = round(float(np.mean([any(frozenset([(i, it["組"][i]), (j, it["組"][j])]) in pairs
+                                                       for i in range(3) for j in range(i + 1, 3)) for it in kai])), 4) if kai else None
+        o["同じ三つ組が覚える側にある割合"] = round(float(np.mean([it["組"] in set(learned) for it in kai])), 4) if kai else None
+        for tname, tb in (("青空だけ", aoz), ("会話だけ", only), ("両方", both)):
+            c = count2(kai, vec, tb)
+            o[tname] = {k.split("・")[1]: dict(表下がる込み=(v["数えた表_下がる込み"].get("一位"), v["数えた表_下がる込み"].get("三位以内")),
+                                               でたらめ=(v["でたらめ"] or {}).get("一位"),
+                                               いちばん多い語=(v["いちばん多い語"].get("一位"), v["いちばん多い語"].get("三位以内")),
+                                               二語の表で答えられた=round(1 - v["2語の表で答えられなかった割合"], 4) if v["2語の表で答えられなかった割合"] is not None else None,
+                                               数=v["足した向き"].get("数"))
+                        for k, v in c.items() if k.startswith("まとめ") and k.endswith("ア_ページ")}
+            if tname != "青空だけ":
+                o[tname + "_組の有無で分けた一位"] = hits_by_pair(kai, tb, pairs, vec)
+        subj = Counter(it["組"][0][0] for it in kai)
+        top = subj.most_common(5)
+        o["だれがの答え"] = dict(種類=len(subj), 上位5語の割合=round(sum(n for _, n in top) / max(1, len(kai)), 4), 上位5語=top)
+        res["試し"][name] = o
+        print(name, round(time.time() - t0), flush=True)
     res["秒"] = round(time.time() - t0)
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
