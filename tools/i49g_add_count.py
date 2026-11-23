@@ -17,6 +17,15 @@
    (ア) 80 問を覚えた後の、見せていない 20 問。(イ) 白紙から 100 問を 1 問ずつ「問う → 答え合わせ → 覚える」時の、25 問ごとの当たりと段。
    (ウ) 数え歌を聞かせない時（並びを知らない）。
    (エ) 同じ部品を、引き算（A ≧ B の 55 問）と掛け算（100 問、数え歌は 0〜81）に当てる。決まりが足し算用に置かれた物でなく、数えた物かを見る。
+7. 新しい数が 1 回だけ出る（持ち主の案）: 0〜8 だけの世界（数え歌 0〜8、足して 8 までの 45 問）を覚えた後、9 を 1 回だけ見せ、
+   9 を使う見せていない問い（足して 9 になる組、見せた 1 問を除く）が当たるかを数える。候補は、聞いた事のある数。
+   出方: 出る前 ／ 並びとして（「8 の次は 9」）／ 答えとして 1 回（4＋5＝9）で並びを埋めない ／ 同じで並びを埋める（Shifter(fill=True)）。
+   続けて 10、11、… 16 も、それぞれ答えとして 1 回だけ見せて、同じ数えをくり返す。
+8. 50 までを覚えて、50 より上を計算する（持ち主の案）: 足して 50 以下の全部（1,326 問、1 桁どうしも入る）を覚え、足して 51〜99 の問い（7 問に 1 問）を問う。
+   数は 1 語のまま（桁に分けない）。答えは「数え足し」（聞いた事のある事実に着くまで 1 歩ずつ戻り、その分だけ答えを運ぶ）で出す。
+   (ア) 数え歌を 0〜99 まで聞いている。(イ) 数え歌は 0〜50 まで（51 より上の数の名前を知らない）。
+   (ウ) 数え歌は 0〜50 まで。問いを答えの小さい順に 1 問ずつ「問う → 正解を聞く → 覚える」。並びを自分で埋める。初めて出る数は必ず外れるので、それを除いた当たりも出す。
+   (エ) (ウ) を、決まった飛ばし方で混ぜた順で。
 語の向き: なし ／ 数え歌（"0 1 2 … 18" を聞いた時の、隣どうしの出方を数えた向き。n の向き = n−1・n・n+1 の所が 1）。
 乱数は使わない。手で置く物: 問いの順（37 飛ばし）、取り分ける 20 問（(A + 2B) を 5 で割り切れる組）、数え歌の窓（隣 1 つ）、周の数。
 python tools/i49g_add_count.py --out <stats.json>
@@ -225,6 +234,85 @@ def other_ops():
     return out
 
 
+def new_number(top=8, upto=16):
+    """7. 新しい数が 1 回だけ出た後、その数を使う見せていない問いが当たるか。"""
+    from i49g_shift import Shifter, STEP
+
+    def world(fill):
+        sh = Shifter(Relation(lambda w: None), fill=fill)
+        sh.hear_song([str(i) for i in range(top + 1)])
+        for a in range(top + 1):
+            for b in range(top + 1 - a):
+                sh.learn((str(a), str(b), str(a + b)))
+        return sh
+
+    def known(sh):
+        return sorted({w for si in (0, 2) for w in sh.rel.by[si]} | {t[1] for t in sh.rel.tri if t[1] != STEP}, key=lambda w: (len(w), w))
+
+    def test(sh, n, shown=None):
+        ps = [(str(a), str(n - a)) for a in range(n + 1) if (str(a), str(n - a)) != shown]
+        cands = known(sh)
+        hit = sum(sh.ask(a, b, cands)["答え"] == str(n) for a, b in ps)
+        return dict(問い=len(ps), 当たり=hit)
+
+    out = {}
+    out["出る前"] = test(world(False), top + 1)
+    sh = world(False)
+    sh.rel.learn((str(top), STEP, str(top + 1)))
+    sh._mv.clear()
+    out["並びとして 1 回"] = test(sh, top + 1)
+    for name, fill in (("答えとして 1 回・埋めない", False), ("答えとして 1 回・埋める", True)):
+        sh, rows = world(fill), {}
+        for n in range(top + 1, upto + 1):
+            shown = (str(n - 5), "5")                      # 見せる 1 問: (n−5)＋5＝n
+            sh.learn(shown + (str(n),))
+            rows[str(n)] = test(sh, n, shown)
+        out[name] = dict(数ごと=rows, 埋めた並び=list(sh.filled))
+    return out
+
+
+def beyond(limit=50, top=99, every=7):
+    """8. limit までを覚えて、その上を数え足しで計算する。"""
+    from i49g_shift import Shifter
+
+    def world(song_top, fill):
+        sh = Shifter(Relation(lambda w: None), fill=fill)
+        sh.hear_song([str(i) for i in range(song_top + 1)])
+        for a in range(limit + 1):
+            for b in range(limit + 1 - a):
+                sh.learn((str(a), str(b), str(a + b)))
+        return sh
+
+    probs = [(str(a), str(n - a), str(n)) for n in range(limit + 1, top + 1) for a in range(n + 1)][::every]
+    names = [str(i) for i in range(top + 1)]
+    out = dict(覚えた事実=(limit + 1) * (limit + 2) // 2, 問い=len(probs))
+    for name, song_top in ((f"数え歌 0〜{top}", top), (f"数え歌 0〜{limit}", limit)):
+        sh = world(song_top, False)
+        cands = names[: song_top + 1]
+        rows = [sh.ask(a, b, cands) for a, b, _ in probs]
+        hit = [o["答え"] == c for o, (_, _, c) in zip(rows, probs)]
+        steps = [o.get("歩", 0) for o in rows]
+        out[name] = dict(当たり=round(sum(hit) / len(probs), 4), 段=dict(Counter(o["段"] for o in rows)),
+                         歩の平均=round(float(np.mean(steps)), 2), 歩の最大=int(max(steps)))
+    for name, order in (("答えの小さい順", probs), ("混ぜた順", [probs[(i * 37) % len(probs)] for i in range(len(probs))] if len(probs) % 37 else probs)):
+        sh = world(limit, True)
+        heard = set(names[: limit + 1])
+        rows = []
+        for a, b, c in order:
+            o = sh.ask(a, b, sorted(heard, key=lambda w: (len(w), w)))
+            rows.append((o["答え"] == c, c in heard))
+            sh.learn((a, b, c))
+            heard.add(c)
+        old = [h for h, k in rows if k]
+        q = max(1, len(rows) // 4)
+        out[f"聞きながら・{name}"] = dict(当たり=round(sum(h for h, _ in rows) / len(rows), 4),
+                                    初めて出る数だった問い=sum(1 for _, k in rows if not k),
+                                    もう出た数の問いの当たり=round(sum(old) / max(1, len(old)), 4),
+                                    四つに分けた当たり=[round(sum(h for h, _ in rows[i * q:(i + 1) * q]) / q, 4) for i in range(4)],
+                                    埋めた並びの数=len(sh.filled))
+    return out
+
+
 def one_hot(w):
     x = np.zeros(TOP, dtype=np.complex64)
     x[int(w)] = 1.0
@@ -295,7 +383,7 @@ def main():
         res[name] = dict(一桁=stream(vec_of), 見せていない問い=holdout(vec_of), 二桁=two_digit(vec_of), 思考の波=w, 答える前の違和感=doubt_count(vec_of))
         if a.waves:
             np.savez_compressed(f"{a.waves}_{name}.npz", **arr)
-    res["ずれを運ぶ"] = dict(数え歌を聞いた=shift_count(True), 数え歌を聞いていない=shift_count(False), ほかの計算=other_ops())
+    res["ずれを運ぶ"] = dict(数え歌を聞いた=shift_count(True), 数え歌を聞いていない=shift_count(False), ほかの計算=other_ops(), 新しい数=new_number(), 五十より上=beyond())
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 

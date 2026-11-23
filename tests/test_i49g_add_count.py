@@ -57,3 +57,9 @@ def test_shift_rule_is_counted_not_placed():
     o = AC.other_ops()
     assert o["引き算"]["当たり"] == 1.0 and o["引き算"]["決まり"]["右が次"] == {"前": 27}
     assert o["掛け算"]["当たり"] < 0.5
+
+
+def test_beyond_the_learned_range_needs_the_names_of_numbers():
+    o = AC.beyond(limit=12, top=24, every=3)
+    assert o["数え歌 0〜24"]["当たり"] == 1.0 and o["数え歌 0〜12"]["当たり"] == 0.0
+    assert o["聞きながら・答えの小さい順"]["当たり"] > o["聞きながら・混ぜた順"]["当たり"] > 0.0
