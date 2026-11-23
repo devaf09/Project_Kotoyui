@@ -71,3 +71,104 @@ class CharSong:
         y = "".join(c for c in out if c != NONE)
         self.rec.append((w, y, used))
         return y
+
+
+class CharSum:
+    """足し算の事実を文字で見て、どの手がかりで答えの字が決まるかを数える（桁を教えずに見つける案 B、未確定）。
+
+    事実 (A, B, C) を右からそろえて 1 文字ずつ見る。場所ごとに、自分の字の組 (A の字, B の字) と、右隣の字の組を手がかりにする。
+    数える物（聞いた事実だけから。数える順は 3 段）:
+      1. 右端の表: 右端の字の組 → 答えの右端の字。
+      2. 右隣の組の働き: 右端でない場所で、自分の字の組が右端の表に有る時、答えの字が「表のとおり（同じ）」か「表の字の次」か「ほか」かを、右隣の字の組ごとに数える。
+         （「次」になる右隣の組が、繰り上がりの起きる組。名前は付けない。）
+      3. 残りの組: (自分の字の組, 右隣の組の働き) → 答えの字。左に字が無い所（無）を含む組は、ここで覚える。
+      2 と 3 は、分かった所から順に広げる: 3 で「右隣が何もしない時の字」が分かった組を使って、まだ働きの分からない右隣の組を 2 で数え直す。増えなくなるまで。
+    答え方: 右から 1 文字ずつ。右端は 1 の表。ほかは、3 に有ればその字。無ければ、1 の表の字を、2 の働き（同じ・次）でずらす。どれも無ければ作れない（None）。
+    字の「次」は、数え歌の 1 文字の並び（CharSong.step）を借りる。
+    手で置く物: 右からそろえる事、手がかりを「自分の字の組」と「右隣の字の組」にする事、数える順、いちばん数の多い答えを使う事。
+    """
+
+    def __init__(self, step):
+        self.step = step                                  # 字 → 次の字
+        self.facts = []
+        self.rec = []
+        self._t = None
+
+    def learn(self, tri):
+        self.facts.append(tuple(tri))
+        self._t = None
+
+    @staticmethod
+    def _rows(a, b, c=None):
+        n = max(len(a), len(b), len(c) if c else 0) + 1
+        pad = lambda w: [NONE] * (n - len(w)) + list(w)
+        A, B, C = pad(a), pad(b), pad(c) if c is not None else [None] * n
+        rows, right = [], EDGE
+        for i in range(n - 1, -1, -1):                    # 右から
+            own = (A[i], B[i])
+            rows.append((own, right, C[i]))
+            right = own
+        return rows
+
+    @staticmethod
+    def _top(c):
+        return max(c, key=c.get) if c else None
+
+    def tables(self):
+        if self._t is not None:
+            return self._t
+        rows = [self._rows(*f) for f in self.facts]
+        t0, work, rest = {}, {}, {}
+        for r in rows:
+            own, _, ch = r[0]
+            t0.setdefault(own, Counter())[ch] += 1
+
+        def base(own):                                    # その組の「右隣が何もしない時」の字
+            b = self._top(t0.get(own))
+            return b if b is not None else self._top(rest.get((own, "同じ")))
+
+        while True:                                       # 分かった所から順に広げる（増えなくなるまで）
+            new = {}
+            for r in rows:
+                for own, right, ch in r[1:]:
+                    if right in work:
+                        continue
+                    b = base(own)
+                    if b is not None:
+                        what = "同じ" if ch == b else "次" if self.step.get(b) == ch else "ほか"
+                        new.setdefault(right, Counter())[what] += 1
+            if not new:
+                break
+            work.update(new)
+            rest = {}
+            for r in rows:
+                for own, right, ch in r[1:]:
+                    w = self._top(work.get(right))
+                    if w is not None:
+                        rest.setdefault((own, w), Counter())[ch] += 1
+        self._t = (t0, work, rest)
+        return self._t
+
+    def ask(self, a, b):
+        """A＋B の答えを 1 文字ずつ作る。作れなければ None。"""
+        t0, work, rest = self.tables()
+        out, how = [], []
+        for own, right, _ in self._rows(a, b):
+            if right == EDGE:
+                ch = self._top(t0.get(own))
+                how.append("右端の表")
+            else:
+                w = self._top(work.get(right))
+                ch = self._top(rest.get((own, w))) if w is not None else None
+                how.append("残りの組")
+                if ch is None and w in ("同じ", "次"):
+                    base = self._top(t0.get(own))
+                    ch = base if w == "同じ" else self.step.get(base)
+                    how[-1] = "表をずらす"
+            if ch is None:
+                self.rec.append((a, b, None, how))
+                return None
+            out.append(ch)
+        y = "".join(c for c in reversed(out) if c != NONE)
+        self.rec.append((a, b, y, how))
+        return y

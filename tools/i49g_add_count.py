@@ -29,6 +29,10 @@
 9. 数え歌を文字で見る（intervention/i49g_digits.CharSong。桁を教えずに見つける案 A）: 数え歌を 0〜n まで聞いた後、n より上 98 までの数の「次」を自分で作れるか。
    n = 9、10、19、20、30、50。作れた数、間違えた例。
    8 の (オ): 数え歌は 0〜50 まで。文字の決まりで 51 より上の並びを自分で作ってから、50 より上の足し算を問う。
+10. 当たり外れだけ返す（持ち主の問い「不正解であることは返してる？」。1〜9 は正解そのものを聞かせている）: 先生は「合ってる」「違う」だけ言い、正解は言わない。
+   ことゆいは、違うと言われたら次の候補を言う。合ってると言われた答えだけを事実として覚える。
+   候補の順: ずれを運んだ票の多い順 → 関係の表の点の多い順 → 残りは、最初に言った答えから数え歌で近い順（数え歌を知らなければ候補の並び順）。
+   白紙から 1 桁の 100 問を 1 周。25 問ごとの、1 回目で当たった割合と、当たるまでに言った答えの数の平均。数え歌あり／なし。
 語の向き: なし ／ 数え歌（"0 1 2 … 18" を聞いた時の、隣どうしの出方を数えた向き。n の向き = n−1・n・n+1 の所が 1）。
 乱数は使わない。手で置く物: 問いの順（37 飛ばし）、取り分ける 20 問（(A + 2B) を 5 で割り切れる組）、数え歌の窓（隣 1 つ）、周の数。
 python tools/i49g_add_count.py --out <stats.json>
@@ -345,6 +349,49 @@ def char_song(tops=(9, 10, 19, 20, 30, 50), upto=99):
     return out
 
 
+def guess_order(sh, a, b, cands):
+    """当たり外れだけの時に、言ってみる答えの順。"""
+    o = sh.ask(a, b, cands)
+    order = []
+    if o["答え"] is not None:
+        pts = o["点"]
+        order = [c for c in sorted(cands, key=lambda c: (-pts.get(c, 0.0), cands.index(c))) if pts.get(c, 0.0) > 0]
+    if o["段"] == "ずれを運ぶ":                             # 運べた時も、表の下がり方の候補を後ろに足す
+        r = sh.rel.ask(2, (a, b, None), cands)
+        order += [c for c in sorted(cands, key=lambda c: (-r["点"].get(c, 0.0), cands.index(c))) if r["点"].get(c, 0.0) > 0 and c not in order]
+    rest = [c for c in cands if c not in order]
+    if order:                                             # 最初に言った答えから、数え歌で近い順
+        lo = hi = order[0]
+        near = []
+        while lo is not None or hi is not None:
+            hi = sh._move(hi, "次") if hi is not None else None
+            lo = sh._move(lo, "前") if lo is not None else None
+            near += [w for w in (hi, lo) if w is not None]
+        rest = [c for c in near if c in rest] + [c for c in rest if c not in near]
+    return order + rest, o["段"]
+
+
+def yes_no(song=True):
+    """10. 先生は 合ってる／違う だけ返す。"""
+    from i49g_shift import Shifter
+    sh = Shifter(Relation(lambda w: None))
+    if song:
+        sh.hear_song(CANDS)
+    rows = []
+    for t in facts():
+        order, lv = guess_order(sh, t[0], t[1], CANDS)
+        tries = order.index(t[2]) + 1                      # 合ってると言われるまでに言った答えの数
+        rows.append((tries, lv))
+        sh.learn(t)                                        # 合ってると言われた答えだけを覚える
+    out = []
+    for i in range(0, 100, 25):
+        part = rows[i:i + 25]
+        out.append(dict(一回目で当たり=round(sum(1 for n, _ in part if n == 1) / 25, 4), 言った答えの数の平均=round(float(np.mean([n for n, _ in part])), 2),
+                        言った答えの数の最大=int(max(n for n, _ in part))))
+    return dict(二十五問ごと=out, 全体=dict(一回目で当たり=round(sum(1 for n, _ in rows if n == 1) / 100, 4),
+                                     言った答えの数の平均=round(float(np.mean([n for n, _ in rows])), 2)))
+
+
 def one_hot(w):
     x = np.zeros(TOP, dtype=np.complex64)
     x[int(w)] = 1.0
@@ -415,7 +462,7 @@ def main():
         res[name] = dict(一桁=stream(vec_of), 見せていない問い=holdout(vec_of), 二桁=two_digit(vec_of), 思考の波=w, 答える前の違和感=doubt_count(vec_of))
         if a.waves:
             np.savez_compressed(f"{a.waves}_{name}.npz", **arr)
-    res["ずれを運ぶ"] = dict(数え歌を聞いた=shift_count(True), 数え歌を聞いていない=shift_count(False), ほかの計算=other_ops(), 新しい数=new_number(), 五十より上=beyond(), 文字の数え歌=char_song())
+    res["ずれを運ぶ"] = dict(数え歌を聞いた=shift_count(True), 数え歌を聞いていない=shift_count(False), ほかの計算=other_ops(), 新しい数=new_number(), 五十より上=beyond(), 文字の数え歌=char_song(), 当たり外れだけ=dict(数え歌あり=yes_no(True), 数え歌なし=yes_no(False)))
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 

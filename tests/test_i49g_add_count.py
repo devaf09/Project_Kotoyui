@@ -68,3 +68,9 @@ def test_beyond_the_learned_range_needs_the_names_of_numbers():
 def test_char_song_needs_thirty_to_settle_the_nines():
     o = AC.char_song(tops=(10, 20, 30))
     assert o["10"]["間違えた"] == 8 and o["20"]["作れなかった"] == 7 and o["30"]["正しく作れた"] == o["30"]["問い"]
+
+
+def test_right_or_wrong_only_still_grows_with_the_song():
+    y, n = AC.yes_no(True), AC.yes_no(False)
+    assert y["二十五問ごと"][0]["言った答えの数の平均"] > y["二十五問ごと"][-1]["言った答えの数の平均"] == 1.0
+    assert n["全体"]["一回目で当たり"] < 0.1 < y["全体"]["一回目で当たり"]
