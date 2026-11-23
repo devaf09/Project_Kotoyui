@@ -26,6 +26,9 @@
    (ア) 数え歌を 0〜99 まで聞いている。(イ) 数え歌は 0〜50 まで（51 より上の数の名前を知らない）。
    (ウ) 数え歌は 0〜50 まで。問いを答えの小さい順に 1 問ずつ「問う → 正解を聞く → 覚える」。並びを自分で埋める。初めて出る数は必ず外れるので、それを除いた当たりも出す。
    (エ) (ウ) を、決まった飛ばし方で混ぜた順で。
+9. 数え歌を文字で見る（intervention/i49g_digits.CharSong。桁を教えずに見つける案 A）: 数え歌を 0〜n まで聞いた後、n より上 98 までの数の「次」を自分で作れるか。
+   n = 9、10、19、20、30、50。作れた数、間違えた例。
+   8 の (オ): 数え歌は 0〜50 まで。文字の決まりで 51 より上の並びを自分で作ってから、50 より上の足し算を問う。
 語の向き: なし ／ 数え歌（"0 1 2 … 18" を聞いた時の、隣どうしの出方を数えた向き。n の向き = n−1・n・n+1 の所が 1）。
 乱数は使わない。手で置く物: 問いの順（37 飛ばし）、取り分ける 20 問（(A + 2B) を 5 で割り切れる組）、数え歌の窓（隣 1 つ）、周の数。
 python tools/i49g_add_count.py --out <stats.json>
@@ -294,6 +297,21 @@ def beyond(limit=50, top=99, every=7):
         steps = [o.get("歩", 0) for o in rows]
         out[name] = dict(当たり=round(sum(hit) / len(probs), 4), 段=dict(Counter(o["段"] for o in rows)),
                          歩の平均=round(float(np.mean(steps)), 2), 歩の最大=int(max(steps)))
+    from i49g_digits import CharSong
+    sh, cs = world(limit, False), CharSong()
+    cs.hear(names[: limit + 1])
+    made = [str(limit)]
+    while len(made) <= top - limit:
+        y = cs.next(made[-1])
+        if y is None:
+            break
+        made.append(y)
+    sh.hear_song(made)
+    cands = names[: limit + 1] + made[1:]
+    rows = [sh.ask(a, b, cands) for a, b, _ in probs]
+    out[f"数え歌 0〜{limit}・先の並びを文字の決まりで自分で作る"] = dict(
+        作った数=len(made) - 1, 正しく作れた数=sum(1 for i, w in enumerate(made[1:]) if w == str(limit + 1 + i)),
+        当たり=round(sum(o["答え"] == c for o, (_, _, c) in zip(rows, probs)) / len(probs), 4))
     for name, order in (("答えの小さい順", probs), ("混ぜた順", [probs[(i * 37) % len(probs)] for i in range(len(probs))] if len(probs) % 37 else probs)):
         sh = world(limit, True)
         heard = set(names[: limit + 1])
@@ -310,6 +328,20 @@ def beyond(limit=50, top=99, every=7):
                                     もう出た数の問いの当たり=round(sum(old) / max(1, len(old)), 4),
                                     四つに分けた当たり=[round(sum(h for h, _ in rows[i * q:(i + 1) * q]) / q, 4) for i in range(4)],
                                     埋めた並びの数=len(sh.filled))
+    return out
+
+
+def char_song(tops=(9, 10, 19, 20, 30, 50), upto=99):
+    """9. 数え歌を 0〜n まで聞いた後、n〜98 の数の次を自分で作れるか。"""
+    from i49g_digits import CharSong
+    out = {}
+    for n in tops:
+        cs = CharSong()
+        cs.hear([str(i) for i in range(n + 1)])
+        got = [(m, cs.next(str(m))) for m in range(n, upto)]
+        bad = [(str(m), y) for m, y in got if y != str(m + 1)]
+        out[str(n)] = dict(問い=len(got), 正しく作れた=len(got) - len(bad), 作れなかった=sum(1 for _, y in bad if y is None),
+                           間違えた=sum(1 for _, y in bad if y is not None), 例=bad[:4], 九十九の次=cs.next(str(upto)))
     return out
 
 
@@ -383,7 +415,7 @@ def main():
         res[name] = dict(一桁=stream(vec_of), 見せていない問い=holdout(vec_of), 二桁=two_digit(vec_of), 思考の波=w, 答える前の違和感=doubt_count(vec_of))
         if a.waves:
             np.savez_compressed(f"{a.waves}_{name}.npz", **arr)
-    res["ずれを運ぶ"] = dict(数え歌を聞いた=shift_count(True), 数え歌を聞いていない=shift_count(False), ほかの計算=other_ops(), 新しい数=new_number(), 五十より上=beyond())
+    res["ずれを運ぶ"] = dict(数え歌を聞いた=shift_count(True), 数え歌を聞いていない=shift_count(False), ほかの計算=other_ops(), 新しい数=new_number(), 五十より上=beyond(), 文字の数え歌=char_song())
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 

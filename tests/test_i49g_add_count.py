@@ -63,3 +63,8 @@ def test_beyond_the_learned_range_needs_the_names_of_numbers():
     o = AC.beyond(limit=12, top=24, every=3)
     assert o["数え歌 0〜24"]["当たり"] == 1.0 and o["数え歌 0〜12"]["当たり"] == 0.0
     assert o["聞きながら・答えの小さい順"]["当たり"] > o["聞きながら・混ぜた順"]["当たり"] > 0.0
+
+
+def test_char_song_needs_thirty_to_settle_the_nines():
+    o = AC.char_song(tops=(10, 20, 30))
+    assert o["10"]["間違えた"] == 8 and o["20"]["作れなかった"] == 7 and o["30"]["正しく作れた"] == o["30"]["問い"]
