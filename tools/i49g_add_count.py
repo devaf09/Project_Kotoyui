@@ -11,6 +11,8 @@
    （settle。白紙なら 1 刻み待つ）→ 正解の C を聞く → 答え合わせの違和感（答えが違った・白紙）を波へ → 覚える。
    器の波の大きさ・感度・C を聞いた時の外れ、違和感の波を、最初の問い・1 周目の終わり・最後の問いで丸ごと残す（--waves で npz にも）。周ごとの平均も出す。
    器に聞かせる向きは、語の向きが なし の時は数ごとに別々の向き（どの数どうしも似ていない）。
+5. 答える前の違和感（正解は使わない）: 借りた = 聞いた事のある組（2 語の段）でなく、下の段で答えたら 1（白紙も 1）。迷い = 2 番目の点 ÷ 1 番目の点（候補が 1 つなら 0）。
+   80 問を覚えた後、見せた 80 問と見せていない 20 問で、この 2 つの平均を並べる。線は引かない。
 語の向き: なし ／ 数え歌（"0 1 2 … 18" を聞いた時の、隣どうしの出方を数えた向き。n の向き = n−1・n・n+1 の所が 1）。
 乱数は使わない。手で置く物: 問いの順（37 飛ばし）、取り分ける 20 問（(A + 2B) を 5 で割り切れる組）、数え歌の窓（隣 1 つ）、周の数。
 python tools/i49g_add_count.py --out <stats.json>
@@ -149,6 +151,29 @@ def two_digit(vec_of, marks=(25, 50, 75, 100)):
     return out
 
 
+def doubt(o):
+    """答える前の違和感。正解は見ない。"""
+    pts = sorted((v for v in o["点"].values() if v > 0), reverse=True)
+    return dict(借りた=float(o["段"] != "2語"), 迷い=float(pts[1] / pts[0]) if len(pts) > 1 else 0.0)
+
+
+def doubt_count(vec_of, rounds=3):
+    """5. 見せた問いと見せていない問いで、答える前の違和感を並べる。"""
+    rel = Relation(vec_of)
+    for _ in range(rounds):
+        for t in facts():
+            if not held(t):
+                rel.learn(t)
+                rel.tick()
+    out = {}
+    for name, flag in (("見せた", False), ("見せていない", True)):
+        ds = [doubt(ask_c(rel, t[0], t[1])) for t in facts() if held(t) == flag]
+        out[name] = dict(問い=len(ds), 借りた=round(float(np.mean([d["借りた"] for d in ds])), 4),
+                         迷い_平均=round(float(np.mean([d["迷い"] for d in ds])), 4),
+                         迷い_最小=round(float(min(d["迷い"] for d in ds)), 4), 迷い_最大=round(float(max(d["迷い"] for d in ds)), 4))
+    return out
+
+
 def one_hot(w):
     x = np.zeros(TOP, dtype=np.complex64)
     x[int(w)] = 1.0
@@ -216,7 +241,7 @@ def main():
     res = {}
     for name, vec_of in VECS.items():
         w, arr = waves(vec_of)
-        res[name] = dict(一桁=stream(vec_of), 見せていない問い=holdout(vec_of), 二桁=two_digit(vec_of), 思考の波=w)
+        res[name] = dict(一桁=stream(vec_of), 見せていない問い=holdout(vec_of), 二桁=two_digit(vec_of), 思考の波=w, 答える前の違和感=doubt_count(vec_of))
         if a.waves:
             np.savez_compressed(f"{a.waves}_{name}.npz", **arr)
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)

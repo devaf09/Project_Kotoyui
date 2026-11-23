@@ -40,3 +40,9 @@ def test_waves_are_kept_at_start_and_end():
     assert out["周ごと"][0]["違った"] > out["周ごと"][1]["違った"] == 0.0
     assert out["周ごと"][1]["正解を聞いた時の外れ"]["速い波"] < out["周ごと"][0]["正解を聞いた時の外れ"]["速い波"]
     assert {"最初の問い・大きさ", "最後の問い・感度", "最後の問い・違和感"} <= set(arr)
+
+
+def test_doubt_stands_only_for_unseen_sums():
+    d = AC.doubt_count(AC.VECS["数え歌"])
+    assert d["見せた"]["借りた"] == 0.0 and d["見せた"]["迷い_最大"] == 0.0
+    assert d["見せていない"]["借りた"] == 1.0 and d["見せていない"]["迷い_最小"] > 0.0
