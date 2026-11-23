@@ -1,4 +1,6 @@
-"""I49 の図: 本物の文での比べ（記録 14〜18 節の数字を、そのまま描く）。\n使い方: python tools/fig_i49_real_compare.py 出力.png\n"""
+"""I49 の図: 本物の文での比べ（記録 14〜18 節の数字を、そのまま描く）。
+使い方: python tools/fig_i49_real_compare.py 出力.png
+"""
 import sys, os, numpy as np, matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
