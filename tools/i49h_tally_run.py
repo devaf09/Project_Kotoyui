@@ -79,12 +79,13 @@ def tally_table(rel):
     return out
 
 
-def run_all(vec_of, talks, pre_tris):
+def run_all(vec_of, talks, pre_tris, makers=None):
+    """makers = ((名前, 作る関数), ...)。1 つ目は Relation（比べる元）。渡さなければ I49h の 3 つ。"""
     import i49e_relation as RL
     import i49h_tally as TY
-    makers = (("Relation", lambda: RL.Relation(vec_of, half=HALF)),
-              ("選ぶ", lambda: TY.TallyRelation(vec_of, half=HALF, mode="選ぶ")),
-              ("合わせる", lambda: TY.TallyRelation(vec_of, half=HALF, mode="合わせる")))
+    makers = makers or (("Relation", lambda: RL.Relation(vec_of, half=HALF)),
+                        ("選ぶ", lambda: TY.TallyRelation(vec_of, half=HALF, mode="選ぶ")),
+                        ("合わせる", lambda: TY.TallyRelation(vec_of, half=HALF, mode="合わせる")))
     res, recs = {}, {}
     for name, make in makers:
         rel = make()
@@ -96,11 +97,15 @@ def run_all(vec_of, talks, pre_tris):
         res[name]["秒"] = round(time.time() - t1, 1)
         if hasattr(rel, "tally_levels"):
             res[name]["終わりの段ごとの当たり外れ"] = tally_table(rel)
-            res[name]["Relation との違い"] = compare(recs["Relation"], recs[name])
+        if hasattr(rel, "used"):
+            res[name]["座り方の近さを使った回数"] = rel.used
+        if name != makers[0][0]:
+            res[name]["Relation との違い"] = compare(recs[makers[0][0]], recs[name])
     return res
 
 
-def main():
+def load(argv=None):
+    """材料を読む。→ (引数, vec_of, 会話, 青空の 3 つ組, 始めの時刻)"""
     import spacy
     import i49c_read_words as Rw
     import i49e_relation_run as RR
@@ -110,7 +115,7 @@ def main():
         ap.add_argument("--" + k, required=True)
     ap.add_argument("--books", default="1,2,3,4,5,6,7,8")
     ap.add_argument("--cap", type=int, default=2000)
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     t0 = time.time()
     nlp = spacy.load("ja_ginza")
     wv = Rw.WordVecs.load(a.wave)
@@ -120,6 +125,11 @@ def main():
     rows = [r for r in rows if r["語"]["選び方"] in ("い", "覚える側")]
     talks = RR.talk_words(nlp, rows) + RR.talk_words(nlp, [json.loads(l) for l in open(a.stream_test, encoding="utf-8")])
     aoz = [tri for w in sorted(learn) for tri in learn[w]]
+    return a, vec_of, talks, aoz, t0
+
+
+def main():
+    a, vec_of, talks, aoz, t0 = load()
     res = dict(会話=len(talks), 青空の組=len(aoz), 注="青空を先に入れる時、TallyRelation の当たり外れの数えは 0 から始まる（learn だけでは数えが付かない）")
     print("用意", round(time.time() - t0), flush=True)
     for name, pre in (("白紙から", []), ("青空を先に", aoz)):
