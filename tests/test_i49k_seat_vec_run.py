@@ -29,3 +29,11 @@ def test_run_lists_all_makers_and_coverage():
         assert res["関係の表（語板の向き）"]["全体"]["問い"] == res["ずれ"]["全体"]["問い"] == 6
         assert res["向き"]["語板には無いが作った向きは有る"] == 3
         assert "Relation との違い" in res["関係の表（作った向き）"]
+
+
+def test_amount_run_rows():
+    import i49k_amount_run as AR
+    res = AR.run(V.get, TALKS, AOZ, steps=(2, 1))
+    assert set(res) == {"1/2", "1/1"} and res["1/2"]["組"] == 3 and res["1/1"]["組"] == 5
+    assert res["1/1"]["作った向きを持つ内容語の割合"] >= res["1/2"]["作った向きを持つ内容語の割合"]
+    assert set(res["1/1"]["関係の表"]) == {"一位", "白紙"}
