@@ -72,3 +72,16 @@ def test_tables_back_off_in_order():
     assert lv == "述語側の1語" and s[eat] == 2
     assert tb.scores(2, (("犬", "NOUN"), ("骨", "NOUN"), eat), [eat], backoff=True) == (None, "答えられない")
     assert TC.rank_by({cat: 1, bird: 1}, cat) == 2
+
+
+def test_talk_lines_drop_speaker_marks():
+    import i49e_make_talk as MT
+    assert MT.lines_of("子: 猫が魚を食べたよ。\n大人：そうなの。\n（場面）\n") == ["猫が魚を食べたよ。", "そうなの。"]
+
+
+def test_copy_tables_is_independent():
+    t = TC.Tables()
+    t.add((("猫", "NOUN"), ("魚", "NOUN"), ("食べる", "VERB")))
+    c = TC.copy_tables(t)
+    c.add((("猫", "NOUN"), ("魚", "NOUN"), ("食べる", "VERB")))
+    assert sum(t.t2[0].values()) == 1 and sum(c.t2[0].values()) == 2
