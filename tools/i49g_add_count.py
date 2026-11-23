@@ -13,6 +13,10 @@
    器に聞かせる向きは、語の向きが なし の時は数ごとに別々の向き（どの数どうしも似ていない）。
 5. 答える前の違和感（正解は使わない）: 借りた = 聞いた事のある組（2 語の段）でなく、下の段で答えたら 1（白紙も 1）。迷い = 2 番目の点 ÷ 1 番目の点（候補が 1 つなら 0）。
    80 問を覚えた後、見せた 80 問と見せていない 20 問で、この 2 つの平均を並べる。線は引かない。
+6. ずれを運ぶ（intervention/i49g_shift.Shifter）: 数え歌 "0 1 … 18" を先に聞いて並びを覚え、事実を聞くたびにずれの決まりを数える。語の向きは使わない。
+   (ア) 80 問を覚えた後の、見せていない 20 問。(イ) 白紙から 100 問を 1 問ずつ「問う → 答え合わせ → 覚える」時の、25 問ごとの当たりと段。
+   (ウ) 数え歌を聞かせない時（並びを知らない）。
+   (エ) 同じ部品を、引き算（A ≧ B の 55 問）と掛け算（100 問、数え歌は 0〜81）に当てる。決まりが足し算用に置かれた物でなく、数えた物かを見る。
 語の向き: なし ／ 数え歌（"0 1 2 … 18" を聞いた時の、隣どうしの出方を数えた向き。n の向き = n−1・n・n+1 の所が 1）。
 乱数は使わない。手で置く物: 問いの順（37 飛ばし）、取り分ける 20 問（(A + 2B) を 5 で割り切れる組）、数え歌の窓（隣 1 つ）、周の数。
 python tools/i49g_add_count.py --out <stats.json>
@@ -174,6 +178,53 @@ def doubt_count(vec_of, rounds=3):
     return out
 
 
+def shift_count(song=True):
+    """6. ずれを運ぶ部品。"""
+    from i49g_shift import Shifter
+
+    def new():
+        sh = Shifter(Relation(lambda w: None))
+        if song:
+            sh.hear_song(CANDS)
+        return sh
+
+    def row(sh, t):
+        o = sh.ask(t[0], t[1], CANDS)
+        return dict(正解=t[2], 答え=o["答え"], 段=o["段"], 当たり=o["答え"] == t[2])
+
+    sh = new()
+    for t in facts():
+        if not held(t):
+            sh.learn(t)
+    out = dict(見せていない問い=count([row(sh, t) for t in facts() if held(t)]),
+               決まり={f"{('左', '右')[si]}が{d}": dict(c) for (si, d), c in sorted(sh.rule.items())})
+    sh, rows = new(), []
+    for t in facts():
+        rows.append(row(sh, t))
+        sh.learn(t)
+    out["一周目"] = [count(rows[i:i + 25]) for i in range(0, 100, 25)]
+    out["一周目の全部"] = count(rows)
+    return out
+
+
+def other_ops():
+    """6 (エ) 引き算と掛け算。見せていない問い（取り分け方は同じ）の当たりと、数えた決まり。"""
+    from i49g_shift import Shifter
+    out = {}
+    for name, op, ok, top in (("引き算", lambda a, b: a - b, lambda a, b: a >= b, 19), ("掛け算", lambda a, b: a * b, lambda a, b: True, 82)):
+        song = [str(i) for i in range(top)]
+        fs = [(a, b, str(op(int(a), int(b)))) for a, b, _ in facts() if ok(int(a), int(b))]
+        sh = Shifter(Relation(lambda w: None))
+        sh.hear_song(song)
+        for t in fs:
+            if not held(t):
+                sh.learn(t)
+        te = [t for t in fs if held(t)]
+        out[name] = dict(見せていない問い=len(te), 当たり=round(sum(sh.ask(t[0], t[1], song)["答え"] == t[2] for t in te) / max(1, len(te)), 4),
+                         決まり={f"{('左', '右')[si]}が{d}": dict(c) for (si, d), c in sorted(sh.rule.items())})
+    return out
+
+
 def one_hot(w):
     x = np.zeros(TOP, dtype=np.complex64)
     x[int(w)] = 1.0
@@ -244,6 +295,7 @@ def main():
         res[name] = dict(一桁=stream(vec_of), 見せていない問い=holdout(vec_of), 二桁=two_digit(vec_of), 思考の波=w, 答える前の違和感=doubt_count(vec_of))
         if a.waves:
             np.savez_compressed(f"{a.waves}_{name}.npz", **arr)
+    res["ずれを運ぶ"] = dict(数え歌を聞いた=shift_count(True), 数え歌を聞いていない=shift_count(False), ほかの計算=other_ops())
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 

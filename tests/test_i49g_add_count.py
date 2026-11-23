@@ -46,3 +46,14 @@ def test_doubt_stands_only_for_unseen_sums():
     d = AC.doubt_count(AC.VECS["数え歌"])
     assert d["見せた"]["借りた"] == 0.0 and d["見せた"]["迷い_最大"] == 0.0
     assert d["見せていない"]["借りた"] == 1.0 and d["見せていない"]["迷い_最小"] > 0.0
+
+
+def test_shift_part_solves_unseen_sums_only_with_the_song():
+    assert AC.shift_count(True)["見せていない問い"]["当たり"] == 1.0
+    assert AC.shift_count(False)["見せていない問い"]["当たり"] == 0.0
+
+
+def test_shift_rule_is_counted_not_placed():
+    o = AC.other_ops()
+    assert o["引き算"]["当たり"] == 1.0 and o["引き算"]["決まり"]["右が次"] == {"前": 27}
+    assert o["掛け算"]["当たり"] < 0.5
