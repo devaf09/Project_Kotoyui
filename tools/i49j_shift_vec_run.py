@@ -58,10 +58,11 @@ def rate(recs):
     return dict(問い=len(recs), 一位=round(sum(r[2] for r in recs) / max(1, len(recs)), 4))
 
 
-def run(vec_of, talks, pre):
+def run(vec_of, talks, pre, mk=None):
+    """mk = ((名前, 作る関数), ...) を渡せば、それを並べる（1 つ目が比べる元）。"""
     fl = flags(vec_of, talks, pre)
     res, base = {}, None
-    for name, make in makers(vec_of):
+    for name, make in (mk or makers(vec_of)):
         rel = make()
         for tri in pre:
             rel.learn(tri)
