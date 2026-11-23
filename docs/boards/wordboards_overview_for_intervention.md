@@ -1,7 +1,7 @@
 # 語板の概要（介入の研究のスレッドへ、2026-11-05、v2 を追記）
 
 語板のスレッド（試験用の語群セットを作る）で作ったものと、使い方のまとめ。
-置き場（非公開）: PC `D:\AI_git\Project_Kotoyui_private\data\boards\`（v1 は `v1\`）、共有フォルダ `/mnt/project-files/kotoyui_boards/`。
+置き場（非公開）: PC の非公開のフォルダの `data/boards/`（v1 は `v1/`）、共有フォルダ `/mnt/project-files/kotoyui_boards/`。
 コード（公開）: devaf09/Project_Kotoyui のブランチ `claude/memory-figure-code`（PR #1）の `lexicon/`。
 
 ## 1. 何があるか
@@ -55,7 +55,7 @@
 
 ## 5. v2 / v2f（文章で深めた版、2026-11-05）
 
-置き場: PC `D:\AI_git\Project_Kotoyui_private\data\boards\v2\`、報告 `/mnt/project-files/kotoyui_boards/v2/boards_v2_v2f_report.md`。
+置き場: PC の非公開のフォルダの `data/boards/v2/`、報告 `/mnt/project-files/kotoyui_boards/v2/boards_v2_v2f_report.md`。
 - 語 17,711。v1 の帯に **話題の帯 G**（前後 2 文の名詞・動詞のクラス、98）を足した。D は名詞 80 + 動詞 20。名札 1,961、学ばせたのは先頭 5,000 語（属性 1,943）。器は v2 = v1、v2f = v1f と同じ。
 - **語義を文から絞った**: トム・メアリー → 個人（v1 の uncle_tom の外れが消えた）、手・目 → 身体部位 97%。
 - 学びの正確さ v2 0.0022 / v2f 0.0039。融合・消去・逆回しは v1 とほぼ同じ（光の和 0.002、板の平均 0.85、設計 + 300 回 0.001）。
