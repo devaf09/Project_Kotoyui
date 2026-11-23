@@ -19,6 +19,10 @@
   pair=True（weight="数" の時だけ）: 一緒に座った 2 語を 1 つに束ねた向きも足す。束ね方 = 周波数ごとに掛け合わせる（位相を足す）。
                              足すだけでは「A とも B とも座った」と「A と B の組と座った」が区別できないので、組を 1 本の向きにして持つ。
                              Unbind は、pair=True の時は問いの 2 語を束ねた向きも足して探す。
+  Unbind の side: "候補" = 候補の作った向きの中に、見せた 2 語が入っているかを見る（今までの形。聞いた事の無い候補は比べられない）。
+                  "見せた語" = 見せた語の作った向きを回し戻して、隠した席に来る語の元の向き（属性なら、属性の割合）を言い当て、
+                               候補の元の向きと比べる。聞いた事の無い候補も、元の向きが有れば比べられる。
+                  "両方" = 2 つの点を足す。
   Unbind の norm: 候補の作った向きの長さで割るかどうか。"cos" = 長さで割る（たくさん聞いた語ほど、1 つの相手との近さは小さくなる）、
                              "なし" = 割らない（その相手と一緒に聞いた数に近い量になる。よく出る語が有利）、"半分" = 長さの平方根で割る（その間）。
   center=True（weight="数" の時だけ）: 作った向きから「たまたまの分」を引く。たまたまの分 = 足した回数 × どの語にも足された向きの平均。
@@ -117,6 +121,14 @@ class SeatVec:
         si, sj, _ = k
         return max(0.0, math.log(c * self.n_p[(si, sj)] / (self.n_w[(si, w)] * self.n_c[k])))
 
+    def unrot(self, x, pair):
+        """rot の逆（回し戻す）。"""
+        p = pair if isinstance(pair, int) else PAIRS.index(tuple(pair))
+        if self.bind == "ずらす":
+            return np.roll(x, -(p + 1) * (len(x) // 7))
+        self.rot(x, p)                                    # 回し方を作っておく
+        return x * np.conj(self._ph[(p, len(x))])
+
     def of(self, w):
         if self.weight == "数":
             v = self.acc.get(w)
@@ -140,10 +152,10 @@ class SeatVec:
 
 
 class Unbind:
-    def __init__(self, sv, online=False, norm="cos"):
+    def __init__(self, sv, online=False, norm="cos", side="候補"):
         assert not online or sv.weight == "数"
-        assert norm in ("cos", "半分", "なし")
-        self.sv, self.online, self.norm = sv, online, norm
+        assert norm in ("cos", "半分", "なし") and side in ("候補", "見せた語", "両方")
+        self.sv, self.online, self.norm, self.side = sv, online, norm, side
         self.rec = []
 
     def tick(self, n=1):
@@ -153,8 +165,43 @@ class Unbind:
         if self.online:
             self.sv.hear(tri)
 
+    def _from_shown(self, si, tri, cands):
+        """見せた語の作った向きを回し戻して、隠した席に来る語の元の向きを言い当て、候補の元の向きと比べる（聞いた事の無い候補も比べられる）。"""
+        guess = None
+        for sj in range(3):
+            if sj == si:
+                continue
+            v = self.sv.of(tri[sj])
+            if v is None:
+                continue
+            x = self.sv.unrot(v, (sj, si))
+            n = float(np.linalg.norm(x))
+            if n > 0:
+                guess = x / n if guess is None else guess + x / n
+        s = {}
+        if guess is not None:
+            ng = float(np.linalg.norm(guess))
+            for c in cands:
+                b = self.sv._base(c)
+                if b is not None and ng > 0:
+                    s[c] = float(np.real(np.vdot(guess, b))) / ng
+        return s
+
     def ask(self, si, tri, cands):
         cands = list(cands)
+        if self.side != "候補":
+            s2 = self._from_shown(si, tri, cands)
+            if self.side == "両方":
+                keep, self.side = self.side, "候補"
+                s1 = self.ask(si, tri, cands)["点"]
+                self.side = keep
+                self.rec.pop()
+                s2 = {c: s1.get(c, 0.0) + s2.get(c, 0.0) for c in cands if c in s1 or c in s2}
+            out = dict(段="答えられない", 点={}, 答え=None)
+            if s2 and max(s2.values()) > 0:
+                out = dict(段="解く", 点=s2, 答え=max(s2, key=lambda c: (s2[c], -cands.index(c))))
+            self.rec.append((0, si, tuple(tri[j] for j in range(3) if j != si), out["段"], out["答え"]))
+            return out
         aim = None
         for sj in range(3):
             if sj == si:
