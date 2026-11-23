@@ -165,7 +165,10 @@ def main():
     ap.add_argument("--test_talks", default=None, help="四歩目: 試し用の会話の jsonl")
     ap.add_argument("--tests5", default=None, help="五歩目: 試し用の会話 <名前>=<会話.jsonl>,...（作り手ごと）。覚える側は --learn_talks")
     ap.add_argument("--share_tests", default=None, help="六歩目: 会話の試し <名前>=<会話.jsonl>,...（童話の試しは --books から）。覚える側の会話は --learn_talks")
+    ap.add_argument("--chain_tests", default=None, help="七歩目: 会話の試し <名前>=<会話.jsonl>,...（童話の試しは --books から）")
     a = ap.parse_args()
+    if a.chain_tests:
+        return main7(a)
     if a.share_tests:
         return main6(a)
     if a.tests5:
@@ -893,6 +896,159 @@ def main6(a):
             for tn in tnames:
                 res[f"{size}・覚える側 {lname}・試し {tn}"] = dict(覚える三つ組=len(tris), ベクトルが無くて分け合えない三つ組=share.dropped,
                                                              数え=share_count(tests[tn], vec, tables, share))
+            json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    res["秒"] = round(time.time() - t0)
+    json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
+
+# ---- 七歩目: 借りる段を、今の表の下がり方のどこに入れるか（切る線・上位 k 個は置かない） ----
+def inv_rank(x):
+    """近さの並び → 近い順に 1, 1/2, 1/3 … の重み（同じ値は前に置く順位）。"""
+    order = np.argsort(-x, kind="stable")
+    r = np.empty(len(x), dtype=np.float64)
+    r[order] = np.arange(1, len(x) + 1)
+    return 1.0 / r
+
+
+def borrow(share, si, tri, cands, how="both", weight="cos"):
+    """借りる段。how = both（見せた 2 語とも似た語で分け合う）／ one（述語側の語は同じ物に限り、もう片方だけ分け合う）。
+    weight = cos（|cos| を掛ける）／ rank（近さの順位 1, 1/2, … を掛ける）。数が全部 0 なら None。"""
+    j, k = [x for x in range(3) if x != si]
+    near = Tables.NEAR[si]
+    other = k if near == j else j
+    if tri[j] not in share.U or tri[k] not in share.U:
+        return None
+    sim = {p: share.S[share.U[tri[p]]].astype(np.float64) for p in (j, k)}
+    if weight == "rank":
+        sim = {p: inv_rank(v) for p, v in sim.items()}
+    if how == "both":
+        w = sim[j][share.T[:, j]] * sim[k][share.T[:, k]]
+    else:
+        if tri[near] not in share.L:
+            return None
+        w = (share.T[:, near] == share.L[tri[near]]) * sim[other][share.T[:, other]]
+    agg = np.bincount(share.T[:, si], weights=w, minlength=len(share.L))
+    s = {c: float(agg[share.L[c]]) if c in share.L else 0.0 for c in cands}
+    return s if any(v > 0 for v in s.values()) else None
+
+
+CHAINS = {
+    "a_今の表": ("2語", "述語側", "もう片方"),
+    "e_2語の次に借りる": ("2語", "借りる", "述語側", "もう片方"),
+    "e_順位で借りる": ("2語", "借りる_順位", "述語側", "もう片方"),
+    "f_白紙の時だけ借りる": ("2語", "述語側", "もう片方", "借りる"),
+    "g_片方だけ借りる": ("2語", "片方だけ借りる", "述語側", "もう片方", "借りる"),
+    "h_いつも借りる": ("2語", "借りる"),
+}
+
+
+def chain_scores(tables, share, si, tri, cands, chain):
+    sh = [j for j in range(3) if j != si]
+    near = Tables.NEAR[si]
+    other = next(j for j in sh if j != near)
+    for lv in chain:
+        if lv == "2語":
+            s = {c: tables.t2[si].get((tri[sh[0]], tri[sh[1]], c), 0) for c in cands}
+        elif lv == "述語側":
+            s = {c: tables.t1n[si].get((tri[near], c), 0) for c in cands}
+        elif lv == "もう片方":
+            s = {c: tables.t1o[si].get((tri[other], c), 0) for c in cands}
+        elif lv == "借りる":
+            s = borrow(share, si, tri, cands, "both", "cos")
+        elif lv == "借りる_順位":
+            s = borrow(share, si, tri, cands, "both", "rank")
+        else:
+            s = borrow(share, si, tri, cands, "one", "cos")
+        if s and any(v > 0 for v in s.values()):
+            return s, lv
+    return None, "答えられない"
+
+
+def chain_count(items, vec, tables, share):
+    out = {}
+    for si, slot in enumerate(SLOTS):
+        shown = [j for j in range(3) if j != si]
+        o = {}
+        N, freq = [], []
+        per = {k: dict(r=[], lv=Counter(), hit=Counter()) for k in CHAINS}
+        for it in items:
+            tri, hid = it["組"], it["組"][si]
+            show = {tri[j] for j in shown}
+            cands = sorted({w for w in it["ページ"] if w in vec and w not in show} | {hid}, key=str)
+            if len(cands) < 2:
+                continue
+            N.append(len(cands))
+            for name, chain in CHAINS.items():
+                s, lv = chain_scores(tables, share, si, tri, cands, chain)
+                r = rank_by(s, hid) if s else len(cands)
+                per[name]["r"].append(r)
+                per[name]["lv"][lv] += 1
+                per[name]["hit"][lv] += r == 1
+            fc = Counter(w for w in it["ページの並び"] if w in vec and w not in show)
+            freq.append(rank_by({c: fc.get(c, 0) for c in cands}, hid))
+        for name, p in per.items():
+            o[name] = dict(summ(p["r"], N), 答えた段=dict(p["lv"]),
+                           段ごとの一位={lv: round(p["hit"][lv] / n, 4) for lv, n in p["lv"].items() if n})
+        o["いちばん多い語"] = summ(freq, N)
+        o["でたらめ"] = chance(N) if N else None
+        out[slot] = o
+    return out
+
+
+def main7(a):
+    import spacy
+    import i49c_read_words as Rw
+    t0 = time.time()
+    nlp = spacy.load("ja_ginza")
+    wv = Rw.WordVecs.load(a.wave)
+    dou, learn, _ = prepare(a, nlp, wv, t0)
+    rows = [json.loads(l) for f in a.learn_talks.split(",") for l in open(f, encoding="utf-8")]
+    rows = [r for r in rows if r["語"]["選び方"] in ("い", "覚える側")]
+    talk_tris = []
+    for r in rows:
+        tris = []
+        for d in nlp.pipe(r["発言"], batch_size=64):
+            tris += [ws for kind, _, _, ws in triples2(toks_of_doc(d)) if kind == "三つ組"]
+        talk_tris.append(tris)
+    tests = {"童": dou}
+    for spec in a.chain_tests.split(","):
+        name, path = spec.split("=", 1)
+        tests[name], _ = talk_items(nlp, [json.loads(l) for l in open(path, encoding="utf-8")], wv)
+    vec = {}
+    for its in tests.values():
+        vec.update(vec_of_items(its, wv))
+    ids = sorted(learn)
+    all_aoz = [tri for w in ids for tri in learn[w]]
+    novec = Counter()
+    for tri in all_aoz:                                      # ベクトルの無い語の品詞の内訳（語そのものは書かない）
+        for w in tri:
+            if wv.of(*w) is None:
+                novec[w] += 1
+    by_pos = Counter()
+    for (l, p), n in novec.items():
+        by_pos[p] += n
+    top = novec.most_common(20)
+    res = dict(試し={k: len(v) for k, v in tests.items()},
+               ベクトルの無い語=dict(異なり=len(novec), 延べ=sum(novec.values()), 品詞ごとの延べ=dict(by_pos),
+                                    品詞ごとの異なり=dict(Counter(p for _, p in novec)),
+                                    上位20語の品詞と数=[(w[1], n) for w, n in top],
+                                    上位20語が延べに占める割合=round(sum(n for _, n in top) / max(1, sum(novec.values())), 4),
+                                    ベクトルの無い語を含む三つ組=sum(1 for t in all_aoz if any(wv.of(*w) is None for w in t))))
+    for size, sel, n_talk in (("1/10", ids[::10], 50), ("全部", ids, len(talk_tris))):
+        aoz_tris = [tri for w in sel for tri in learn[w]]
+        talk = [tri for tris in talk_tris[:n_talk] for tri in tris]
+        for w in {w for t in aoz_tris + talk for w in t}:
+            if w not in vec and wv.of(*w) is not None:
+                vec[w] = wv.of(*w)
+        ask_words = {w for its in tests.values() for it in its for w in it["ページ"]}
+        for lname, tris, tnames in (("青空", aoz_tris, ["童"]), ("青空＋会話", aoz_tris + talk, [k for k in tests if k != "童"])):
+            tables = Tables()
+            for tri in tris:
+                tables.add(tri)
+            share = Share(tris, vec, ask_words, seed=a.seed)
+            for tn in tnames:
+                res[f"{size}・覚える側 {lname}・試し {tn}"] = chain_count(tests[tn], vec, tables, share)
+            print(size, lname, round(time.time() - t0), flush=True)
             json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     res["秒"] = round(time.time() - t0)
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
