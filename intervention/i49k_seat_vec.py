@@ -16,6 +16,8 @@
   Unbind(sv, online=False)   語を鍵にした表をまったく持たずに答える形。問いの見せた 2 語を、隠した席から見た回し方で回して足し、
                              それに作った向きが近い候補を答える（作った向きの中に「この席でこの相手と座った」が入っているかを共振で見る）。
                              online=True なら、答え合わせの後にその 3 つ組も sv に聞かせる（weight="数" の時だけ）。
+  center=True（weight="数" の時だけ）: 作った向きから「たまたまの分」を引く。たまたまの分 = 足した回数 × どの語にも足された向きの平均。
+                             よく出る語（食べる など）の成分が、どの語にも大きく入って混ざるのを減らすため。足し算と引き算だけで、聞くたびに直せる。
 手で置く物: 回し方（ずらす数 = (席の組の番号 + 1) × 次元 ÷ 7。位相の傾き = (席の組の番号 + 1) × 黄金比の小数部）、重さの 2 通り、
             元の向きを長さ 1 にそろえる事、Unbind の近さを cos の実部にした事。数は薄れさせていない。乱数は置かない。
 """
@@ -29,9 +31,13 @@ PAIRS = [(i, j) for i in range(3) for j in range(3) if i != j]
 
 
 class SeatVec:
-    def __init__(self, base_of, weight="偏り", bind="ずらす"):
+    def __init__(self, base_of, weight="偏り", bind="ずらす", center=False):
         assert weight in ("数", "偏り") and bind in ("ずらす", "位相")
-        self.base_of, self.weight, self.bind = base_of, weight, bind
+        assert not center or weight == "数"
+        self.base_of, self.weight, self.bind, self.center = base_of, weight, bind, center
+        self.n_add = {}                                   # 語 → 足した回数
+        self.tot = None                                   # 全部の語に足した向きの合計
+        self.n_tot = 0
         self.acc = {}                                     # 語 → 足した向き（weight="数" の時だけ。聞くたびに足す）
         self._ph = {}                                     # (席の組の番号, 次元) → 位相の回し方
         self.ctx = {}                                     # 語 → {(自分の席, 相手の席, 相手の語): 数}
@@ -58,6 +64,9 @@ class SeatVec:
                     if b is not None:
                         x = self.rot(b, (si, sj))
                         self.acc[w] = x.copy() if w not in self.acc else self.acc[w] + x
+                        self.n_add[w] = self.n_add.get(w, 0) + 1
+                        self.tot = x.astype(np.complex128) if self.tot is None else self.tot + x
+                        self.n_tot += 1
         self._v.clear()
 
     def rot(self, b, pair):
@@ -88,7 +97,10 @@ class SeatVec:
 
     def of(self, w):
         if self.weight == "数":
-            return self.acc.get(w)
+            v = self.acc.get(w)
+            if v is None or not self.center:
+                return v
+            return (v - self.n_add[w] * (self.tot / self.n_tot)).astype(np.complex64)
         if w in self._v:
             return self._v[w]
         out = None

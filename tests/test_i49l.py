@@ -89,3 +89,16 @@ def test_run_tool_lists_everything():
     on = LR.online(V.get, talks, FACTS)
     assert on["白紙から"]["解く・位相"]["全体"]["問い"] == on["白紙から"]["関係の表（語板の向き）"]["全体"]["問い"] == 6
     assert on["青空を先に"]["解く・位相"]["全体"]["一位"] >= on["白紙から"]["解く・位相"]["全体"]["一位"]
+
+
+def test_center_removes_the_common_part():
+    s = SeatVec(V.get, weight="数", bind="位相", center=True)
+    for t in FACTS + [("タマ", "道", "食べる"), ("ポチ", "魚", "食べる")]:
+        s.hear(t)
+    plain = made("位相")
+    for t in [("タマ", "道", "食べる"), ("ポチ", "魚", "食べる")]:
+        plain.hear(t)
+    # どの語にも入る 食べる の分を引くと、座り方の違う ミケ と ポチ は、引かない時より離れる
+    assert cos(s.of("ミケ"), s.of("ポチ")) < cos(plain.of("ミケ"), plain.of("ポチ"))
+    u = Unbind(s)
+    assert u.ask(2, ("ポチ", "道", None), ["食べる", "捕る", "走る"])["答え"] == "走る"
