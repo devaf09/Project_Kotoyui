@@ -157,7 +157,17 @@ def main():
     ap.add_argument("--n_words", type=int, default=50)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--talks", default=None, help="三歩目: 作った会話 <名前>=<会話.jsonl>,... を覚える側に足して数える")
+    ap.add_argument("--pick_words4", default=None, help="四歩目: 覚える側と試し用の語を選んで、この jsonl に書く")
+    ap.add_argument("--keep", default=None, help="四歩目: 前に作った会話（渡した語を新しく選ぶ語から除く）")
+    ap.add_argument("--n_learn", type=int, default=450)
+    ap.add_argument("--n_test", type=int, default=100)
+    ap.add_argument("--learn_talks", default=None, help="四歩目: 覚える側の会話の jsonl（, 区切り、並べた順に 100・250・500 本で切る）")
+    ap.add_argument("--test_talks", default=None, help="四歩目: 試し用の会話の jsonl")
     a = ap.parse_args()
+    if a.pick_words4:
+        return pick_words4(a)
+    if a.test_talks:
+        return main4(a)
     if a.pick_words:
         return pick_words(a)
     if a.talks:
@@ -564,6 +574,114 @@ def copy_tables(t):
     c.t1n = [Counter(x) for x in t.t1n]
     c.t1o = [Counter(x) for x in t.t1o]
     return c
+
+
+# ---- 四歩目: 試しの側にも作った会話を置く ----
+def random_words(nlp, wv, n, seed, exclude=()):
+    """語のベクトルを持つ内容語（1 語で GiNZA が同じ原形・品詞を返す物）を seed 固定ででたらめに n 個。exclude の原形は除く。"""
+    import i48_wave_board as W48
+    pool = [w for w, _ in sorted(wv.ix.items(), key=lambda x: x[1]) if isinstance(w, str) and w not in exclude]
+    out = []
+    for nm in random.Random(seed).sample(pool, len(pool)):
+        d = nlp(nm)
+        if len(d) == 1 and d[0].pos_ in W48.CONTENT and d[0].lemma_ not in W48.STOP and wv.of(d[0].lemma_, d[0].pos_) is not None:
+            out.append((d[0].lemma_, d[0].pos_))
+        if len(out) >= n:
+            break
+    return out
+
+
+def pick_words4(a):
+    """覚える側 a.n_learn 語（seed a.seed）と、試し用 a.n_test 語（seed a.seed + 1、覚える側の語と、--keep の会話で渡した語を除く）。"""
+    import spacy
+    import i49c_read_words as Rw
+    nlp = spacy.load("ja_ginza")
+    wv = Rw.WordVecs.load(a.wave)
+    keep = [json.loads(l) for l in open(a.keep, encoding="utf-8")] if a.keep else []
+    used = {r["語"]["原形"] for r in keep}
+    learn = random_words(nlp, wv, a.n_learn, a.seed, exclude=used)
+    test = random_words(nlp, wv, a.n_test, a.seed + 1, exclude=used | {w for w, _ in learn})
+    with open(a.pick_words4, "w", encoding="utf-8") as f:
+        for g, ws in (("覚える側", learn), ("試し用", test)):
+            for w in ws:
+                f.write(json.dumps({"原形": w[0], "品詞": w[1], "選び方": g}, ensure_ascii=False) + "\n")
+    print("覚える側", len(learn), "試し用", len(test))
+
+
+def talk_items(nlp, rows, wv):
+    """作った会話（1 本 = 1 ページ）→ 試しの 3 つ組（候補 = その会話の内容語）と、落ちた数。"""
+    import i48_wave_board as W48
+    items, kinds = [], Counter()
+    for ti, r in enumerate(rows):
+        docs = list(nlp.pipe(r["発言"], batch_size=64))
+        seq = [(t.lemma_, t.pos_) for d in docs for t in d if t.pos_ in W48.CONTENT and t.lemma_ not in W48.STOP]
+        for d in docs:
+            for kind, sk, ak, ws in triples2(toks_of_doc(d)):
+                if kind != "三つ組":
+                    continue
+                kinds["三つ組"] += 1
+                if any(wv.of(*w) is None for w in ws):
+                    kinds["ベクトルが無い"] += 1
+                    continue
+                items.append(dict(組=ws, 主語の格=sk, 目的の格=ak, 文=(ti, len(items)), ページの並び=seq, ページ=set(seq), 作品=set(seq)))
+    return items, kinds
+
+
+def main4(a):
+    import spacy
+    import i49c_read_words as Rw
+    t0 = time.time()
+    nlp = spacy.load("ja_ginza")
+    wv = Rw.WordVecs.load(a.wave)
+    dou, learn, _ = prepare(a, nlp, wv, t0)
+    rows = [json.loads(l) for f in a.learn_talks.split(",") for l in open(f, encoding="utf-8")]
+    rows = [r for r in rows if r["語"]["選び方"] in ("い", "覚える側")]          # 三歩目の あ（試しの童話から選んだ語）は使わない
+    test_rows = [json.loads(l) for l in open(a.test_talks, encoding="utf-8")]
+    talk_tris = []
+    for r in rows:
+        tris = []
+        for d in nlp.pipe(r["発言"], batch_size=64):
+            tris += [ws for kind, _, _, ws in triples2(toks_of_doc(d)) if kind == "三つ組"]
+        talk_tris.append(tris)
+    kai, kai_kinds = talk_items(nlp, test_rows, wv)
+    print("童", len(dou), "会", len(kai), "覚える会話", len(rows), round(time.time() - t0), flush=True)
+    vec = vec_of_items(dou, wv)
+    vec.update(vec_of_items(kai, wv))
+    learned = [tri for tris in talk_tris for tri in tris]
+    pairs = {frozenset([(i, tri[i]), (j, tri[j])]) for tri in learned for i in range(3) for j in range(i + 1, 3)}
+    full = set(learned)
+    res = dict(覚える会話=len(rows), 覚える会話の三つ組=len(learned), 試し用の会話=len(test_rows), 童=len(dou), 会=len(kai),
+               会の取れた数=dict(kai_kinds), 会のベクトルが無くて落ちた割合=round(kai_kinds["ベクトルが無い"] / max(1, kai_kinds["三つ組"]), 4),
+               漏れ=dict(同じ三つ組=round(float(np.mean([it["組"] in full for it in kai])), 4) if kai else None,
+                       同じ2語の組=round(float(np.mean([any(frozenset([(i, it["組"][i]), (j, it["組"][j])]) in pairs
+                                                       for i in range(3) for j in range(i + 1, 3)) for it in kai])), 4) if kai else None))
+    aoz = Tables()
+    for L in learn.values():
+        for tri in L:
+            aoz.add(tri)
+
+    def brief(tables, items):
+        c = count2(items, vec, tables)
+        keep = ("足した向き", "隣の1語の向き", "関係の無い2語", "数えた表_2語", "数えた表_下がる込み", "いちばん多い語")
+        return {k.replace("まとめ・", ""): dict({m: (v[m].get("一位"), v[m].get("三位以内")) for m in keep},
+                                              でたらめ=(v["でたらめ"] or {}).get("一位"), 数=v["足した向き"].get("数"),
+                                              二語の表で答えられない=v["2語の表で答えられなかった割合"], 使った表=v["下がる込みで使った表"],
+                                              注意=v.get("注意", ""))
+                for k, v in c.items() if k.startswith("まとめ") and k.endswith("ア_ページ")}
+
+    for tname, items in (("童", dou), ("会", kai)):
+        res[f"{tname}・青空だけ"] = brief(aoz, items)
+        for n in (100, 250, 500):
+            only, both = Tables(), copy_tables(aoz)
+            for tris in talk_tris[:n]:
+                for tri in tris:
+                    only.add(tri)
+                    both.add(tri)
+            res[f"{tname}・会話だけ {n} 本"] = brief(only, items)
+            res[f"{tname}・両方 {n} 本"] = brief(both, items)
+        print(tname, round(time.time() - t0), flush=True)
+    res["秒"] = round(time.time() - t0)
+    json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 
 if __name__ == "__main__":
