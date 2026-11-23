@@ -70,3 +70,40 @@ def test_norm_choice_changes_who_wins():
         return u.ask(0, (None, "魚", "食べる"), ["犬", "猫"])["点"]
     c, r = ans("cos"), ans("なし")
     assert r["猫"] / r["犬"] > c["猫"] / c["犬"]             # 割らない方が、たくさん聞いた 猫 に有利
+
+
+def test_why_drop_trace_and_summary():
+    import i49m_why_drop as WD
+    ab = AttrBase(BOARD)
+    W = {(w["name"], "NOUN") for w in BOARD[:5]} | {("食べる", "VERB"), ("投げる", "VERB")}
+    tri = lambda a, b, c: ((a, "NOUN"), (b, "NOUN"), (c, "VERB"))
+    talks = [([tri("猫", "魚", "食べる")], W), ([tri("猫", "魚", "食べる"), tri("犬", "肉", "食べる")], W)]
+    rows = WD.trace(ab.of, talks, [tri("猫", "石", "投げる")])
+    assert len(rows) == 9 and all(r["nv"] <= r["n"] for r in rows)
+    assert rows[0]["heard"] >= 1 and any(r["hit"] for r in rows[3:6])       # 2 回目の同じ 3 つ組は当たる席がある
+    s = WD.summarize(rows, 2, every=1)
+    assert set(s["区切りごと"]) == {"1", "2"} and s["全体"]["問い"] == 9
+    assert sum(v["問い"] for v in s["正解が聞かれた回数ごと"].values()) == 9
+
+
+def test_from_shown_side_can_pick_a_candidate_never_heard():
+    ab = AttrBase(BOARD)
+    def mk(side):
+        u = Unbind(SeatVec(ab.of, weight="数", bind="位相"), online=True, side=side)
+        u.learn(("猫", "魚", "食べる"))
+        u.learn(("猫", "石", "投げる"))
+        return u
+    q = ("猫", None, "食べる")
+    # 肉 も 空 も一度も聞いていない。候補の側からは比べられないが、見せた語の側からなら、食べ物の属性で 肉 が 空 より上に来る
+    assert mk("候補").ask(1, q, [("空", "NOUN"), "肉"])["答え"] is None
+    assert mk("見せた語").ask(1, q, [("空", "NOUN"), "肉"])["答え"] == "肉"
+    both = mk("両方").ask(1, q, ["石", "肉", "魚"])
+    assert both["答え"] == "魚" and set(both["点"]) == {"石", "肉", "魚"}
+
+
+def test_unrot_undoes_rot():
+    ab = AttrBase(BOARD)
+    for bind in ("位相", "ずらす"):
+        s = SeatVec(ab.of, weight="数", bind=bind)
+        b = s._base("猫")
+        assert np.allclose(s.unrot(s.rot(b, (0, 2)), (0, 2)), b, atol=1e-5)

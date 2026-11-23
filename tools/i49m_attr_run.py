@@ -7,6 +7,8 @@
   解く・属性・引く        上に、たまたまの分を引く（どの語にも付く属性が強く出るのを減らす）
   解く・属性・束ねる      上（引かない）に、一緒に座った 2 語を束ねた向きも足す
   解く・属性（話題の帯を除く）  G 帯を除いた属性だけ
+  解く・属性・見せた語から   見せた語の作った向きを回し戻して、隠した席に来る語の属性を言い当て、候補の属性と比べる（聞いた事の無い候補も比べられる）
+  解く・属性・両方 ／ 解く・語の波・両方   上と、今までの形（候補の作った向きを見る）の点を足す
   解く・属性・長さで割らない ／ 長さの平方根で割る   候補の作った向きの長さで割る割り方を変える（聞くほど下がる理由の見立て:
                           長さで割ると、たくさん聞いた語ほど不利になる。会話でよく答えになる語が、材料が増えるほど負けていく）
   表（属性の近さで借りる）  関係の表のまま、借りる時の近さだけを属性の割合の cos にする
@@ -36,14 +38,17 @@ def run(wave_of, board, talks, aoz):
     full = AB.AttrBase(board)
     no_g = AB.AttrBase(board, bands=[b for b in sorted({k[0] for k in full.ix}) if b != "G"])
 
-    def unb(base, norm="cos", **kw):
-        return KV.Unbind(KV.SeatVec(base, weight="数", bind="位相", **kw), online=True, norm=norm)
+    def unb(base, norm="cos", side="候補", **kw):
+        return KV.Unbind(KV.SeatVec(base, weight="数", bind="位相", **kw), online=True, norm=norm, side=side)
     mk = (("表（語の波の近さで借りる）", lambda: RL.Relation(wave_of, half=HR.HALF)),
           ("解く・語の波", lambda: unb(wave_of)),
           ("解く・属性", lambda: unb(full.of)),
           ("解く・属性・引く", lambda: unb(full.of, center=True)),
           ("解く・属性・束ねる", lambda: unb(full.of, pair=True)),
           ("解く・属性（話題の帯を除く）", lambda: unb(no_g.of)),
+          ("解く・属性・見せた語から", lambda: unb(full.of, side="見せた語")),
+          ("解く・属性・両方", lambda: unb(full.of, side="両方")),
+          ("解く・語の波・両方", lambda: unb(wave_of, side="両方")),
           ("解く・属性・長さで割らない", lambda: unb(full.of, norm="なし")),
           ("解く・属性・長さの平方根で割る", lambda: unb(full.of, norm="半分")),
           ("表（属性の近さで借りる）", lambda: RL.Relation(full.of, half=HR.HALF)))
