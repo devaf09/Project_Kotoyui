@@ -61,12 +61,13 @@ def online(board_of, talks, aoz):
     import i49k_seat_vec as KV
     out = {}
     for start, pre in (("白紙から", []), ("青空を先に", aoz)):
-        def unb(bind, center=False):
-            sv = KV.SeatVec(board_of, weight="数", bind=bind, center=center)
+        def unb(bind, center=False, pair=False):
+            sv = KV.SeatVec(board_of, weight="数", bind=bind, center=center, pair=pair)
             return KV.Unbind(sv, online=True)
         mk = (("関係の表（語板の向き）", lambda: RL.Relation(board_of, half=HR.HALF)),
               ("解く・ずらす", lambda: unb("ずらす")), ("解く・位相", lambda: unb("位相")),
-              ("解く・位相・たまたまの分を引く", lambda: unb("位相", True)))
+              ("解く・位相・たまたまの分を引く", lambda: unb("位相", True)),
+              ("解く・位相・組も束ねる", lambda: unb("位相", False, True)))
         out[start] = JR.run(board_of, talks, pre, mk)
     return out
 

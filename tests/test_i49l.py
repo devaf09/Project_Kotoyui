@@ -102,3 +102,17 @@ def test_center_removes_the_common_part():
     assert cos(s.of("ミケ"), s.of("ポチ")) < cos(plain.of("ミケ"), plain.of("ポチ"))
     u = Unbind(s)
     assert u.ask(2, ("ポチ", "道", None), ["食べる", "捕る", "走る"])["答え"] == "走る"
+
+
+def test_pair_binding_tells_the_pair_from_the_two_singles():
+    # 太郎 は 魚 を 捕る、次郎 は 魚 を 食べる・肉 を 捕る。「? が 魚 を 捕る」: 足すだけだと 次郎（魚 とも 捕る とも座った）が 太郎 と並ぶ
+    names = ["太郎", "次郎", "魚", "肉", "捕る", "食べる"]
+    v = {n: wave(i + 20) for i, n in enumerate(names)}
+    facts = [("太郎", "魚", "捕る"), ("次郎", "魚", "食べる"), ("次郎", "肉", "捕る")]
+    def score(pair):
+        s = SeatVec(v.get, weight="数", bind="位相", pair=pair)
+        for t in facts:
+            s.hear(t)
+        o = Unbind(s).ask(0, (None, "魚", "捕る"), ["次郎", "太郎"])
+        return o["点"]["太郎"] - o["点"]["次郎"]
+    assert score(True) > score(False)

@@ -16,6 +16,9 @@
   Unbind(sv, online=False)   語を鍵にした表をまったく持たずに答える形。問いの見せた 2 語を、隠した席から見た回し方で回して足し、
                              それに作った向きが近い候補を答える（作った向きの中に「この席でこの相手と座った」が入っているかを共振で見る）。
                              online=True なら、答え合わせの後にその 3 つ組も sv に聞かせる（weight="数" の時だけ）。
+  pair=True（weight="数" の時だけ）: 一緒に座った 2 語を 1 つに束ねた向きも足す。束ね方 = 周波数ごとに掛け合わせる（位相を足す）。
+                             足すだけでは「A とも B とも座った」と「A と B の組と座った」が区別できないので、組を 1 本の向きにして持つ。
+                             Unbind は、pair=True の時は問いの 2 語を束ねた向きも足して探す。
   center=True（weight="数" の時だけ）: 作った向きから「たまたまの分」を引く。たまたまの分 = 足した回数 × どの語にも足された向きの平均。
                              よく出る語（食べる など）の成分が、どの語にも大きく入って混ざるのを減らすため。足し算と引き算だけで、聞くたびに直せる。
 手で置く物: 回し方（ずらす数 = (席の組の番号 + 1) × 次元 ÷ 7。位相の傾き = (席の組の番号 + 1) × 黄金比の小数部）、重さの 2 通り、
@@ -31,9 +34,10 @@ PAIRS = [(i, j) for i in range(3) for j in range(3) if i != j]
 
 
 class SeatVec:
-    def __init__(self, base_of, weight="偏り", bind="ずらす", center=False):
+    def __init__(self, base_of, weight="偏り", bind="ずらす", center=False, pair=False):
         assert weight in ("数", "偏り") and bind in ("ずらす", "位相")
-        assert not center or weight == "数"
+        assert not (center or pair) or weight == "数"
+        self.pair = pair
         self.base_of, self.weight, self.bind, self.center = base_of, weight, bind, center
         self.n_add = {}                                   # 語 → 足した回数
         self.tot = None                                   # 全部の語に足した向きの合計
@@ -67,10 +71,26 @@ class SeatVec:
                         self.n_add[w] = self.n_add.get(w, 0) + 1
                         self.tot = x.astype(np.complex128) if self.tot is None else self.tot + x
                         self.n_tot += 1
+            if self.pair and self.weight == "数":
+                x = self.both(si, t)
+                if x is not None:
+                    self.acc[w] = x.copy() if w not in self.acc else self.acc[w] + x
+                    self.n_add[w] = self.n_add.get(w, 0) + 1
+                    self.tot = x.astype(np.complex128) if self.tot is None else self.tot + x
+                    self.n_tot += 1
         self._v.clear()
 
+    def both(self, si, tri):
+        """隠す席 si から見た、ほかの 2 語を 1 つに束ねた向き（周波数ごとに掛け合わせて位相を足し、長さ 1 にそろえ、席ごとの回し方で回す）。"""
+        o = [self._base(tri[j]) for j in range(3) if j != si]
+        if o[0] is None or o[1] is None:
+            return None
+        x = o[0] * o[1]
+        n = float(np.linalg.norm(x))
+        return None if n == 0 else self.rot(x / n, len(PAIRS) + si)
+
     def rot(self, b, pair):
-        p = PAIRS.index(tuple(pair))
+        p = pair if isinstance(pair, int) else PAIRS.index(tuple(pair))
         if self.bind == "ずらす":
             return np.roll(b, (p + 1) * (len(b) // 7))
         key = (p, len(b))
@@ -139,6 +159,10 @@ class Unbind:
             b = self.sv._base(tri[sj])
             if b is not None:
                 x = self.sv.rot(b, (si, sj))
+                aim = x if aim is None else aim + x
+        if self.sv.pair:
+            x = self.sv.both(si, tri)
+            if x is not None:
                 aim = x if aim is None else aim + x
         out = dict(段="答えられない", 点={}, 答え=None)
         if aim is not None:
