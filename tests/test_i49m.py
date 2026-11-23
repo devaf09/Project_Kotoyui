@@ -56,3 +56,17 @@ def test_run_tool():
     assert res["向き"]["属性の数"] == AttrBase(BOARD).n_attr
     assert {"解く・属性", "解く・属性・引く", "解く・属性・束ねる", "解く・属性（話題の帯を除く）", "表（属性の近さで借りる）"} <= set(res["白紙から"])
     assert res["白紙から"]["解く・属性"]["全体"]["問い"] == 6
+
+
+def test_norm_choice_changes_who_wins():
+    ab = AttrBase(BOARD)
+    def ans(norm):
+        u = Unbind(SeatVec(ab.of, weight="数", bind="位相"), online=True, norm=norm)
+        for _ in range(3):
+            u.learn(("猫", "魚", "食べる"))
+        for _ in range(12):
+            u.learn(("猫", "石", "投げる"))                # 猫 はたくさん聞いた語。食べる との分は、長さの中で薄まる
+        u.learn(("犬", "肉", "食べる"))
+        return u.ask(0, (None, "魚", "食べる"), ["犬", "猫"])["点"]
+    c, r = ans("cos"), ans("なし")
+    assert r["猫"] / r["犬"] > c["猫"] / c["犬"]             # 割らない方が、たくさん聞いた 猫 に有利

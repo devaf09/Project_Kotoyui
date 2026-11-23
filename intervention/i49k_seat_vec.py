@@ -19,6 +19,8 @@
   pair=True（weight="数" の時だけ）: 一緒に座った 2 語を 1 つに束ねた向きも足す。束ね方 = 周波数ごとに掛け合わせる（位相を足す）。
                              足すだけでは「A とも B とも座った」と「A と B の組と座った」が区別できないので、組を 1 本の向きにして持つ。
                              Unbind は、pair=True の時は問いの 2 語を束ねた向きも足して探す。
+  Unbind の norm: 候補の作った向きの長さで割るかどうか。"cos" = 長さで割る（たくさん聞いた語ほど、1 つの相手との近さは小さくなる）、
+                             "なし" = 割らない（その相手と一緒に聞いた数に近い量になる。よく出る語が有利）、"半分" = 長さの平方根で割る（その間）。
   center=True（weight="数" の時だけ）: 作った向きから「たまたまの分」を引く。たまたまの分 = 足した回数 × どの語にも足された向きの平均。
                              よく出る語（食べる など）の成分が、どの語にも大きく入って混ざるのを減らすため。足し算と引き算だけで、聞くたびに直せる。
 手で置く物: 回し方（ずらす数 = (席の組の番号 + 1) × 次元 ÷ 7。位相の傾き = (席の組の番号 + 1) × 黄金比の小数部）、重さの 2 通り、
@@ -138,9 +140,10 @@ class SeatVec:
 
 
 class Unbind:
-    def __init__(self, sv, online=False):
+    def __init__(self, sv, online=False, norm="cos"):
         assert not online or sv.weight == "数"
-        self.sv, self.online = sv, online
+        assert norm in ("cos", "半分", "なし")
+        self.sv, self.online, self.norm = sv, online, norm
         self.rec = []
 
     def tick(self, n=1):
@@ -173,7 +176,8 @@ class Unbind:
                 if v is not None:
                     nv = float(np.linalg.norm(v))
                     if nv > 0 and na > 0:
-                        s[c] = float(np.real(np.vdot(aim, v))) / (na * nv)
+                        div = nv if self.norm == "cos" else (nv ** 0.5 if self.norm == "半分" else 1.0)
+                        s[c] = float(np.real(np.vdot(aim, v))) / (na * div)
             if s and max(s.values()) > 0:
                 best = max(s, key=lambda c: (s[c], -cands.index(c)))
                 out = dict(段="解く", 点=s, 答え=best)
