@@ -164,7 +164,10 @@ def main():
     ap.add_argument("--learn_talks", default=None, help="四歩目: 覚える側の会話の jsonl（, 区切り、並べた順に 100・250・500 本で切る）")
     ap.add_argument("--test_talks", default=None, help="四歩目: 試し用の会話の jsonl")
     ap.add_argument("--tests5", default=None, help="五歩目: 試し用の会話 <名前>=<会話.jsonl>,...（作り手ごと）。覚える側は --learn_talks")
+    ap.add_argument("--share_tests", default=None, help="六歩目: 会話の試し <名前>=<会話.jsonl>,...（童話の試しは --books から）。覚える側の会話は --learn_talks")
     a = ap.parse_args()
+    if a.share_tests:
+        return main6(a)
     if a.tests5:
         return main5(a)
     if a.pick_words4:
@@ -757,6 +760,140 @@ def main5(a):
         o["だれがの答え"] = dict(種類=len(subj), 上位5語の割合=round(sum(n for _, n in top) / max(1, len(kai)), 4), 上位5語=top)
         res["試し"][name] = o
         print(name, round(time.time() - t0), flush=True)
+    res["秒"] = round(time.time() - t0)
+    json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
+
+# ---- 六歩目: 似た語どうしで数を分け合う（持ち主「学習を増やせないなぁ」） ----
+class Share:
+    """覚えた 3 つ組を、語の向きの近さで分け合って使う口。
+    b: 点(候補) = Σ_t 近さ(見せた語1, t の語1) × 近さ(見せた語2, t の語2) × [t の答え = 候補]
+    c: 点(候補) = Σ_t 近さ1 × 近さ2 × 近さ(候補, t の答え)
+    d: 波の板。席ごとに 板 = Σ_t 結び(t の語1, t の語2) ⊙ t の答え（結び = 席ごとの並べ替えを掛けた向きの要素ごとの積）。
+       問いは 板 ⊙ conj(結び(見せた語1, 見せた語2)) に近い候補を選ぶ。近さはどれも |cos|。切る線・上位 k 個・前処理は置かない。"""
+
+    def __init__(self, tris, vec, ask_words, seed=7):
+        words = sorted({w for t in tris for w in t if w in vec}, key=str)
+        self.L = {w: i for i, w in enumerate(words)}
+        VL = np.stack([unit(vec[w]) for w in words]).astype(np.complex64)
+        self.tris = [t for t in tris if all(w in self.L for w in t)]
+        self.dropped = len(tris) - len(self.tris)
+        self.T = np.array([[self.L[w] for w in t] for t in self.tris], dtype=np.int64).reshape(-1, 3)
+        ask = sorted({w for w in ask_words if w in vec}, key=str)
+        self.U = {w: i for i, w in enumerate(ask)}
+        VU = np.stack([unit(vec[w]) for w in ask]).astype(np.complex64)
+        self.S = np.zeros((len(ask), len(words)), dtype=np.float32)       # 近さ（問いの側の語 × 覚えた語）
+        for s in range(0, len(ask), 512):
+            self.S[s:s + 512] = np.abs(np.conj(VU[s:s + 512]) @ VL.T)
+        dim = VL.shape[1]
+        rng = np.random.default_rng(seed)
+        self.perm = [rng.permutation(dim) for _ in range(3)]               # 席ごとの並べ替え
+        self.VU = VU
+        self.board = []
+        for si in range(3):
+            j, k = [x for x in range(3) if x != si]
+            B = np.zeros(dim, dtype=np.complex64)
+            for s in range(0, len(self.T), 4096):
+                t = self.T[s:s + 4096]
+                B += (VL[t[:, j]][:, self.perm[j]] * VL[t[:, k]][:, self.perm[k]] * VL[t[:, si]]).sum(0)
+            self.board.append(B)
+
+    def scores(self, kind, si, tri, cands):
+        j, k = [x for x in range(3) if x != si]
+        if tri[j] not in self.U or tri[k] not in self.U:
+            return None
+        if kind == "d":
+            q = self.VU[self.U[tri[j]]][self.perm[j]] * self.VU[self.U[tri[k]]][self.perm[k]]
+            r = self.board[si] * np.conj(q)
+            return {c: float(np.abs(np.vdot(self.VU[self.U[c]], r))) if c in self.U else 0.0 for c in cands}
+        w = self.S[self.U[tri[j]], self.T[:, j]] * self.S[self.U[tri[k]], self.T[:, k]]
+        agg = np.bincount(self.T[:, si], weights=w, minlength=len(self.L))
+        if kind == "b":
+            return {c: float(agg[self.L[c]]) if c in self.L else 0.0 for c in cands}
+        return {c: float(self.S[self.U[c]] @ agg) if c in self.U else 0.0 for c in cands}
+
+
+def share_count(items, vec, tables, share, seed=7):
+    """席ごとに、a 今の表（下がる込み）・b・c（2 語の表に組があればそれを使い、無ければ分け合う）・d 波の板、でたらめ、いちばん多い語。
+    2 語の表で答えられなかった問いだけの 1 位も。"""
+    out = {}
+    for si, slot in enumerate(SLOTS):
+        shown = [j for j in range(3) if j != si]
+        R = {k: [] for k in ("a_今の表", "b_分け合う", "c_答えも分け合う", "d_波の板", "いちばん多い語")}
+        miss = {k: [] for k in ("a_今の表", "b_分け合う", "c_答えも分け合う", "d_波の板", "いちばん多い語")}
+        N, Nm, cannot = [], [], 0
+        for it in items:
+            tri, hid = it["組"], it["組"][si]
+            show = {tri[j] for j in shown}
+            cands = sorted({w for w in it["ページ"] if w in vec and w not in show} | {hid}, key=str)
+            if len(cands) < 2:
+                continue
+            N.append(len(cands))
+            s2, _ = tables.scores(si, tri, cands, False)
+            sa, _ = tables.scores(si, tri, cands, True)
+            ranks = {"a_今の表": rank_by(sa, hid) if sa else len(cands)}
+            for key, kind in (("b_分け合う", "b"), ("c_答えも分け合う", "c"), ("d_波の板", "d")):
+                s = s2 if (s2 and kind != "d") else share.scores(kind, si, tri, cands)
+                if s is None:
+                    cannot += kind == "b"
+                ranks[key] = rank_by(s, hid) if s else len(cands)
+            fc = Counter(w for w in it["ページの並び"] if w in vec and w not in show)
+            ranks["いちばん多い語"] = rank_by({c: fc.get(c, 0) for c in cands}, hid)
+            for key, r in ranks.items():
+                R[key].append(r)
+                if s2 is None:
+                    miss[key].append(r)
+            if s2 is None:
+                Nm.append(len(cands))
+        o = {k: summ(v, N) for k, v in R.items()}
+        o["でたらめ"] = chance(N) if N else None
+        o["2語の表で答えられなかった問いだけ"] = dict({k: summ(v, Nm) for k, v in miss.items()}, でたらめ=chance(Nm) if Nm else None)
+        o["見せた語にベクトルが無くて分け合えなかった問い"] = cannot
+        out[slot] = o
+    return out
+
+
+def main6(a):
+    import spacy
+    import i49c_read_words as Rw
+    t0 = time.time()
+    nlp = spacy.load("ja_ginza")
+    wv = Rw.WordVecs.load(a.wave)
+    dou, learn, _ = prepare(a, nlp, wv, t0)
+    rows = [json.loads(l) for f in a.learn_talks.split(",") for l in open(f, encoding="utf-8")]
+    rows = [r for r in rows if r["語"]["選び方"] in ("い", "覚える側")]
+    talk_tris = []
+    for r in rows:
+        tris = []
+        for d in nlp.pipe(r["発言"], batch_size=64):
+            tris += [ws for kind, _, _, ws in triples2(toks_of_doc(d)) if kind == "三つ組"]
+        talk_tris.append(tris)
+    tests = {"童": dou}
+    for spec in a.share_tests.split(","):
+        name, path = spec.split("=", 1)
+        tests[name], _ = talk_items(nlp, [json.loads(l) for l in open(path, encoding="utf-8")], wv)
+    vec = {}
+    for its in tests.values():
+        vec.update(vec_of_items(its, wv))
+    ids = sorted(learn)
+    res = dict(試し={k: len(v) for k, v in tests.items()})
+    for size, sel, n_talk in (("1/10", ids[::10], 50), ("全部", ids, len(talk_tris))):
+        aoz_tris = [tri for w in sel for tri in learn[w]]
+        talk = [tri for tris in talk_tris[:n_talk] for tri in tris]
+        for w in {w for t in aoz_tris + talk for w in t}:
+            if w not in vec and wv.of(*w) is not None:
+                vec[w] = wv.of(*w)
+        ask_words = {w for its in tests.values() for it in its for w in it["ページ"]}
+        for lname, tris, tnames in (("青空", aoz_tris, ["童"]), ("青空＋会話", aoz_tris + talk, [k for k in tests if k != "童"])):
+            tables = Tables()
+            for tri in tris:
+                tables.add(tri)
+            share = Share(tris, vec, ask_words, seed=a.seed)
+            print(size, lname, "三つ組", len(tris), "分け合えない（ベクトル無し）", share.dropped, round(time.time() - t0), flush=True)
+            for tn in tnames:
+                res[f"{size}・覚える側 {lname}・試し {tn}"] = dict(覚える三つ組=len(tris), ベクトルが無くて分け合えない三つ組=share.dropped,
+                                                             数え=share_count(tests[tn], vec, tables, share))
+            json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     res["秒"] = round(time.time() - t0)
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 

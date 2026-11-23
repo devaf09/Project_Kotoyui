@@ -96,3 +96,18 @@ def test_hits_by_pair_splits_questions():
     items = [dict(組=(cat, fish, eat), ページ={cat, fish, eat, sky})]
     o = TC.hits_by_pair(items, tb, pairs, vec)
     assert o["どうした"]["組があった"] == dict(問い=1, 一位=1.0) and o["だれが"]["組が無かった"]["問い"] == 1
+
+
+def test_share_borrows_from_similar_words():
+    cat, kitten, fish, eat, run, sky = (("猫", "NOUN"), ("子猫", "NOUN"), ("魚", "NOUN"), ("食べる", "VERB"), ("走る", "VERB"), ("空", "NOUN"))
+    vec = {cat: e(0), kitten: (e(0) + 0.1 * e(5)), fish: e(1), eat: e(2), run: e(3), sky: e(4)}
+    tris = [(cat, fish, eat)]
+    sh = TC.Share(tris, vec, [kitten, fish, eat, run, sky])
+    s = sh.scores("b", 2, (kitten, fish, None), [eat, run])   # 子猫 と 魚 は見た事が無い組 → 猫 と 魚 の数を借りる
+    assert s[eat] > 0.9 and s[run] == 0.0
+    rng = np.random.default_rng(0)                         # 波の板は、向きが散らばった（密な）ベクトルで確かめる
+    dv = {w: np.exp(1j * rng.uniform(0, 2 * np.pi, 256)).astype(np.complex64) for w in (cat, fish, eat, run, sky)}
+    dv[kitten] = dv[cat]
+    sh = TC.Share(tris, dv, [kitten, fish, eat, run, sky])
+    s = sh.scores("d", 2, (kitten, fish, None), [eat, run])
+    assert s[eat] > 5 * s[run]
