@@ -8,7 +8,8 @@
      本体の答えと板の答えの両方を出す。板を外した時の答え（= 本体の答え）が 1 回目と同じ事も確かめて出す。
 問いのファイル（UTF-8、タブ区切り、1 行 1 問）:  種類 <TAB> が <TAB> を <TAB> どうした    隠す席は「？」。種類は自由な名札（教える・似た問い・関係ない、など）
 教えのファイル（UTF-8、タブ区切り）:            問いの番号（1 から） <TAB> 正しい語      出した答えで合っていれば、その語をそのまま書く
-候補: 問いのファイルと教えのファイルに出た語のうち、同じ席の語の全部。
+候補: 問いのファイルと教えのファイルに出た語のうち、同じ席の語の全部。問いのファイルに「候補 <TAB> 語、語 <TAB> 語、語 <TAB> 語、語」の行を
+      置くと、その語も席ごとの候補に足す（区切りは「、」）。
 引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --ask 問い.tsv [--teach 教え.tsv] --out 結果.md [--dark 0.001]
 手で置く物: 暗い側の強さ。上位を 3 つまで見せる事。
 """
@@ -41,6 +42,16 @@ def read_ask(path):
     return qs
 
 
+def read_extra(path):
+    c = [set(), set(), set()]
+    for line in open(path, encoding="utf-8").read().splitlines():
+        p = [x.strip() for x in line.split("\t")]
+        if len(p) == 4 and p[0] == "候補":
+            for j in range(3):
+                c[j] |= {(w.strip(), POS[j]) for w in p[1 + j].split("、") if w.strip()}
+    return c
+
+
 def read_teach(path):
     out = {}
     for line in open(path, encoding="utf-8").read().splitlines():
@@ -50,8 +61,8 @@ def read_teach(path):
     return out
 
 
-def cands_of(qs, teach):
-    c = [set(), set(), set()]
+def cands_of(qs, teach, extra=None):
+    c = [set(x) for x in extra] if extra else [set(), set(), set()]
     for _, si, q in qs:
         for j, w in enumerate(q):
             if w is not None:
@@ -69,9 +80,9 @@ def show(q, si):
     return " ".join("（？）" if j == si else q[j][0] for j in range(3))
 
 
-def try_run(body, board, qs, teach):
+def try_run(body, board, qs, teach, extra=None):
     """→ 行の並び。body は材料をもう聞いた本体。"""
-    cands = cands_of(qs, teach)
+    cands = cands_of(qs, teach, extra)
     rows = []
     for kind, si, q in qs:
         cs = [c for c in cands[si] if c not in {w for w in q if w is not None}]
@@ -135,8 +146,9 @@ def main():
         body.tick()
     qs = read_ask(a.ask)
     teach = read_teach(a.teach) if a.teach else {}
-    rows = try_run(body, TeachBoard(full.of, dark=a.dark), qs, teach)
-    no_attr = sorted({w[0] for _, _, q in qs for w in q if w is not None and full.of(w) is None})
+    extra = read_extra(a.ask)
+    rows = try_run(body, TeachBoard(full.of, dark=a.dark), qs, teach, extra)
+    no_attr = sorted({w[0] for _, _, q in qs for w in q if w is not None and full.of(w) is None} | {w[0] for x in extra for w in x if full.of(w) is None})
     md = to_md(rows, bool(teach)) + ("\n属性の無い語（板の鍵に使えない）: " + "、".join(no_attr) + "\n" if no_attr else "")
     open(a.out, "w", encoding="utf-8").write(md)
     json.dump(rows, open(os.path.splitext(a.out)[0] + ".json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)

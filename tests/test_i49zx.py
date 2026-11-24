@@ -106,3 +106,7 @@ def test_teach_try_before_and_after(tmp_path):
     assert rows[1]["板の答え"] == "食べる" and not rows[1]["教えた組そのもの"]      # 似た問いへ広がる
     assert all(r["外すと一回目と同じ"] for r in rows)                                # 板を外せば元の答え
     assert "教える前の答え" in T.to_md(rows, True) and "上位 3" in T.to_md(rows, False)
+    ask.write_text("候補\t花子\tみかん、金づち\t食べる、かじる\n教える\t太郎\tりんご\t？\n", encoding="utf-8")
+    ex = T.read_extra(str(ask))
+    assert ("かじる", "VERB") in ex[2] and ("金づち", "NOUN") in ex[1] and len(T.read_ask(str(ask))) == 1
+    assert ("かじる", "VERB") in T.cands_of(T.read_ask(str(ask)), {}, ex)[2]
