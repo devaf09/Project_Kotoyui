@@ -124,3 +124,37 @@ def test_settle_counts_only_questions_that_were_taught():
     b.teach(2, tri, "振る")
     b.settle(tri)
     assert b.tally == [0, 1, 1]
+
+
+def _talks():
+    import i49zp_text_talks_run as ZP
+    lines = ["太郎が金づちを振る", "花子が金づちを振る", "",
+             "花子が金づちを振る", "太郎が金づちを振る", "花子が金づちを振る", "",
+             "太郎がりんごを食べる", "花子がみかんをかじる", "太郎がみかんを食べる", "",
+             "花子がりんごをかじる", "太郎がりんごを食べる", "花子がみかんをかじる", "太郎がみかんを食べる"]
+    return ZP.talks_of(lines)[0]
+
+
+def test_direct_mixes_taught_triples_into_body():
+    import i49zzd_taught_body as Z
+    d = Z.Direct(Fixed("振る"))
+    tri = ("太郎", "りんご", "食べる")
+    d.ask(2, ("太郎", "りんご", None), ["食べる", "振る"])
+    d.settle(tri)
+    assert not d.body.heard                                             # 教えが無ければ、本体は聞かない
+    d.teach(2, tri, "振る")
+    assert not d.body.heard
+    d.settle(tri)
+    assert d.body.heard == [tri] and d.n == 1
+
+
+def test_unheard_run_direct_and_only_when_wrong():
+    import i49zx_teach_board_run as R
+    get = lambda w: small(w[0])
+    s = R.run_unheard(get, get, _talks(), rates=(1.0,), ks=(0,), dim=1024, ext=True, direct=True)["元の順"]["介入 100%"]
+    assert s["本体に直に混ぜる（比べ役）"]["教えた数"] == s["教えた数"] > 0 and 0 <= s["本体に直に混ぜる（比べ役）"]["当たり"] <= 1
+    used = sum(c["外付けを使った問い"] for c in s["外付けを使った段の組"].values())
+    assert used == s["使った答え"]["外付け"]
+    assert sum(c["当たりに変わった"] for c in s["外付けを使った段の組"].values()) == s["当たりに変わった"]
+    w = R.run_unheard(get, get, _talks(), rates=(1.0,), ks=(0,), dim=1024, ext=True, when="外れた時")["元の順"]["介入 100%"]
+    assert 0 < w["教えた数"] <= s["教えた数"] and w["本体の答えが板なしと違った数"] == 0

@@ -16,6 +16,8 @@ I48 の決まりは引き継ぐ: 介入は本体に混ぜず、外付けに持�
     tick(): 本体と外付けの両方。rest(): 外付けだけ（本体が聞かない場面の、話の終わり用）。
     last = 直前の問いの (外付けが答えを持ったか, その 2 語の組を教えた事が有るか, 本体の答え, 外付けの答え)。
     tally = (本体の段, 外付けの段) → [本体の当たり, 外付けの当たり, 問い]。used = どちらの答えを使ったかの数。
+    log = 問いごとの (段の組か None, 外付けの答えを使ったか)。数える道具が、害の出た場面を見るために使う。
+  Direct(body)   比べ役: 教わった 3 つ組を、本体に直に聞かせる（混ぜる。外せない）。teach / settle / learn / tick は TaughtBody と同じ呼び方。
 手で置く物: 同じなら本体。乱数は置かない。
 """
 from __future__ import annotations
@@ -27,6 +29,7 @@ class TaughtBody:
         self.tally, self._wait, self.last = {}, [], None
         self._mark, self._seats, self.keys, self.n = False, set(), set(), 0
         self.used = dict(本体=0, 外付け=0)
+        self.log = []
 
     def ask(self, si, tri, cands):
         cands = list(cands)
@@ -36,10 +39,12 @@ class TaughtBody:
         self.last = (e["答え"] is not None, key in self.keys, o["答え"], e["答え"])
         if e["答え"] is None:
             self.used["本体"] += 1
+            self.log.append((None, False))
             return o
         cell = (o["段"], e["段"])
         self._wait.append((si, cell, o["答え"], e["答え"]))
         h = self.tally.get(cell, (0, 0, 0))
+        self.log.append((cell, h[1] > h[0]))
         if h[1] > h[0]:
             self.used["外付け"] += 1
             return dict(e, 段="外付け")
@@ -78,3 +83,33 @@ class TaughtBody:
 
     def rest(self):
         self.ext.tick()
+
+
+class Direct:
+    def __init__(self, body):
+        self.body, self._mark, self.n = body, False, 0
+
+    def ask(self, si, tri, cands):
+        return self.body.ask(si, tri, cands)
+
+    def teach(self, si, tri, answered):
+        self._mark = True
+        return True
+
+    def settle(self, tri, every=False):
+        if self._mark:
+            self.body.learn(tri)
+            self.n += 1
+        elif hasattr(self.body, "drop"):
+            self.body.drop()
+        self._mark = False
+
+    def learn(self, tri):
+        self._mark = False
+        self.body.learn(tri)
+
+    def tick(self):
+        self.body.tick()
+
+    def rest(self):
+        self.body.tick()
