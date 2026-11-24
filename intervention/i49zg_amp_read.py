@@ -73,7 +73,7 @@ class AmpRead:
         s = np.full(len(names), -np.inf, dtype=np.float64)
         s[live] = (re[live] @ a) / (na * nv[live])
         g = re / (float(np.linalg.norm(aim)) * np.linalg.norm(V, axis=1))[:, None]
-        self._asked.append((si, names, g, s))
+        self._asked.append((si, names, g, s, aim, V, tuple(tri)))
         pts = {c: float(x) for c, x in zip(names, s) if np.isfinite(x)}
         if pts and max(pts.values()) > 0:
             out = dict(段="解く", 点=pts, 答え=max(pts, key=lambda c: (pts[c], -cands.index(c))))
@@ -103,7 +103,7 @@ class AmpRead:
         self.n_fix += 1
 
     def learn(self, tri):
-        for si, names, g, s in self._asked:
+        for si, names, g, s, *_ in self._asked:
             self._fix(si, names, g, s, tri[si])
         self._asked = []
         self.sv.hear(tri)
