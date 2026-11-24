@@ -1,4 +1,4 @@
-"""I49zr の図: 席を増やした枠（が・を・に・で・と・へ・から・どうした）で数えた結果。
+"""I49zr・I49zs の図: 席を増やした枠（が・を・に・で・と・へ・から・どうした）で数えた結果。
 
 数は PC で数えた集計値をそのまま置いている（3 つのテキスト、451 話・枠 5,314）。
 使い方: python tools/fig_i49zr_frames.py 出力.png
@@ -17,58 +17,63 @@ if os.path.exists(FONT):
     plt.rcParams["font.family"] = font_manager.FontProperties(fname=FONT).get_name()
 plt.rcParams["axes.unicode_minus"] = False
 
-C = dict(表="#4c72b0", 解く形="#8c8c8c", 数えて選ぶ="#55a868")
-# 足した席が有る枠の、が・を・どうした を隠す問い 1,654。4 通りの並べ方（見せない, 見せる）
-SHOW = {"表": ([.2443, .2418, .2461, .2364], [.2969, .2823, .2890, .2896], "z +4.1〜+5.2"),
-        "解く形": ([.2424, .2449, .2467, .2509], [.3597, .3428, .3495, .3434], "z +9.9〜+12.2"),
-        "数えて選ぶ": ([.2618, .2509, .2606, .2618], [.3761, .3573, .3609, .3640], "z +9.7〜+11.0")}
-# 三つの席だけの枠（4,552）。4 通りの並べ方（今までの部品, 作り直した部品）
-THREE = {"表": ([.3581, .3615, .3605, .3593], [.3038, .3023, .3031, .3038], "z −22 前後"),
-         "解く形": ([.3419, .3426, .3444, .3429], [.3448, .3474, .3479, .3459], "z +3.2〜+5.4"),
-         "数えて選ぶ": ([.3895, .3918, .3907, .3911], [.3562, .3599, .3588, .3577], "z −13 前後")}
-# 全部の席、並べ替え 3、隠した席ごと（席, 問い, 表, 解く形, 数えて選ぶ）
-SEAT = [("が", 5314, .4307, .4513, .4614), ("を", 4682, .2407, .2809, .2935), ("どうした", 5314, .2162, .2742, .2806),
-        ("に", 549, .2787, .2514, .2805), ("で", 48, .2083, .25, .25), ("から", 17, .2353, .1176, .1765), ("へ", 12, .0833, .0833, .1667)]
+BLUE, GRAY, GREEN = "#4c72b0", "#8c8c8c", "#55a868"
+# 足した席が有る枠の、が・を・どうした を隠す問い 1,654。4 通りの並べ方（色, [(名札, 4 つの数)], z）
+SHOW = {"表": (BLUE, [("見せない", [.2443, .2418, .2461, .2364]), ("見せる", [.2969, .2823, .2890, .2896])], "z +4.1〜+5.2"),
+        "表・席ごと": (BLUE, [("見せない", [.2557, .2509, .2557, .2461]), ("見せる", [.3210, .3035, .3083, .3071])], "z +5.2〜+6.3"),
+        "解く形": (GRAY, [("見せない", [.2424, .2449, .2467, .2509]), ("見せる", [.3597, .3428, .3495, .3434])], "z +9.9〜+12.2"),
+        "数えて選ぶ": (GREEN, [("見せない", [.2618, .2509, .2606, .2618]), ("見せる", [.3761, .3573, .3609, .3640])], "z +9.7〜+11.0"),
+        "数えて選ぶ\n・席ごと": (GREEN, [("見せない", [.2660, .2636, .2696, .2684]), ("見せる", [.4002, .3736, .3827, .3857])], "z +11.0〜+12.8")}
+# 三つの席だけの枠（4,552）
+THREE = {"表": (BLUE, [("今まで", [.3581, .3615, .3605, .3593]), ("作り直し", [.3038, .3023, .3031, .3038]), ("席ごと", [.3571, .3600, .3600, .3585])],
+                "今まで → 席ごと\nz −0.4〜−1.1"),
+         "解く形": (GRAY, [("今まで", [.3419, .3426, .3444, .3429]), ("作り直し", [.3448, .3474, .3479, .3459])], "z +3.2〜+5.4"),
+         "数えて選ぶ": (GREEN, [("今まで", [.3895, .3918, .3907, .3911]), ("作り直し", [.3562, .3599, .3588, .3577]), ("席ごと", [.3909, .3937, .3923, .3921])],
+                   "今まで → 席ごと\nz +0.7〜+1.2")}
+# 全部の席、並べ替え 3、隠した席ごと（席, 問い, 表, 表・席ごと, 解く形, 数えて選ぶ・席ごと）
+SEAT = [("が", 5314, .4307, .4291, .4513, .4787), ("を", 4682, .2407, .3358, .2809, .3454), ("どうした", 5314, .2162, .2879, .2742, .3256),
+        ("に", 549, .2787, .3078, .2514, .3461), ("で", 48, .2083, .2083, .25, .2708)]
+SEAT_FORMS = [("表", BLUE, .45), ("表・席ごと", BLUE, 1), ("解く形", GRAY, 1), ("数えて選ぶ・席ごと", GREEN, 1)]
 
 
-def pair(a, data, left, right, title, ylim):
-    w = .36
-    for i, (name, (x, y, z)) in enumerate(data.items()):
-        for k, (ys, al) in enumerate(((x, .45), (y, 1))):
-            px = i + (k - .5) * w
-            a.bar(px, sum(ys) / 4, w * .94, color=C[name], alpha=al)
+def group(a, data, title, ylim):
+    for i, (name, (col, series, z)) in enumerate(data.items()):
+        w = .8 / len(series)
+        for k, (lab, ys) in enumerate(series):
+            px = i + (k - (len(series) - 1) / 2) * w
+            a.bar(px, sum(ys) / 4, w * .94, color=col, alpha=.4 + .6 * k / max(1, len(series) - 1))
             a.plot([px] * 4, ys, ".", color="k", ms=3)
-            a.text(px, max(ys) + .004, ("%.3f" % (sum(ys) / 4))[1:], ha="center", fontsize=9)
-            a.text(px, ylim[0] + .004, (left, right)[k], ha="center", fontsize=8, color="k")
-        a.text(i, ylim[1] - .012, z, ha="center", fontsize=9)
-    a.set_xticks(range(3))
-    a.set_xticklabels(list(data))
+            a.text(px, max(ys) + .003, ("%.3f" % (sum(ys) / 4))[1:], ha="center", fontsize=8)
+            a.text(px, ylim[0] + .003, lab, ha="center", fontsize=7)
+        a.text(i, ylim[1] - (ylim[1] - ylim[0]) * .09, z, ha="center", fontsize=8)
+    a.set_xticks(range(len(data)))
+    a.set_xticklabels(list(data), fontsize=9)
     a.set_ylim(*ylim)
     a.set_title(title, fontsize=11)
     a.grid(axis="y", alpha=.3)
 
 
 def main(out):
-    fig, ax = plt.subplots(1, 3, figsize=(19, 5.6), gridspec_kw=dict(width_ratios=[1, 1, 1.25]))
-    pair(ax[0], SHOW, "見せない", "見せる", "足した席（に・で など）を見せると、同じ 1,654 問が当たりやすくなる", (.2, .4))
+    fig, ax = plt.subplots(1, 3, figsize=(20, 5.8), gridspec_kw=dict(width_ratios=[1.25, 1.1, 1.1]))
+    group(ax[0], SHOW, "足した席（に・で など）を見せると、同じ 1,654 問が当たりやすくなる", (.2, .44))
     ax[0].set_ylabel("正しい物（棒は 4 通りの並べ方の平均、点は並べ方ごと）")
-    pair(ax[1], THREE, "今まで", "作り直し", "三つの席だけの行では、作り直した表が今までの表より下", (.28, .42))
+    group(ax[1], THREE, "三つの席だけの行: 席ごとに段を分けると、今までの表に並ぶ", (.28, .43))
     a = ax[2]
-    w = .27
-    for i, (s, n, t, u, m) in enumerate(SEAT):
-        for k, (v, name) in enumerate(((t, "表"), (u, "解く形"), (m, "数えて選ぶ"))):
-            a.bar(i + (k - 1) * w, v, w * .94, color=C[name], label=name if i == 0 else None)
-        a.text(i, max(t, u, m) + .012, "{:,} 問".format(n), ha="center", fontsize=9)
+    w = .2
+    for i, row in enumerate(SEAT):
+        for k, (name, col, al) in enumerate(SEAT_FORMS):
+            a.bar(i + (k - 1.5) * w, row[2 + k], w * .94, color=col, alpha=al, label=name if i == 0 else None)
+        a.text(i, max(row[2:]) + .012, "{:,} 問".format(row[1]), ha="center", fontsize=9)
     a.axvline(2.5, color="k", lw=.8, ls=":")
-    a.text(4.7, .36, "足した席\n（問いが少なく、「で」より右は\n揺れが大きい）", ha="center", fontsize=9)
+    a.text(3.5, .40, "足した席", ha="center", fontsize=10)
     a.set_xticks(range(len(SEAT)))
     a.set_xticklabels([s[0] for s in SEAT])
-    a.set_xlabel("隠した席")
-    a.set_ylim(0, .52)
+    a.set_xlabel("隠した席（「で」は揺れが大きい。と・へ・から は 20 問より少なく、描いていない）")
+    a.set_ylim(0, .62)
     a.set_title("隠した席ごとの当たり（全部の席、並べ替え 3）", fontsize=11)
     a.grid(axis="y", alpha=.3)
-    a.legend(fontsize=9, loc="upper right")
-    fig.suptitle("席を増やした枠（451 話・枠 5,314）: 足した席は効く。ただし、作り直した表は今までの表に届いていない", fontsize=13)
+    a.legend(fontsize=9, loc="upper right", ncol=2)
+    fig.suptitle("席を増やした枠（451 話・枠 5,314）: 足した席は効く。表は「どの席が同じ語だったか」で段を分けると、今までの表に並ぶ", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, .94))
     fig.savefig(out, dpi=170)
 
