@@ -10,7 +10,7 @@
     ask / learn / tick は Relation と同じ形。used は、どちらの答えを使ったかの数
   I49zc: Mix(table, solve, upper=None) は、表に任せる段を手で置かない。段ごとに、表と解く形のどちらが当たってきたかを
     答え合わせ（learn）のたびに数え、その段でそれまでに多く当たった方の答えを使う（同じなら表）。数えは問う前の分だけ。
-    tally は 段 → [表の当たり, 解く形の当たり, 問いの数]。
+    tally は 段 → [表の当たり, 解く形の当たり, 問いの数]。drop() は、答え合わせが来なかった問いの分を捨てる。
 手で置く物: 表に任せる段の組 upper（I49s の数えで、表が勝った段をそのまま置いた）。upper=None の時は無し（同じなら表、だけ）。
 """
 from __future__ import annotations
@@ -50,6 +50,10 @@ class Mix:
         self._wait = []
         self.table.learn(tri)
         self.solve.learn(tri)
+
+    def drop(self):
+        """答え合わせが来なかった問いの分を捨てる（I49zzd: 教えられた 3 つ組だけを聞く使い方で、数えが別の 3 つ組とずれないように）。"""
+        self._wait = []
 
     def tick(self):
         self.table.tick()

@@ -10,6 +10,7 @@
 教えのファイル（UTF-8、タブ区切り）:            問いの番号（1 から） <TAB> 正しい語      出した答えで合っていれば、その語をそのまま書く
                                               同じ番号を何行も書ける（「この語も合っている」）。出した答えが、その番号の正しい語のどれかなら、暗い側には入れない
                                               正しい語の代わりに「×語」と書くと、「板のこの答えは違う」（I49zz）。その問いの組で、その語を板の止める側に入れる
+                                              正しい語の代わりに「遠い」と書くと、「この問いは板の出番ではない」（I49zza）。板がその問いで出している語を全部、出した分だけ止める
 候補: 問いのファイルと教えのファイルに出た語のうち、同じ席の語の全部。問いのファイルに「候補 <TAB> 語、語 <TAB> 語、語 <TAB> 語、語」の行を
       置くと、その語も席ごとの候補に足す（区切りは「、」）。
 鍵の形（--key、カンマ区切りで並べると、形ごとに同じ問いと教えで表を出す。I49zy）:
@@ -36,6 +37,7 @@ import i49zx_teach_board_run as TR  # noqa: E402
 POS = ("NOUN", "NOUN", "VERB")
 HIDE = ("？", "?")
 DENY = ("×", "✕")
+FAR = "遠い"
 
 
 def read_ask(path):
@@ -77,7 +79,7 @@ def cands_of(qs, teach, extra=None):
             if w is not None:
                 c[j].add(w)
     for i, ws in teach.items():
-        c[qs[i][1]] |= {(w[1:] if w[:1] in DENY else w, POS[qs[i][1]]) for w in ws}
+        c[qs[i][1]] |= {(w[1:] if w[:1] in DENY else w, POS[qs[i][1]]) for w in ws if w != FAR}
     return [sorted(x, key=str) for x in c]
 
 
@@ -101,7 +103,8 @@ def try_run(body, board, qs, teach, extra=None):
         return rows
     signs = []
     deny = {i: [w[1:] for w in ws if w[:1] in DENY] for i, ws in teach.items()}
-    teach = {i: [w for w in ws if w[:1] not in DENY] for i, ws in teach.items()}
+    far = sorted(i for i, ws in teach.items() if FAR in ws)
+    teach = {i: [w for w in ws if w[:1] not in DENY and w != FAR] for i, ws in teach.items()}
     for i, ws in sorted(teach.items()):
         if not ws:
             continue
@@ -121,6 +124,9 @@ def try_run(body, board, qs, teach, extra=None):
         if ws:
             rows[i]["教え"] = (rows[i]["教え"] + "。" if rows[i].get("教え") else "") + "板の " + "、".join(ws) + " は違う" \
                 + ("" if all(done) else "（板はその語を出していなかったので、何も入れていない）")
+    for i in far:                                          # 「遠い」も、ほかの教えを全部入れた後に入れる
+        n = board.far(qs[i][1], qs[i][2])
+        rows[i]["教え"] = (rows[i]["教え"] + "。" if rows[i].get("教え") else "") + "遠い（板の出番ではない。止めた語 %d）" % n
     for row, (kind, si, q) in zip(rows, qs):
         cs = [c for c in cands[si] if c not in {w for w in q if w is not None}]
         o = body.ask(si, q, cs)
