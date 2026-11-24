@@ -76,3 +76,20 @@ def test_teach_try_deny_line(tmp_path):
     assert rows[0]["板の答え"] == "読む" and rows[1]["板の答え"] is None and rows[1]["教え"] == "板の 読む は違う"
     rows = T.try_run(Body(), T.board_of(get, "めずらしさ", seats), qs, {0: ["読む"]})
     assert rows[1]["板の答え"] == "読む"                                # 「違う」を教えなければ、遠い問いに 読む のまま
+
+
+def test_stop_by_own_output_brings_denied_point_to_zero():
+    import i49zw_dense_pair as D
+    import i49zx_teach_board as X
+    cs = ["読む", "歌う"]
+    far, same, tegami = ("学生", "歌", None), ("学生", "本", None), ("学生", "手紙", None)
+    out = {}
+    for stop in (1.0, "出した分"):
+        b = X.TeachBoard(attr, amp="そのまま", rare=D.rare_of(attr, ZY.SEATS), stop=stop)
+        b.teach(2, ("学生", "本", "読む"), "読む")
+        assert b.deny(2, far, "読む")
+        out[stop] = {q: b.points(2, q, cs)["読む"] for q in (far, same, tegami)}
+        if stop == "出した分":
+            assert abs(out[stop][far]) < 1e-3                          # 教えた問いの点が、ちょうど 0 になる
+            assert not b.deny(2, far, "読む")                          # もう点が出ていないので、重ねて引かない
+    assert out["出した分"][same] > out[1.0][same] and out["出した分"][tegami] > out[1.0][tegami]      # 引き過ぎない分、巻き込みが小さい

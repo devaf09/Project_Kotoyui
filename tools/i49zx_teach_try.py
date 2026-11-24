@@ -16,7 +16,7 @@
   今まで      広げて掛けて、大きさをそろえる（I49zx の初めの形）
   引く        席ごとの「いつもの属性」（材料でその席に出た語の平均）を引いてから、広げて掛ける。大きさはそろえない
   めずらしさ  席ごとの「めずらしさ」（1 − その属性を持つ語の割合）を掛けてから、広げて掛ける。大きさはそろえない
-引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --ask 問い.tsv [--teach 教え.tsv] --out 結果.md [--dark 0.001] [--key 今まで] [--dim 8192]
+引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --ask 問い.tsv [--teach 教え.tsv] --out 結果.md [--dark 0.001] [--key 今まで] [--dim 8192] [--stop 1 か 出した分]
 手で置く物: 暗い側の強さ。上位を 3 つまで見せる事。いつもの属性・めずらしさを、材料でその席に出た語（1 語 1 回）から作る事。
 """
 from __future__ import annotations
@@ -147,15 +147,15 @@ def to_md(rows, taught):
         "" if r["教えた組との一番の近さ"] is None else "%.2f" % r["教えた組との一番の近さ"], r["板を外した答え"], "" if r["外すと一回目と同じ"] else "（一回目と違う）") for i, r in enumerate(rows))
 
 
-def board_of(attr_of, key, seats, dark=1.0 / 1000, dim=8192):
+def board_of(attr_of, key, seats, dark=1.0 / 1000, dim=8192, stop=1.0):
     import i49zw_dense_pair as D
     from i49zx_teach_board import TeachBoard
     assert key in ("今まで", "引く", "めずらしさ"), key
     if key == "今まで":
-        return TeachBoard(attr_of, dim=dim, dark=dark)
+        return TeachBoard(attr_of, dim=dim, dark=dark, stop=stop)
     if key == "引く":
-        return TeachBoard(attr_of, dim=dim, dark=dark, amp="そのまま", usual=D.usual_of(attr_of, seats))
-    return TeachBoard(attr_of, dim=dim, dark=dark, amp="そのまま", rare=D.rare_of(attr_of, seats))
+        return TeachBoard(attr_of, dim=dim, dark=dark, stop=stop, amp="そのまま", usual=D.usual_of(attr_of, seats))
+    return TeachBoard(attr_of, dim=dim, dark=dark, stop=stop, amp="そのまま", rare=D.rare_of(attr_of, seats))
 
 
 def main():
@@ -168,6 +168,7 @@ def main():
     ap.add_argument("--dark", type=float, default=1.0 / 1000)
     ap.add_argument("--key", default="今まで")
     ap.add_argument("--dim", type=int, default=8192)
+    ap.add_argument("--stop", default="1")
     a = ap.parse_args()
     talks = []
     for f in a.text.split(","):
@@ -191,7 +192,7 @@ def main():
     no_attr = sorted({w[0] for _, _, q in qs for w in q if w is not None and full.of(w) is None} | {w[0] for x in extra for w in x if full.of(w) is None})
     md, res = "", {}
     for key in a.key.split(","):
-        rows = try_run(body, board_of(full.of, key, seats, a.dark, a.dim), qs, teach, extra)
+        rows = try_run(body, board_of(full.of, key, seats, a.dark, a.dim, a.stop if a.stop == "出した分" else float(a.stop)), qs, teach, extra)
         md += "鍵の形: %s\n\n" % key + to_md(rows, bool(teach)) + "\n"
         res[key] = rows
     md += "属性の無い語（板の鍵に使えない）: " + "、".join(no_attr) + "\n" if no_attr else ""

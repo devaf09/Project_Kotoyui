@@ -10,6 +10,7 @@ I48 の決まりを引き継ぐ: 介入は本体に混ぜず、別の板に持�
     points(隠した席, 問いの 3 つ組, 候補) → 候補 → 点（明るい側との近さ − 暗い側との近さ）。板に何も無ければ空。
     教えるたびに、板の全部が half 回で半分になる速さで薄れる。
     deny(隠した席, 問いの 3 つ組, 語): 板が広げて出した答えへの「違う」（I49zz、未確定の試し）。その組の印を、その語の「止める側」に stop の重さで足す。
+      stop="出した分" にすると、重さを置かず、板がその語に今出している点と同じ量だけ足す（教えた問いの点がちょうど 0 になる。点が 0 以下なら何も足さない）。
       points は 明るい側 − 暗い側 − 止める側。暗い側（本体の間違いを薄く覚える）とは別に持つ。本体には触らない。薄れ方は同じ。
     taught(隠した席, 問い): この組そのものを教えた事が有るか（数える用。答え方には使わない）。
   Taught(body, board)   本体に介入の板を外付けする。
@@ -17,7 +18,7 @@ I48 の決まりを引き継ぐ: 介入は本体に混ぜず、別の板に持�
          それまでにどちらが多く当たったかで決める（同じなら本体）。数えは問う前の分だけ。
     learn / tick: 本体と同じ。teach(隠した席, 3 つ組, 出した答え): 板に教える。
     last = 直前の問いの (板が答えを持ったか, 教えた組そのものか, 本体の答え, 板の答え)。tally = [本体の当たり, 板の当たり, 問い]。
-手で置く物: stop（止める側の重さ 1。明るい側と同じ強さ）、dark（持ち主の 1/1,000〜1/10,000 の上の端）、half、dim、同じなら本体。乱数は置かない。
+手で置く物: stop（止める側の重さ 1。明るい側と同じ強さ。"出した分" なら置かない）、dark（持ち主の 1/1,000〜1/10,000 の上の端）、half、dim、同じなら本体。乱数は置かない。
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ class TeachBoard:
         self.keep = np.float32(0.5 ** (1.0 / half))
         self.bright = [{}, {}, {}]
         self.dark = [{}, {}, {}]
-        self.stop_w = float(stop)
+        self.stop_w = stop if stop == "出した分" else float(stop)
         self.stop = [{}, {}, {}]
         self.keys = set()
         self.n = 0
@@ -59,10 +60,13 @@ class TeachBoard:
         p = self.pair.sign(si, tri)
         if p is None:
             return False
+        amount = self.points(si, tri, [word]).get(word, 0.0) if self.stop_w == "出した分" else self.stop_w
+        if amount <= 0:
+            return False
         for side in (self.bright, self.dark, self.stop):
             for w in side[si]:
                 side[si][w] *= self.keep
-        self._add(self.stop[si], word, (p * np.float32(self.stop_w)).astype(np.complex64))
+        self._add(self.stop[si], word, (p * np.float32(amount)).astype(np.complex64))
         self.n += 1
         return True
 
