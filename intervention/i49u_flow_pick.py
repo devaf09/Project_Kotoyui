@@ -37,6 +37,7 @@ I49t で、解く形は正解を上位に入れているが、点の並んだ候
       "出た語"       候補の中に、この話で出た語が有る時だけ、板で選び直す（決まりで書いた比べ役）
       "同じ波"       板に同じ波が並んでいる候補だけの中から、板で選ぶ。無ければ一位のまま（board="並べる" の時だけ）
                     同じ波 = 近さが 1（float32 の丸めの分だけ下まで）。語の表は引かない。
+      "同じ波・重さ"  上と同じ関門。選ぶ時も、似た波の分は見ず、同じ波の重さ（一番新しい分）だけで比べる。同じ重さなら点の順
 手で置く物: 上位の数 top、九割、流れを足す重さ 1、薄れる速さ half、話ごとに空に戻すかどうか、「ほかは半分」の半分。
 """
 from __future__ import annotations
@@ -49,7 +50,7 @@ class FlowPick:
         assert not (minus_self and (half is not None or by_seat or carry or usual))
         assert board in ("足す", "並べる") and not (board == "並べる" and (usual or minus_self))
         self.board = board
-        assert gate in (None, "出た語", "同じ波") and not (gate == "同じ波" and board != "並べる")
+        assert gate in (None, "出た語", "同じ波", "同じ波・重さ") and not (gate in ("同じ波", "同じ波・重さ") and board != "並べる")
         self.gate = gate
         assert usual in (None, "明るい分だけ", "残す・ほかは半分", "引く")
         self.usual = usual
@@ -93,18 +94,22 @@ class FlowPick:
         self._buf[self._hi], self._bw[self._hi], self._bs[self._hi] = v, 1.0, sj
         self._hi += 1
 
-    def same_on_board(self, c, si=None):
+    def same_weight(self, c, si=None):
+        """板に並んだ波のうち、候補と同じ波の重さの一番大きい物。無ければ None。"""
         b = self.base_of(c)
         if b is None or self._hi == self._lo:
-            return False
+            return None
         nb = float(np.linalg.norm(b))
         if nb <= 0:
-            return False
+            return None
         sl = slice(self._lo, self._hi)
-        v = np.real(self._buf[sl] @ np.conj(b)) / nb
+        same = np.real(self._buf[sl] @ np.conj(b)) / nb >= 1.0 - 1e-4
         if self.by_seat and si is not None:
-            v = v[self._bs[sl] == si]
-        return bool(v.size) and float(v.max()) >= 1.0 - 1e-4
+            same &= self._bs[sl] == si
+        return float(self._bw[sl][same].max()) if same.any() else None
+
+    def same_on_board(self, c, si=None):
+        return self.same_weight(c, si) is not None
 
     def near_rows(self, c, si=None):
         b = self.base_of(c)
@@ -180,11 +185,14 @@ class FlowPick:
                 pool = near90
             if self.gate == "出た語" and not any(c in self.said for c in pool):
                 return o
-            if self.gate == "同じ波":
+            if self.gate in ("同じ波", "同じ波・重さ"):
                 pool = [c for c in pool if self.same_on_board(c, si)]
                 if not pool:
                     return o
-            nr = {c: self.near(c, si) for c in pool}
+            if self.gate == "同じ波・重さ":
+                nr = {c: self.same_weight(c, si) for c in pool}
+            else:
+                nr = {c: self.near(c, si) for c in pool}
             if all(v is None for v in nr.values()):
                 return o
             lo = min(v for v in nr.values() if v is not None) - 1.0

@@ -64,7 +64,7 @@ def test_run_shapes():
     res = Z.run(V.get, V.get, talks, [("友達", "海", "泳ぐ")])
     assert len(ZE.VERS) == n
     r = res["白紙から"]
-    assert len(r) == 14 and r["板無し"]["答えが変わった数"] == 0
+    assert len(r) == 17 and r["板無し"]["答えが変わった数"] == 0
     for d in r.values():
         assert 0 <= d["正しい物"] <= d["合わせて"] <= 1
 
@@ -77,3 +77,17 @@ def test_same_wave_reset_per_talk_follows_recency():
     assert fp.ask(0, (None, "魚", "釣る"), c)["答え"] == "海"            # 新しく出た語ほど重い
     fp.tick()
     assert fp.ask(0, (None, "魚", "釣る"), c)["答え"] == "先生"          # 話が変わると板は空
+
+
+def test_same_weight_matches_said_rule():
+    """同じ波の重さで選ぶ形は、決まりで書いた「出た語」と同じ答えになる。"""
+    from i49u_flow_pick import FlowPick
+    pts = {"先生": 3.0, "友達": 2.0, "海": 1.0}
+    a = _fp("同じ波・重さ", half=1)
+    b = FlowPick(_Rel(pts), V.get, pick="出た語", top=3)
+    c = ["先生", "友達", "海"]
+    for tri in [("魚", "ゲーム", "釣る"), ("友達", "海", "釣る"), ("魚", "海", "泳ぐ"), ("先生", "友達", "釣る")]:
+        assert a.ask(0, (None, "魚", "釣る"), c)["答え"] == b.ask(0, (None, "魚", "釣る"), c)["答え"]
+        a.learn(tri)
+        b.learn(tri)
+    assert a.ask(0, (None, "魚", "釣る"), c)["答え"] == b.ask(0, (None, "魚", "釣る"), c)["答え"] == "先生"

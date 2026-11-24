@@ -33,6 +33,10 @@ VERS.append(("並べた板｜1 枚｜同じ波だけ｜半分まで 1 組・話�
 VERS.append(("並べた板｜1 枚｜同じ波だけ｜半分まで 4 組・話ごとに空", "語の波", dict(B, gate="同じ波", half=4)))
 VERS.append(("並べた板｜席ごと｜同じ波だけ｜半分まで 1 組・話ごとに空", "語の波", dict(B, by_seat=True, gate="同じ波", half=1)))
 VERS.append(("並べた板｜1 枚｜関門無し｜半分まで 1 組・話ごとに空", "語の波", dict(B, half=1)))
+# 続き 2: 選ぶ時も、同じ波の重さだけで比べる（似た波の分と、丸めのぶれを除く）。決まりで書いた「出た語」と同じ値になるはずの版。
+VERS.append(("並べた板｜1 枚｜同じ波・重さ｜半分まで 1 組・話ごとに空", "語の波", dict(B, gate="同じ波・重さ", half=1)))
+VERS.append(("並べた板｜席ごと｜同じ波・重さ｜半分まで 1 組・話ごとに空", "語の波", dict(B, by_seat=True, gate="同じ波・重さ", half=1)))
+VERS.append(("並べた板｜1 枚｜同じ波・重さ｜半分まで 1 組", "語の波", dict(B, gate="同じ波・重さ", half=1, carry=True)))
 
 
 def run(wave_of, attr_of, talks, aoz, done=None, save=None):
