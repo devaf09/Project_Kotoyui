@@ -26,7 +26,7 @@ def test_scenes_and_talks():
     b = ["犬がゲームを見る", "犬がゲームを運ぶ", "犬が魚を見る", "犬が海を見る", "犬がゲームを釣る", "犬が魚を運ぶ"]
     sc = Z.scenes(a + b)
     assert sc == [list(range(6)), list(range(6, 12))]                # 出る人が替わる所で切れる
-    assert Z.scenes(a[:3] + [""] + a[3:]) == [[0, 1, 2], [4, 5, 6]]     # 空行は必ず切る
+    assert Z.scenes(a[:3] + [""] + a[3:] + b + [""]) == [[0, 1, 2], list(range(4, 13))]   # 空行が有れば、空行だけで切る
     talks, why, ex = Z.talks_of(a + ["友達が海に行く", "友達が魚を釣る"] + b)
     assert why["「を」が無い"] == 1 and why["同じ話の中の同じ行"] == 1
     assert all(len(t[0]) >= 2 for t in talks) and talks[0][0][0] == (("友達", "NOUN"), ("魚", "NOUN"), ("釣る", "VERB"))

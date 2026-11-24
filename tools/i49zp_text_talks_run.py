@@ -6,7 +6,9 @@
   「を」が 1 つでない行、「何を」に ほかの助詞（に・で・へ・と・から）が入る行、「の」でつないだ語、「〜をする」、動詞で終わらない行。
 話の区切り（テキストに区切りが無いので、決まりで入れる）:
   その行の「だれが」が前の 8 行に無く、かつ前の 4 行の「だれが」が次の 4 行に 1 つも出ない所で切る。12 行で必ず切る。
-  切った後、6 行に足りない話は、次の話とつなぐ。空行が有る所は、必ず切る（人が入れた区切りを優先）。
+  切った後、6 行に足りない話は、次の話とつなぐ。
+  テキストに空行が 1 つでも有れば、人が入れた区切りと見て、空行だけで切る（上の決まりは使わない）。
+  --text はカンマ区切りで複数渡せる（順につなぐ。ファイルの境目は必ず切る）。
 並べ替え（乱数は使わない）: 話の順を、番号 × 黄金比 × k の小数部の小さい順に並べる（k = 1・2・3）。元の順も数える。話の中の行の順は変えない。
 抜き出し: 答える前に問う流れなので、どの問いも聞く前の問い。加えて、流れの後ろ 2 割の問いだけの点も出す（8 割を聞いた後の、聞いていない話）。
 形: 関係の表 ／ 解く形・属性だけ ／ 属性＋固有の位相（混ぜ 1・1,024 本） ／ ＋振幅 ／ 数えて選ぶ。まっさらからだけ（青空は先に聞かせない）。
@@ -62,6 +64,17 @@ def cut(line):
 def scenes(lines):
     """行の並び（空行は区切り）→ 話ごとの行番号の並び。"""
     subj = [l.split("が", 1)[0] if "が" in l else "" for l in lines]
+    while lines and not lines[-1]:
+        lines = lines[:-1]
+    if any(not l for l in lines):                          # 人が空行で区切ったテキストは、空行だけで切る（決まりでは切らない）
+        out, cur = [], []
+        for i, l in enumerate(lines):
+            if l:
+                cur.append(i)
+            elif cur:
+                out.append(cur)
+                cur = []
+        return out + ([cur] if cur else [])
     out, cur = [], []
     for i, l in enumerate(lines):
         if not l:
@@ -189,8 +202,14 @@ def main():
     ap.add_argument("--talks_out")
     a = ap.parse_args()
     t0 = time.time()
-    lines = [l.strip() for l in open(a.text, encoding="utf-8").read().splitlines()]
-    talks, why, ex = talks_of(lines)
+    talks, why, n_lines = [], {}, 0
+    for f in a.text.split(","):
+        lines = [l.strip() for l in open(f, encoding="utf-8").read().splitlines()]
+        t, w, _ = talks_of(lines)
+        talks += t
+        n_lines += sum(1 for l in lines if l)
+        for k, v in w.items():
+            why[k] = why.get(k, 0) + v
     wv = Rw.WordVecs.load(a.wave)
 
     def wave_of(w):
@@ -203,7 +222,7 @@ def main():
             for i, (tris, _, src) in enumerate(talks):
                 f.write("# 話 %d\n%s\n\n" % (i, "\n".join(src)))
     sizes = [len(t[0]) for t in talks]
-    res = dict(行=sum(1 for l in lines if l), 話=len(talks), 三つ組=sum(sizes), 話ごとの三つ組の平均=round(sum(sizes) / max(1, len(sizes)), 2),
+    res = dict(行=n_lines, 話=len(talks), 三つ組=sum(sizes), 話ごとの三つ組の平均=round(sum(sizes) / max(1, len(sizes)), 2),
                話ごとの語の平均=round(sum(len(t[1]) for t in talks) / max(1, len(talks)), 2), 外した数=why, 語の持ち物=cover(talks, wave_of, full.of))
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(json.dumps(res, ensure_ascii=False), flush=True)
