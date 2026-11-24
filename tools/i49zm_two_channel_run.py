@@ -79,6 +79,16 @@ def run(wave_of, attr_of, talks, aoz, save=None):
     from i49zj_phase_read import PhaseRead
     from i49zm_two_channel import TwoChannel
     ok = WR.ok_sets([t for tris, _ in talks for t in tris] + [tuple(t) for t in aoz])
+    dims = {}                                             # 属性の側と語の波の側の長さを、先に材料から調べておく（長さだけ）
+    for tri in [t for tris, _ in talks for t in tris] + [tuple(t) for t in aoz]:
+        for w in tri:
+            for key, f in (("n_attr", attr_of), ("n_wave", wave_of)):
+                if key not in dims:
+                    v = f(w)
+                    if v is not None:
+                        dims[key] = len(v)
+        if len(dims) == 2:
+            break
     out = {}
     for start, pre in (("白紙から", ()), ("青空の 3 つ組を先に", aoz)):
         out[start], base, keep = {}, None, {}
@@ -91,7 +101,7 @@ def run(wave_of, attr_of, talks, aoz, save=None):
                     base_of = attr_of
                 else:
                     kw = dict(two)
-                    base_of = TwoChannel(attr_of, wave_of=wave_of if kw.pop("語の波", False) else None, **kw).of
+                    base_of = TwoChannel(attr_of, wave_of=wave_of if kw.pop("語の波", False) else None, n_attr=dims.get("n_attr"), n_wave=dims.get("n_wave"), **kw).of
                 sv = KV.SeatVec(base_of, weight="数", bind="位相")
                 inner = PhaseRead(sv, **read) if read else KV.Unbind(sv, online=True)
             for tri in pre:

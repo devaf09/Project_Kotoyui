@@ -73,3 +73,20 @@ def test_run_shapes():
         for k, d in r.items():
             if k != "直の比べ":
                 assert 0 <= d["正しい物"] <= d["合わせて"] <= 1
+
+
+def test_wave_channel_pads_missing_side():
+    """語の波を並べる形で、属性は有るが波の無い語も、長さがそろう（PC で長さ違いのエラーになった所）。"""
+    import i49k_seat_vec as KV
+    from i49zm_two_channel import TwoChannel
+    attr = lambda w: None if w == "波だけ" else np.ones(3)          # noqa: E731
+    wave = lambda w: None if w == "属性だけ" else np.arange(1, 5) * (1 + len(w))   # noqa: E731
+    t = TwoChannel(attr, mix=1.0, wave_of=wave)
+    assert t.of("属性だけ") is None                                # 波の側の長さがまだ分からない
+    assert t.of("両方").shape == (7,)
+    a, b = t.of("属性だけ"), t.of("波だけ")
+    assert a.shape == b.shape == (7,) and not a[3:].any() and not b[:3].any()
+    u = KV.Unbind(KV.SeatVec(TwoChannel(attr, mix=1.0, wave_of=wave).of, weight="数", bind="位相"), online=True)
+    for tri in [("両方", "属性だけ", "波だけ"), ("属性だけ", "両方", "波だけ")]:
+        u.learn(tri)
+    assert u.ask(0, (None, "属性だけ", "波だけ"), ["両方", "属性だけ"])["答え"] is not None
