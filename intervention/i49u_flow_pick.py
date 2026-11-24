@@ -31,6 +31,12 @@ I49t で、解く形は正解を上位に入れているが、点の並んだ候
     board: "足す"（今まで通り、板は 1 本の足した波） ／ "並べる"（聞いた語の波を 1 本ずつ並べて持ち、重さだけを薄れさせる）
       "並べる" の近さ = 並べた波を一斉に走査して、重さ × 候補との近さ の一番大きい物。
       重さが float32 で 0 になった波は、並びから外す（薄れ切った物。閾は置かない）。
+  I49zf（板が答えを替え過ぎていないかを見る。未確定の試し）で足した物:
+    gate: 板で選び直す時の関門
+      None          今まで通り、いつも板に一番近い候補に替える
+      "出た語"       候補の中に、この話で出た語が有る時だけ、板で選び直す（決まりで書いた比べ役）
+      "同じ波"       板に同じ波が並んでいる候補だけの中から、板で選ぶ。無ければ一位のまま（board="並べる" の時だけ）
+                    同じ波 = 近さが 1（float32 の丸めの分だけ下まで）。語の表は引かない。
 手で置く物: 上位の数 top、九割、流れを足す重さ 1、薄れる速さ half、話ごとに空に戻すかどうか、「ほかは半分」の半分。
 """
 from __future__ import annotations
@@ -39,10 +45,12 @@ import numpy as np
 
 
 class FlowPick:
-    def __init__(self, rel, base_of, pick="上位", top=3, minus_self=False, half=None, by_seat=False, carry=False, usual=None, board="足す"):
+    def __init__(self, rel, base_of, pick="上位", top=3, minus_self=False, half=None, by_seat=False, carry=False, usual=None, board="足す", gate=None):
         assert not (minus_self and (half is not None or by_seat or carry or usual))
         assert board in ("足す", "並べる") and not (board == "並べる" and (usual or minus_self))
         self.board = board
+        assert gate in (None, "出た語", "同じ波") and not (gate == "同じ波" and board != "並べる")
+        self.gate = gate
         assert usual in (None, "明るい分だけ", "残す・ほかは半分", "引く")
         self.usual = usual
         self.u_sum, self.u_n = [None, None, None, None], [0, 0, 0, 0]      # 席 3 つ + 全部
@@ -84,6 +92,19 @@ class FlowPick:
             self._lo, self._hi = 0, n
         self._buf[self._hi], self._bw[self._hi], self._bs[self._hi] = v, 1.0, sj
         self._hi += 1
+
+    def same_on_board(self, c, si=None):
+        b = self.base_of(c)
+        if b is None or self._hi == self._lo:
+            return False
+        nb = float(np.linalg.norm(b))
+        if nb <= 0:
+            return False
+        sl = slice(self._lo, self._hi)
+        v = np.real(self._buf[sl] @ np.conj(b)) / nb
+        if self.by_seat and si is not None:
+            v = v[self._bs[sl] == si]
+        return bool(v.size) and float(v.max()) >= 1.0 - 1e-4
 
     def near_rows(self, c, si=None):
         b = self.base_of(c)
@@ -157,6 +178,12 @@ class FlowPick:
         else:
             if self.pick == "出た語→板":
                 pool = near90
+            if self.gate == "出た語" and not any(c in self.said for c in pool):
+                return o
+            if self.gate == "同じ波":
+                pool = [c for c in pool if self.same_on_board(c, si)]
+                if not pool:
+                    return o
             nr = {c: self.near(c, si) for c in pool}
             if all(v is None for v in nr.values()):
                 return o
