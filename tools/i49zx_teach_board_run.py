@@ -158,6 +158,16 @@ def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=
                 s["話の終わりに本体へ反映する"] = dict(当たり=round(sum(r[1] for r in rr) / n, 4), 当たりに変わった=up, 外れに変わった_害=dn,
                                            z=round((up - dn) / max(1.0, (up + dn) ** 0.5), 2), 反映した三つ組=tr.reflected, 使った答え=dict(tr.used),
                                            セーブから戻した本体の答えが元と違った数=sum(b[4] != p[4] for b, p in zip(back, plain)))
+                if len(both) == len(rr):  # 「本体が後半も聞く」と問いごとに比べる（越えた分がどこで出たか）
+                    vs = {}
+                    for r, b, (cell, used) in zip(rr, both, tr.log):
+                        name = "外付けの答えを使った問い" if used else "本体の答えを使った問い"
+                        for kk in (name,) + (("外付け・%s｜%s" % cell,) if used else ()):
+                            c = vs.setdefault(kk, dict(問い=0, こちらだけ当たり=0, 聞く方だけ当たり=0))
+                            c["問い"] += 1
+                            c["こちらだけ当たり"] += bool(r[1]) and not b[0]
+                            c["聞く方だけ当たり"] += bool(b[0]) and not r[1]
+                    s["話の終わりに本体へ反映する"]["本体が後半も聞く時との比べ"] = dict(sorted(vs.items(), key=lambda kv: -kv[1]["問い"]))
             if ext:
                 cells = {}
                 for r, p, (cell, used) in zip(recs, plain, t.log):
