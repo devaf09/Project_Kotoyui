@@ -41,11 +41,8 @@ KINDS = ("教えた組そのもの", "似た組")
 
 
 def body_of(wave_of, attr_of):
-    import i49e_relation as RL
-    import i49h_tally_run as HR
-    import i49k_seat_vec as KV
-    from i49zb_mix import Mix
-    return Mix(RL.Relation(wave_of, half=HR.HALF), KV.Unbind(KV.SeatVec(attr_of, weight="数", bind="位相"), online=True), upper=None)
+    import i49_foundation as FD
+    return FD.body(wave_of, attr_of)
 
 
 def stream(rel, seq, rate, hear=True, when="いつも"):
