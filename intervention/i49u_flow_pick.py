@@ -56,21 +56,46 @@ class FlowPick:
         self.ctx, self.said, self.t = None, {}, 0
         self.seat_ctx = [None, None, None]
         self.w, self.seat_w = 0.0, [0.0, 0.0, 0.0]
-        self.rows, self.row_w, self.row_seat, self._mat = [], [], [], None
+        self._buf, self._bw, self._bs, self._lo, self._hi = None, None, None, 0, 0     # 並べた波（古い順）、重さ、席
+
+    @property
+    def rows(self):
+        return [] if self._buf is None else self._buf[self._lo:self._hi]
+
+    @property
+    def row_w(self):
+        return [] if self._buf is None else [float(v) for v in self._bw[self._lo:self._hi]]
+
+    def _push(self, v, sj):
+        if self._buf is None:
+            self._buf = np.zeros((64, v.shape[0]), dtype=v.dtype)
+            self._bw, self._bs = np.zeros(64, dtype=np.float32), np.zeros(64, dtype=np.int8)
+        if self._hi == self._buf.shape[0]:
+            n = self._hi - self._lo
+            if n > self._buf.shape[0] // 2:                 # 生きている波が多ければ、置き場を倍にする
+                for name in ("_buf", "_bw", "_bs"):
+                    old = getattr(self, name)
+                    new = np.zeros((old.shape[0] * 2,) + old.shape[1:], dtype=old.dtype)
+                    new[:n] = old[self._lo:self._hi]
+                    setattr(self, name, new)
+            else:                                           # 薄れ切った分の場所を詰める
+                for a in (self._buf, self._bw, self._bs):
+                    a[:n] = a[self._lo:self._hi].copy()
+            self._lo, self._hi = 0, n
+        self._buf[self._hi], self._bw[self._hi], self._bs[self._hi] = v, 1.0, sj
+        self._hi += 1
 
     def near_rows(self, c, si=None):
         b = self.base_of(c)
-        if b is None or not self.rows:
+        if b is None or self._hi == self._lo:
             return None
         nb = float(np.linalg.norm(b))
         if nb <= 0:
             return None
-        if self._mat is None:
-            self._mat = (np.stack(self.rows), np.asarray(self.row_w, dtype=np.float32), np.asarray(self.row_seat))
-        m, w, seat = self._mat
-        v = np.real(m @ np.conj(b)) / nb * w
+        sl = slice(self._lo, self._hi)
+        v = np.real(self._buf[sl] @ np.conj(b)) / nb * self._bw[sl]
         if self.by_seat and si is not None:
-            v = v[seat == si]
+            v = v[self._bs[sl] == si]
         return float(v.max()) if v.size else None
 
     def hear_usual(self, tri):
@@ -156,11 +181,10 @@ class FlowPick:
             self.seat_ctx = [None if x is None else x * self.keep for x in self.seat_ctx]
             self.w *= self.keep
             self.seat_w = [v * self.keep for v in self.seat_w]
-            if self.rows:
-                rw = [float(np.float32(v * self.keep)) for v in self.row_w]
-                live = [i for i, v in enumerate(rw) if v > 0.0]
-                self.rows, self.row_w, self.row_seat = [self.rows[i] for i in live], [rw[i] for i in live], [self.row_seat[i] for i in live]
-                self._mat = None
+            if self._hi > self._lo:
+                self._bw[self._lo:self._hi] *= np.float32(self.keep)
+                while self._lo < self._hi and self._bw[self._lo] <= 0.0:      # 古い順なので、前から外れる
+                    self._lo += 1
         for sj, w in enumerate(tri):
             b = self.base_of(w)
             if b is not None:
@@ -171,10 +195,7 @@ class FlowPick:
                 if self.board == "並べる":
                     nb = float(np.linalg.norm(b))
                     if nb > 0:
-                        self.rows.append(b / nb)
-                        self.row_w.append(1.0)
-                        self.row_seat.append(sj)
-                        self._mat = None
+                        self._push(b / nb, sj)
             n = self.said.get(w, (0, 0))[0]
             self.said[w] = (n + 1, self.t)
         if self.usual:

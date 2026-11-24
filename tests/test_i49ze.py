@@ -32,11 +32,12 @@ def test_rows_near_and_fade():
     assert fp.near("友達", 0) >= 0.5 - 1e-5 and fp.near("友達", 0) < 1.0 - 1e-5   # 1 組で半分（別の語の方が近ければそちら）
     assert abs(fp.near("先生", 0) - 1.0) < 1e-5
     fp.tick()
-    assert fp.rows                                           # 話をまたいでも残る
+    assert len(fp.rows)                                        # 話をまたいでも残る
     for _ in range(200):
         fp.learn(("先生", "海", "泳ぐ"))
-    assert len(fp.rows) < 200 * 3                            # 薄れ切った波は並びから外れる
-    assert all(isinstance(v, float) and v > 0 for v in fp.row_w)
+    assert 0 < len(fp.rows) < 200 * 3                        # 薄れ切った波は並びから外れる
+    assert all(v > 0 for v in fp.row_w)
+    assert abs(fp.near("先生", 0) - 1.0) < 1e-5
 
 
 def test_rows_reset_without_carry():
@@ -59,3 +60,19 @@ def test_run_shapes():
     for d in r.values():
         assert 0 <= d["正しい物"] <= d["合わせて"] <= 1
     assert np.isfinite(r["並べた板｜上位 3｜1 枚｜薄れない"]["正しい物"])
+
+
+def test_resume_skips_done():
+    import i49ze_row_board_run as Z
+    W = set(NAMES)
+    talks = [([("友達", "魚", "釣る"), ("友達", "海", "泳ぐ")], W)]
+    full = Z.run(V.get, V.get, talks, [])
+    mark = dict(正しい物=-1, 合わせて=-1)
+    done = {"白紙から": {"板無し": mark, "出た語・上位 3": mark}}
+    saved = []
+    res = Z.run(V.get, V.get, talks, [], done, saved.append)
+    assert res["白紙から"]["出た語・上位 3"] is mark              # 出ていた版は数え直さない
+    assert res["白紙から"]["板無し"]["正しい物"] == full["白紙から"]["板無し"]["正しい物"]
+    k = "並べた板｜九割以内｜席ごと｜半分まで 1 組"
+    assert {x: res["白紙から"][k][x] for x in ("正しい物", "合わせて")} == {x: full["白紙から"][k][x] for x in ("正しい物", "合わせて")}
+    assert saved
