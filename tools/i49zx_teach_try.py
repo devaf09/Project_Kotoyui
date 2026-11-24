@@ -9,6 +9,7 @@
 問いのファイル（UTF-8、タブ区切り、1 行 1 問）:  種類 <TAB> が <TAB> を <TAB> どうした    隠す席は「？」。種類は自由な名札（教える・似た問い・関係ない、など）
 教えのファイル（UTF-8、タブ区切り）:            問いの番号（1 から） <TAB> 正しい語      出した答えで合っていれば、その語をそのまま書く
                                               同じ番号を何行も書ける（「この語も合っている」）。出した答えが、その番号の正しい語のどれかなら、暗い側には入れない
+                                              正しい語の代わりに「×語」と書くと、「板のこの答えは違う」（I49zz）。その問いの組で、その語を板の止める側に入れる
 候補: 問いのファイルと教えのファイルに出た語のうち、同じ席の語の全部。問いのファイルに「候補 <TAB> 語、語 <TAB> 語、語 <TAB> 語、語」の行を
       置くと、その語も席ごとの候補に足す（区切りは「、」）。
 鍵の形（--key、カンマ区切りで並べると、形ごとに同じ問いと教えで表を出す。I49zy）:
@@ -34,6 +35,7 @@ import i49zx_teach_board_run as TR  # noqa: E402
 
 POS = ("NOUN", "NOUN", "VERB")
 HIDE = ("？", "?")
+DENY = ("×", "✕")
 
 
 def read_ask(path):
@@ -75,7 +77,7 @@ def cands_of(qs, teach, extra=None):
             if w is not None:
                 c[j].add(w)
     for i, ws in teach.items():
-        c[qs[i][1]] |= {(w, POS[qs[i][1]]) for w in ws}
+        c[qs[i][1]] |= {(w[1:] if w[:1] in DENY else w, POS[qs[i][1]]) for w in ws}
     return [sorted(x, key=str) for x in c]
 
 
@@ -98,7 +100,16 @@ def try_run(body, board, qs, teach, extra=None):
     if not teach:
         return rows
     signs = []
+    deny = {i: [w[1:] for w in ws if w[:1] in DENY] for i, ws in teach.items()}
+    teach = {i: [w for w in ws if w[:1] not in DENY] for i, ws in teach.items()}
+    for i, ws in sorted(deny.items()):
+        for w in ws:
+            board.deny(qs[i][1], qs[i][2], (w, POS[qs[i][1]]))
+        if ws:
+            rows[i]["教え"] = "板の " + "、".join(ws) + " は違う"
     for i, ws in sorted(teach.items()):
+        if not ws:
+            continue
         kind, si, q = qs[i]
         if board.pair.sign(si, q) is not None:
             signs.append((si, board.pair.sign(si, q)))
