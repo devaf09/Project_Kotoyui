@@ -50,3 +50,16 @@ def test_run_shapes():
     assert set(r) == {v[0] for v in Z.VERS}
     u = r["表 → 解く"]["使った答え"]
     assert u["表"] + u["解く"] == 12 and "当たりに変わった数" in r["表 → 解く"]
+
+
+def test_mix_counts_which_side_hits_per_level():
+    m = Mix(Level("もう片方", "泳ぐ"), Fixed(PTS), upper=None)
+    q = (2, ("海", "魚", None), C)
+    assert m.ask(*q)["答え"] == "泳ぐ"                           # 数えが無い間は表
+    m.learn(("海", "魚", "勉強"))                                # 解く形（勉強）が当たり
+    assert m.tally["もう片方"] == [0, 1, 1]
+    assert m.ask(*q)["答え"] == "勉強"                           # 次からは解く形
+    m.learn(("海", "魚", "泳ぐ"))
+    m.learn(("海", "魚", "泳ぐ"))                                # 問わずに聞いた分は数えない
+    assert m.tally["もう片方"] == [1, 1, 2]
+    assert m.ask(*q)["答え"] == "泳ぐ"                           # 同じなら表

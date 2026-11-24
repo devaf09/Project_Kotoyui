@@ -8,6 +8,7 @@
   表 → 解く＋板            一位と並ぶ候補の中で、席ごとの薄れる板（1 組で半分）に一番近い語（I49z）
   表 → 解く＋出た語→板      出た語が有ればそれ、無ければ板
   解く＋出た語→板          表を使わず、解く形と選び直しだけ
+  数えて選ぶ（I49zc）       表に任せる段を手で置かず、段ごとにそれまで多く当たった方を使う。選び直し無し ／ 出た語 ／ 出た語→板
 採点は、正しい物と、合わせて（I49w の集まり、話と青空）。関係の表だけから 当たりに変わった数・外れに変わった数、表と解く形のどちらを使ったかの数も出す。
 流れは tools/i49h_tally_run.py と同じ。引数は tools/i49m_attr_run.py と同じ（--content 付き）。記録はリポジトリの外。
 手で置く物: Mix と FlowPick の物（表に任せる段、上位 3、九割、薄れる速さ 1 組）。
@@ -35,7 +36,10 @@ VERS = (("関係の表だけ", "表", None),
         ("表 → 解く＋出た語（九割以内）", "両方", dict(pick="出た語・九割以内")),
         ("表 → 解く＋板", "両方", dict(pick="九割以内", **BOARD)),
         ("表 → 解く＋出た語→板", "両方", dict(pick="出た語→板", top=3, **BOARD)),
-        ("解く＋出た語→板", "解く", dict(pick="出た語→板", top=3, **BOARD)))
+        ("解く＋出た語→板", "解く", dict(pick="出た語→板", top=3, **BOARD)),
+        ("数えて選ぶ", "数える", dict(pick="そのまま")),
+        ("数えて選ぶ＋出た語", "数える", dict(pick="出た語", top=3)),
+        ("数えて選ぶ＋出た語→板", "数える", dict(pick="出た語→板", top=3, **BOARD)))
 
 
 def run(wave_of, attr_of, talks, aoz):
@@ -58,11 +62,13 @@ def run(wave_of, attr_of, talks, aoz):
                     table.learn(tri)
                 if fp is not None:
                     fp.rel.sv.hear(tri)
-            rel = table if kind == "表" else fp if kind == "解く" else Mix(table, fp)
+            rel = table if kind == "表" else fp if kind == "解く" else Mix(table, fp) if kind == "両方" else Mix(table, fp, upper=None)
             recs = ZR.stream(rel, talks, ok)
             out[start][name] = ZR.summary(recs, fp.picked if fp is not None else 0, base)
-            if kind == "両方":
+            if kind in ("両方", "数える"):
                 out[start][name]["使った答え"] = dict(rel.used)
+            if kind == "数える":
+                out[start][name]["段ごとの当たり"] = {lv: dict(表=h[0], 解く=h[1], 問い=h[2]) for lv, h in rel.tally.items()}
             base = recs if base is None else base
             print(start, name, out[start][name]["正しい物"], out[start][name]["合わせて"], flush=True)
     return out
