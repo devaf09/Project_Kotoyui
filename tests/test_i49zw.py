@@ -78,3 +78,25 @@ def test_run_shapes():
         assert 0 <= d[name]["正しい物"] <= 1
     assert d["組だけ・まばら"]["正しい物"] == 0 and d["組だけ・広げる"]["正しい物"] > 0
     assert len(d["直の比べ"]) == len(R.DUELS)
+
+
+def test_amp_modes():
+    import i49zw_dense_pair as D
+    cos = lambda x, y: float(np.real(np.vdot(x, y)))
+    for amp in ("そのまま", "属性を 1", "位相だけ"):
+        p = D.PairSolve(attr, dim=1024, amp=amp)
+        a = p.sign(2, ("太郎", "りんご", None))
+        assert cos(a, p.sign(2, ("花子", "みかん", None))) > .7 and abs(cos(a, p.sign(2, ("太郎", "金づち", None)))) < .2
+        if amp == "位相だけ":
+            m = np.abs(a)
+            assert float(m.max() - m.min()) < 1e-4            # どの本も同じ大きさ（力が全部の本に配られている）
+
+
+def test_run_amp_shapes():
+    import i49zp_text_talks_run as ZP
+    import i49zw_dense_pair_run as R
+    lines = ["太郎がりんごを食べる", "花子がみかんをかじる", "太郎が金づちを振る", "花子がのこぎりを振る", "太郎がみかんを食べる"]
+    talks, _, _ = ZP.talks_of(lines)
+    d = R.run_amp(lambda w: attr(w[0]), talks, ks=(0,), dim=1024)["元の順"]
+    assert len(d) == 7 and len(d["直の比べ"]) == 4
+    assert all(0 <= v["正しい物"] <= 1 for k, v in d.items() if k != "直の比べ")

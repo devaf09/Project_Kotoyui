@@ -13,6 +13,10 @@
     ask(隠す席, tri, 候補): 見せた 2 語の組の印と、候補がその席で覚えた印の和との近さ（cos の実部）。一番近い候補を答える
     tick(): 何もしない（薄れさせていない）
     stat(a, b): 2 語の属性の数、共通の属性の数、まばらな掛け算で残る長さ（数える用）
+    amp（mode="広げる" の時だけ。助言の「密な複素スペクトル」のもう半分、大きさをそろえる事の確かめ）:
+      "そのまま"   属性の割合をそのまま置く（初めの形）
+      "属性を 1"   持っている属性は、割合を見ずに全部 1 として置く
+      "位相だけ"   広げた後、どの本も大きさを 1 にして位相だけを残す（力を全部の本に同じだけ配る）
   置き直し: 席 s の語の属性 i は、(g_s × (i + 1)) mod dim 本目に置く。g_s は席ごとに違う奇数（どの席の語かで印が変わるように）。
 手で置く物: dim、g_s の作り方（dim × 黄金比の小数部 ×（席 + 1）に一番近い奇数）、印の長さを 1 にそろえる事、近さを cos の実部にした事。乱数は置かない。
 """
@@ -24,9 +28,9 @@ PHI = 0.6180339887498949
 
 
 class PairSolve:
-    def __init__(self, attr_of, mode="広げる", dim=8192):
-        assert mode in ("広げる", "まばら")
-        self.attr_of, self.mode, self.dim = attr_of, mode, int(dim)
+    def __init__(self, attr_of, mode="広げる", dim=8192, amp="そのまま"):
+        assert mode in ("広げる", "まばら") and amp in ("そのまま", "属性を 1", "位相だけ")
+        self.attr_of, self.mode, self.dim, self.amp = attr_of, mode, int(dim), amp
         self.g = [int(self.dim * PHI * (s + 1)) % self.dim | 1 for s in range(3)]
         self._d = {}
         self.mem = [{}, {}, {}]                            # 席 → 語 → 覚えた印の和
@@ -44,8 +48,11 @@ class PairSolve:
             if v is not None and float(np.linalg.norm(v)) > 0:
                 idx = np.nonzero(v)[0]
                 put = np.zeros(self.dim, dtype=np.complex64)
-                np.add.at(put, (self.g[s] * (idx + 1)) % self.dim, v[idx])
+                np.add.at(put, (self.g[s] * (idx + 1)) % self.dim, 1.0 if self.amp == "属性を 1" else v[idx])
                 x = np.fft.fft(put).astype(np.complex64)
+                if self.amp == "位相だけ":
+                    m = np.abs(x)
+                    x = np.where(m > 0, x / np.where(m > 0, m, 1), 0).astype(np.complex64)
             self._d[key] = x
         return self._d[key]
 

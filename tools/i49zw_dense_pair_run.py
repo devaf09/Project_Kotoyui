@@ -6,7 +6,9 @@
   解く形 ／ 解く形＋今までの束ね（SeatVec(pair=True)） ／ 組だけ・まばら ／ 組だけ・広げる ／ 解く形＋組・広げる（点を 1 対 1 で足す）
   数えて選ぶ ／ 数えて選ぶ・組と（解く側を「解く形＋組・広げる」に替える）
 材料と話の作り方、並べ替えは tools/i49zp_text_talks_run.py と同じ（材料はリポジトリに入れない）。
-引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --out 記録.json [--dim 8192]
+--amp_check を付けると、大きさのそろえ方だけを変えた比べをする（そのまま ／ 属性を 1 ／ 位相だけ。ほかは同じ）:
+  組だけ・広げる と 解く形＋組・広げる を、3 通りの大きさで。比べの元は「そのまま」。
+引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --out 記録.json [--dim 8192] [--amp_check]
 手で置く物: dim、点を足す重さ 1 対 1、並べ替えの k、後ろ 2 割。
 """
 from __future__ import annotations
@@ -67,6 +69,37 @@ def make(name, wave_of, attr_of, dim):
     return Mix(RL.Relation(wave_of, half=HR.HALF), solve() if name == "数えて選ぶ" else both, upper=None)
 
 
+AMPS = ("そのまま", "属性を 1", "位相だけ")
+
+
+def run_amp(attr_of, talks, ks=(0, 1, 2, 3), dim=8192):
+    import i49k_seat_vec as KV
+    import i49w_also_right_run as WR
+    import i49za_fold_run as ZR
+    import i49zk_mix_phase_run as ZK
+    from i49zw_dense_pair import Both, PairSolve
+    plain = [(t[0], t[1]) for t in talks]
+    ok = WR.ok_sets([t for tris, _ in plain for t in tris])
+    out = {}
+    for k in ks:
+        name_k = "元の順" if k == 0 else "並べ替え %d" % k
+        seq = [plain[i] for i in ZP.order(len(plain), k)]
+        d, keep = {}, {}
+        for amp in AMPS:
+            for name, make in (("組だけ・広げる｜" + amp, lambda: PairSolve(attr_of, dim=dim, amp=amp)),
+                               ("解く形＋組・広げる｜" + amp, lambda: Both(KV.Unbind(KV.SeatVec(attr_of, weight="数", bind="位相"), online=True),
+                                                                      PairSolve(attr_of, dim=dim, amp=amp)))):
+                recs = ZR.stream(make(), seq, ok)
+                s = ZR.summary(recs, 0)
+                s["後ろ 2 割"] = ZP.tail_score(recs)
+                keep[name], d[name] = recs, s
+                print(name_k, name, s["正しい物"], s["合わせて"], flush=True)
+        d["直の比べ"] = {"%s｜そのまま → %s" % (f, amp): ZK.duel(keep[f + "｜そのまま"], keep[f + "｜" + amp])
+                      for f in ("組だけ・広げる", "解く形＋組・広げる") for amp in AMPS[1:]}
+        out[name_k] = d
+    return out
+
+
 def run(wave_of, attr_of, talks, ks=(0, 1, 2, 3), dim=8192):
     import i49w_also_right_run as WR
     import i49za_fold_run as ZR
@@ -97,6 +130,7 @@ def main():
     for k in ("text", "wave", "content", "out"):
         ap.add_argument("--" + k, required=True)
     ap.add_argument("--dim", type=int, default=8192)
+    ap.add_argument("--amp_check", action="store_true")
     a = ap.parse_args()
     t0 = time.time()
     talks = []
@@ -112,7 +146,7 @@ def main():
     res = dict(話=len(talks), 三つ組=sum(len(t[0]) for t in talks), dim=a.dim, まばらさ=sparse_stats(full.of, talks, a.dim))
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(json.dumps(res, ensure_ascii=False), flush=True)
-    res.update(run(wave_of, full.of, talks, dim=a.dim))
+    res.update(run_amp(full.of, talks, dim=a.dim) if a.amp_check else run(wave_of, full.of, talks, dim=a.dim))
     res["秒"] = round(time.time() - t0)
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
