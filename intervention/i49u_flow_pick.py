@@ -27,6 +27,10 @@ I49t で、解く形は正解を上位に入れているが、点の並んだ候
       "残す・ほかは半分"  ふだんより明るい属性はそのまま、ほかは半分に薄める（記憶板 I40b の FADE と同じ形）
       "引く"            板からも候補からも、ふだんを引いてから比べる
     hear_usual(tri): ふだんだけに足す（先に聞かせた材料の分）
+  I49ze（板の語を足さずに並べる。持ち主の言葉「並べて一斉に走査もOK」から。未確定の試し）で足した物:
+    board: "足す"（今まで通り、板は 1 本の足した波） ／ "並べる"（聞いた語の波を 1 本ずつ並べて持ち、重さだけを薄れさせる）
+      "並べる" の近さ = 並べた波を一斉に走査して、重さ × 候補との近さ の一番大きい物。
+      重さが float32 で 0 になった波は、並びから外す（薄れ切った物。閾は置かない）。
 手で置く物: 上位の数 top、九割、流れを足す重さ 1、薄れる速さ half、話ごとに空に戻すかどうか、「ほかは半分」の半分。
 """
 from __future__ import annotations
@@ -35,8 +39,10 @@ import numpy as np
 
 
 class FlowPick:
-    def __init__(self, rel, base_of, pick="上位", top=3, minus_self=False, half=None, by_seat=False, carry=False, usual=None):
+    def __init__(self, rel, base_of, pick="上位", top=3, minus_self=False, half=None, by_seat=False, carry=False, usual=None, board="足す"):
         assert not (minus_self and (half is not None or by_seat or carry or usual))
+        assert board in ("足す", "並べる") and not (board == "並べる" and (usual or minus_self))
+        self.board = board
         assert usual in (None, "明るい分だけ", "残す・ほかは半分", "引く")
         self.usual = usual
         self.u_sum, self.u_n = [None, None, None, None], [0, 0, 0, 0]      # 席 3 つ + 全部
@@ -50,6 +56,22 @@ class FlowPick:
         self.ctx, self.said, self.t = None, {}, 0
         self.seat_ctx = [None, None, None]
         self.w, self.seat_w = 0.0, [0.0, 0.0, 0.0]
+        self.rows, self.row_w, self.row_seat, self._mat = [], [], [], None
+
+    def near_rows(self, c, si=None):
+        b = self.base_of(c)
+        if b is None or not self.rows:
+            return None
+        nb = float(np.linalg.norm(b))
+        if nb <= 0:
+            return None
+        if self._mat is None:
+            self._mat = (np.stack(self.rows), np.asarray(self.row_w, dtype=np.float32), np.asarray(self.row_seat))
+        m, w, seat = self._mat
+        v = np.real(m @ np.conj(b)) / nb * w
+        if self.by_seat and si is not None:
+            v = v[seat == si]
+        return float(v.max()) if v.size else None
 
     def hear_usual(self, tri):
         for sj, w in enumerate(tri):
@@ -60,6 +82,8 @@ class FlowPick:
                     self.u_n[k] += 1
 
     def near(self, c, si=None):
+        if self.board == "並べる":
+            return self.near_rows(c, si)
         b = self.base_of(c)
         seat = self.by_seat and si is not None
         x = self.seat_ctx[si] if seat else self.ctx
@@ -132,6 +156,11 @@ class FlowPick:
             self.seat_ctx = [None if x is None else x * self.keep for x in self.seat_ctx]
             self.w *= self.keep
             self.seat_w = [v * self.keep for v in self.seat_w]
+            if self.rows:
+                rw = [float(np.float32(v * self.keep)) for v in self.row_w]
+                live = [i for i, v in enumerate(rw) if v > 0.0]
+                self.rows, self.row_w, self.row_seat = [self.rows[i] for i in live], [rw[i] for i in live], [self.row_seat[i] for i in live]
+                self._mat = None
         for sj, w in enumerate(tri):
             b = self.base_of(w)
             if b is not None:
@@ -139,6 +168,13 @@ class FlowPick:
                 self.seat_ctx[sj] = b.copy() if self.seat_ctx[sj] is None else self.seat_ctx[sj] + b
                 self.w += 1.0
                 self.seat_w[sj] += 1.0
+                if self.board == "並べる":
+                    nb = float(np.linalg.norm(b))
+                    if nb > 0:
+                        self.rows.append(b / nb)
+                        self.row_w.append(1.0)
+                        self.row_seat.append(sj)
+                        self._mat = None
             n = self.said.get(w, (0, 0))[0]
             self.said[w] = (n + 1, self.t)
         if self.usual:
