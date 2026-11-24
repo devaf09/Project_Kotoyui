@@ -142,3 +142,24 @@ def test_teach_try_far_line(tmp_path):
     assert ("遠い", "VERB") not in T.cands_of(qs, tc)[2]
     rows = T.try_run(Body(), T.board_of(get, "めずらしさ", seats), qs, tc)
     assert rows[0]["教え"] == "遠い（板の出番ではない。止めた語 2）" and rows[0]["板の答え"] is None and rows[1]["板の答え"] in ("読む", "書く")
+
+
+def test_unheard_run_board_carries_what_body_never_heard():
+    import i49zp_text_talks_run as ZP
+    import i49zx_teach_board_run as R
+    from test_i49zw import attr as small
+    lines = ["太郎が金づちを振る", "花子が金づちを振る", "",
+             "花子が金づちを振る", "太郎が金づちを振る", "花子が金づちを振る", "",
+             "太郎がりんごを食べる", "花子がみかんをかじる", "太郎がみかんを食べる", "",
+             "花子がりんごをかじる", "太郎がりんごを食べる", "花子がみかんをかじる", "太郎がみかんを食べる"]
+    talks, _, _ = ZP.talks_of(lines)
+    assert len(talks) == 4
+    get = lambda w: small(w[0])
+    res = R.run_unheard(get, get, talks, rates=(1.0,), ks=(0,), dim=1024)
+    d = res["元の順"]
+    base, s = d["本体だけ（後半を聞かない）"], d["介入 100%"]
+    assert s["本体"] == base["本体"] and s["本体の答えが板なしと違った数"] == 0       # 本体は後半を聞かず、板を付けても変わらない
+    assert d["本体が後半も聞く・板なし（比べ役）"]["問い"] == base["問い"] == s["問い"]
+    assert s["教えた数"] > 0 and s["板が答えを持った問い"] > 0
+    assert s["板が答えを持てばいつも板（比べ役）"] > base["本体"]                    # 本体が聞いていない事を、板が運ぶ
+    assert s["板を付けた形"] >= base["本体"]
