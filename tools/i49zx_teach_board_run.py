@@ -14,6 +14,7 @@
     本体だけ（後半を聞かない） ／ 介入の板を付けた形（割合ごと） ／ 板が答えを持てばいつも板（比べ役） ／ 本体が後半も聞く・板なし（比べ役。同じ事を本体が全部聞けた時）
   --unheard と --ceiling を付けると、板を使わずに「2 語の組で覚える」事の上限を数える（I49zzc）。後半の問いを、同じ 2 語の組が後半でもう出たか
   どうかで分け、本体（聞かない・聞く）の当たり、正解がその組で前に出た語のどれかである割合（上限）、その組で一番多く出た語で答えた時の当たりを出す。
+  --unheard と --ext を付けると、介入の板の代わりに、本体と同じ形の外付け（intervention/i49zzd_taught_body.py）で数える（I49zzd）。
   鍵の形は --key（今まで・引く・めずらしさ。tools/i49zx_teach_try.py と同じ）。
 引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --out 記録.json [--rates 0.1,0.3,1.0] [--dark 0.001] [--unheard] [--key 今まで] [--ks 1,2]
 手で置く物: 介入の割合、暗い側の強さ、板の薄れる速さ・本数（部品の既定）、並べ替えの k（0 と 1）。
@@ -66,6 +67,8 @@ def stream(rel, seq, rate, hear=True):
                 rel.settle(tri)
         if hear:
             rel.tick()
+        elif hasattr(rel, "rest"):
+            rel.rest()
     return recs
 
 
@@ -104,9 +107,10 @@ def run(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(0, 1), dark=1.0 / 10
     return out
 
 
-def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=1.0 / 1000, dim=8192, key="今まで"):
+def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=1.0 / 1000, dim=8192, key="今まで", ext=False):
     import i49zx_teach_try as TT
     from i49zx_teach_board import Taught
+    from i49zzd_taught_body import TaughtBody
     plain_t = [(t[0], t[1]) for t in talks]
     out = {}
     for k in ks:
@@ -128,13 +132,17 @@ def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=
         d = {"本体だけ（後半を聞かない）": dict(問い=len(plain), 本体=round(sum(r[0] for r in plain) / n, 4)),
              "本体が後半も聞く・板なし（比べ役）": dict(問い=len(both), 本体=round(sum(r[0] for r in both) / n, 4))}
         for rate in rates:
-            t = Taught(heard_body(), TT.board_of(attr_of, key, seats, dark, dim))
+            t = TaughtBody(heard_body(), body_of(wave_of, attr_of)) if ext else Taught(heard_body(), TT.board_of(attr_of, key, seats, dark, dim))
             recs = stream(t, second, rate, hear=False)
             s = summary(recs, plain)
-            s["教えた数"] = t.board.n
+            s["教えた数"] = t.n if ext else t.board.n
             s["板が答えを持った問い"] = sum(r[2] is not None for r in recs)
             s["板が答えを持てばいつも板（比べ役）"] = round(sum((r[3] if r[2] is not None else r[0]) for r in recs) / n, 4)
-            s["板が答えを持った問いでの数え"] = dict(本体の当たり=t.tally[0], 板の当たり=t.tally[1], 問い=t.tally[2])
+            if ext:
+                s["使った答え"] = dict(t.used)
+                s["段ごとの数え"] = {"%s｜%s" % c: dict(本体の当たり=h[0], 外付けの当たり=h[1], 問い=h[2]) for c, h in sorted(t.tally.items(), key=str)}
+            else:
+                s["板が答えを持った問いでの数え"] = dict(本体の当たり=t.tally[0], 板の当たり=t.tally[1], 問い=t.tally[2])
             d["介入 %d%%" % round(rate * 100)] = s
             print(k, rate, s["本体"], s["板を付けた形"], s["z"], flush=True)
         out["元の順" if k == 0 else "並べ替え %d" % k] = d
@@ -197,6 +205,7 @@ def main():
     ap.add_argument("--dark", type=float, default=1.0 / 1000)
     ap.add_argument("--unheard", action="store_true")
     ap.add_argument("--ceiling", action="store_true")
+    ap.add_argument("--ext", action="store_true")
     ap.add_argument("--key", default="今まで")
     ap.add_argument("--ks", default="1,2")
     a = ap.parse_args()
@@ -216,8 +225,8 @@ def main():
     if a.unheard and a.ceiling:
         res.update(run_ceiling(wave_of, full.of, talks, ks=tuple(int(x) for x in a.ks.split(","))))
     elif a.unheard:
-        res["鍵の形"] = a.key
-        res.update(run_unheard(wave_of, full.of, talks, rates=rates, ks=tuple(int(x) for x in a.ks.split(",")), dark=a.dark, key=a.key))
+        res["外付けの形"] = "本体と同じ形" if a.ext else "介入の板（鍵の形: %s）" % a.key
+        res.update(run_unheard(wave_of, full.of, talks, rates=rates, ks=tuple(int(x) for x in a.ks.split(",")), dark=a.dark, key=a.key, ext=a.ext))
     else:
         res.update(run(wave_of, full.of, talks, rates=rates, dark=a.dark))
     res["秒"] = round(time.time() - t0)
