@@ -109,6 +109,6 @@ def test_run_level_shapes():
     talks, _, _ = ZP.talks_of(lines)
     get = lambda w: attr(w[0])
     d = R.run_level(get, get, talks, ks=(0,), dim=1024)["元の順"]
-    assert sum(h["問い"] for h in d.values()) == 18
+    assert sum(h["問い"] for h in d.values()) == 3 * sum(len(x[0]) for x in talks) > 0
     for h in d.values():
         assert h["解く形と組"] - h["解く形"] == h["当たりに変わった"] - h["外れに変わった"]
