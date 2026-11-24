@@ -12,6 +12,8 @@ I48 の決まりを引き継ぐ: 介入は本体に混ぜず、別の板に持�
     deny(隠した席, 問いの 3 つ組, 語): 板が広げて出した答えへの「違う」（I49zz、未確定の試し）。その組の印を、その語の「止める側」に stop の重さで足す。
       stop="出した分" にすると、重さを置かず、板がその語に今出している点と同じ量だけ足す（教えた問いの点がちょうど 0 になる。点が 0 以下なら何も足さない）。
       points は 明るい側 − 暗い側 − 止める側。暗い側（本体の間違いを薄く覚える）とは別に持つ。本体には触らない。薄れ方は同じ。
+    far(隠した席, 問いの 3 つ組): 「この問いは遠い（板の出番ではない）」の教え（I49zza、未確定の試し）。板がその問いで正の点を出している語の全部を、
+      それぞれ出した分だけ止める側に足す（stop の値に関わらず、出した分）。教えた問いでは、板は答えなくなる。止めた語の数を返す。
     taught(隠した席, 問い): この組そのものを教えた事が有るか（数える用。答え方には使わない）。
   Taught(body, board)   本体に介入の板を外付けする。
     ask: 本体の答えと、板の答え（点が正の候補が有る時だけ）を出す。どちらを使うかは重さを置かず、板が答えを持った問いで
@@ -69,6 +71,22 @@ class TeachBoard:
         self._add(self.stop[si], word, (p * np.float32(amount)).astype(np.complex64))
         self.n += 1
         return True
+
+    def far(self, si, tri):
+        p = self.pair.sign(si, tri)
+        if p is None:
+            return 0
+        words = sorted(set(self.bright[si]) | set(self.dark[si]) | set(self.stop[si]), key=str)
+        out = {w: v for w, v in self.points(si, tri, words).items() if v > 0}
+        if not out:
+            return 0
+        for side in (self.bright, self.dark, self.stop):
+            for w in side[si]:
+                side[si][w] *= self.keep
+        for w, v in out.items():
+            self._add(self.stop[si], w, (p * np.float32(v)).astype(np.complex64))
+        self.n += 1
+        return len(out)
 
     def taught(self, si, tri):
         return (si,) + tuple(w for j, w in enumerate(tri) if j != si) in self.keys

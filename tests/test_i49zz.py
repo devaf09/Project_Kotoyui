@@ -109,3 +109,36 @@ def test_teach_try_denies_after_teaching_so_own_output_is_seen():
     rows = T.try_run(Body(), b, qs, {0: ["×読む"], 1: ["読む"]})        # 「違う」の行が先に書いてあっても、教えの後に入る
     assert rows[0]["教え"] == "板の 読む は違う" and rows[0]["板の答え"] is None and ("読む", "VERB") in b.stop[2]
     assert rows[1]["板の答え"] == "読む"
+
+
+def test_far_stops_every_word_the_board_gives_there():
+    import i49zw_dense_pair as D
+    import i49zx_teach_board as X
+    cs = ["読む", "書く", "歌う"]
+    b = X.TeachBoard(attr, amp="そのまま", rare=D.rare_of(attr, ZY.SEATS))
+    b.teach(2, ("学生", "本", "読む"), "読む")
+    b.teach(2, ("父", "手紙", "書く"), "書く")
+    far, same = ("学生", "歌", None), ("学生", "本", None)
+    before = b.points(2, same, cs)["読む"]
+    assert b.points(2, far, cs)["読む"] > .2 and b.points(2, far, cs)["書く"] > 0
+    assert b.far(2, far) == 2 and not b.dark[2]
+    s = b.points(2, far, cs)
+    assert abs(s["読む"]) < 1e-3 and abs(s["書く"]) < 1e-3              # 教えた問いでは、どの語の点も 0 になる（次の語が出てこない）
+    assert b.far(2, far) == 0                                          # もう何も出していないので、重ねて止めない
+    assert .3 < b.points(2, same, cs)["読む"] < before                  # 教えた組は残る（弱くはなる）
+
+
+def test_teach_try_far_line(tmp_path):
+    import i49zx_teach_try as T
+    get = lambda w: attr(w[0])
+    seats = [[(w, "NOUN") for w in ZY.SEATS[0]], [(w, "NOUN") for w in ZY.SEATS[1]], []]
+    qs = [("遠い問い", 2, (("学生", "NOUN"), ("歌", "NOUN"), None)), ("教える", 2, (("学生", "NOUN"), ("本", "NOUN"), None))]
+
+    class Body:
+        def ask(self, si, tri, cands):
+            return dict(段="本体", 点={("歌う", "VERB"): 1.0}, 答え=("歌う", "VERB"))
+
+    tc = {0: ["遠い"], 1: ["読む", "書く"]}
+    assert ("遠い", "VERB") not in T.cands_of(qs, tc)[2]
+    rows = T.try_run(Body(), T.board_of(get, "めずらしさ", seats), qs, tc)
+    assert rows[0]["教え"] == "遠い（板の出番ではない。止めた語 2）" and rows[0]["板の答え"] is None and rows[1]["板の答え"] in ("読む", "書く")
