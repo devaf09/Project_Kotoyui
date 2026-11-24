@@ -64,6 +64,16 @@ def test_run_shapes():
     res = Z.run(V.get, V.get, talks, [("友達", "海", "泳ぐ")])
     assert len(ZE.VERS) == n
     r = res["白紙から"]
-    assert len(r) == 10 and r["板無し"]["答えが変わった数"] == 0
+    assert len(r) == 14 and r["板無し"]["答えが変わった数"] == 0
     for d in r.values():
         assert 0 <= d["正しい物"] <= d["合わせて"] <= 1
+
+
+def test_same_wave_reset_per_talk_follows_recency():
+    fp = _fp("同じ波", half=1)
+    c = ["先生", "友達", "海"]
+    fp.learn(("友達", "魚", "釣る"))
+    fp.learn(("海", "魚", "釣る"))
+    assert fp.ask(0, (None, "魚", "釣る"), c)["答え"] == "海"            # 新しく出た語ほど重い
+    fp.tick()
+    assert fp.ask(0, (None, "魚", "釣る"), c)["答え"] == "先生"          # 話が変わると板は空
