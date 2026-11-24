@@ -9,6 +9,8 @@ I48 の決まりは引き継ぐ: 介入は本体に混ぜず、外付けに持�
     反映とセーブ（I49zze。持ち主の言葉「外付けを短期記憶とかその場の考え・一時的なスキルと考えれば不自然ではないと思うけど、
       しいて言えば本体への反映と本体からのセーブがあればなおいいかも？」から。未確定の試し）:
       reflect=True なら、話の終わり（rest か tick）に、外付けが聞いた 3 つ組を本体に聞かせ、外付けを空に戻す（fresh() で作り直す）。
+      tally_body=True なら、反映の時に、本体の中の「段ごとの数え」も進める（教えが届いた席の問いの分だけ。その 3 つ組の問いで本体が出した答えを
+      取っておき、反映でその 3 つ組を聞かせる時に答え合わせをする）。False なら、本体の中の数えは反映では進めない（初めの形）。
       save() は本体の写しを返す。restore(写し) で、本体をその時の姿に戻し、外付けも空にする（「外せば元に戻る」の代わりに「セーブした所まで戻れる」）。
     ask: 本体の答えと、外付けの答えを出す。どちらを使うかは重さを置かず、（本体の答えた段, 外付けの答えた段）ごとに、
          それまでにどちらが多く当たったかで決める（同じなら本体）。数えは問う前の分だけ。
@@ -28,9 +30,10 @@ from __future__ import annotations
 
 
 class TaughtBody:
-    def __init__(self, body, ext, fresh=None, reflect=False):
+    def __init__(self, body, ext, fresh=None, reflect=False, tally_body=False):
         assert not reflect or fresh is not None
         self.body, self.ext, self.fresh, self.do_reflect = body, ext, fresh, bool(reflect)
+        self.tally_body = bool(tally_body) and hasattr(body, "take")
         self._held, self.reflected = [], 0
         self.tally, self._wait, self.last = {}, [], None
         self._mark, self._seats, self.keys, self.n = False, set(), set(), 0
@@ -72,9 +75,10 @@ class TaughtBody:
             h[1] += b == tri[si]
             h[2] += 1
         self._wait = []
+        waits = [w for w in self.body.take() if w[0] in self._seats] if self.tally_body else []
         if self._mark:
             self.ext.learn(tri)
-            self._held.append(tri)
+            self._held.append((tri, waits))
             self.n += 1
         elif hasattr(self.ext, "drop"):
             self.ext.drop()
@@ -88,7 +92,9 @@ class TaughtBody:
         """外付けが聞いた 3 つ組を本体に聞かせ、外付けを空に戻す。反映した 3 つ組の数を返す。"""
         if hasattr(self.body, "drop"):
             self.body.drop()
-        for tri in self._held:
+        for tri, waits in self._held:
+            if self.tally_body:
+                self.body.give(waits)
             self.body.learn(tri)
         k = len(self._held)
         if k:

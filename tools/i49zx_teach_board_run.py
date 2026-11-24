@@ -186,6 +186,11 @@ def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=
                 s["話の終わりに本体へ反映する"] = dict(当たり=round(sum(r[1] for r in rr) / n, 4), 当たりに変わった=up, 外れに変わった_害=dn,
                                            z=round((up - dn) / max(1.0, (up + dn) ** 0.5), 2), 反映した三つ組=tr.reflected, 使った答え=dict(tr.used),
                                            セーブから戻した本体の答えが元と違った数=sum(b[4] != p[4] for b, p in zip(back, plain)))
+                t2 = TaughtBody(heard_body(), fresh(), fresh=fresh, reflect=True, tally_body=True)  # 反映の時に、本体の段の数えも進める形
+                r2 = stream(t2, second, rate, hear=False, when=when)
+                up2, dn2 = sum((not p[0]) and r[1] for r, p in zip(r2, plain)), sum(p[0] and not r[1] for r, p in zip(r2, plain))
+                s["話の終わりに本体へ反映する・本体の段の数えも進める"] = dict(当たり=round(sum(r[1] for r in r2) / n, 4), 当たりに変わった=up2, 外れに変わった_害=dn2,
+                                                           z=round((up2 - dn2) / max(1.0, (up2 + dn2) ** 0.5), 2), 使った答え=dict(t2.used))
                 if "比べ役・話の終わりにまとめて聞く" not in d:  # 越えた分が、聞く時機から来るのか、段の数えを止めた事から来るのか
                     for name, cls in (("比べ役・話の終わりにまとめて聞く", _Late), ("比べ役・すぐ聞くが段の数えを止める", _Frozen)):
                         rc = stream(cls(heard_body()), second, 0, hear=True)

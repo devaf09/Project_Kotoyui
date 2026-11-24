@@ -200,3 +200,24 @@ def test_unheard_run_reflect():
     assert sum(v["問い"] for k, v in vs.items() if k.endswith("使った問い")) == d["本体だけ（後半を聞かない）"]["問い"]
     for name in ("比べ役・話の終わりにまとめて聞く", "比べ役・すぐ聞くが段の数えを止める"):   # 越えた理由を分ける比べ役が付く
         assert 0 <= d[name]["本体"] <= 1
+
+
+def test_reflect_can_advance_the_body_tally():
+    # 反映の時に、本体の中の段の数えも進める形: 教えが届いた席の問いの分だけ、反映で答え合わせをする
+    import i49_foundation as FD
+    import i49zzd_taught_body as Z
+    get = lambda w: small(w[0])
+    tri = (("犬", "NOUN"), ("骨", "NOUN"), ("かじる", "VERB"))
+    for flag, want in ((False, 0), (True, 1)):
+        fresh = lambda: FD.body(get, get)
+        base = fresh()
+        base.learn(tri)
+        base.tick()
+        t = Z.TaughtBody(base, fresh(), fresh=fresh, reflect=True, tally_body=flag)
+        before = sum(h[2] for h in t.body.tally.values())
+        t.ask(2, (tri[0], tri[1], None), [tri[2], ("読む", "VERB")])
+        t.teach(2, tri, None)
+        t.ask(1, (tri[0], None, tri[2]), [tri[1], ("本", "NOUN")])          # 教えが届かなかった席の問いは数えない
+        t.settle(tri)
+        t.tick()
+        assert sum(h[2] for h in t.body.tally.values()) - before == want
