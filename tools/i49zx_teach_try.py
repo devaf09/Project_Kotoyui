@@ -11,8 +11,12 @@
                                               同じ番号を何行も書ける（「この語も合っている」）。出した答えが、その番号の正しい語のどれかなら、暗い側には入れない
 候補: 問いのファイルと教えのファイルに出た語のうち、同じ席の語の全部。問いのファイルに「候補 <TAB> 語、語 <TAB> 語、語 <TAB> 語、語」の行を
       置くと、その語も席ごとの候補に足す（区切りは「、」）。
-引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --ask 問い.tsv [--teach 教え.tsv] --out 結果.md [--dark 0.001]
-手で置く物: 暗い側の強さ。上位を 3 つまで見せる事。
+鍵の形（--key、カンマ区切りで並べると、形ごとに同じ問いと教えで表を出す。I49zy）:
+  今まで      広げて掛けて、大きさをそろえる（I49zx の初めの形）
+  引く        席ごとの「いつもの属性」（材料でその席に出た語の平均）を引いてから、広げて掛ける。大きさはそろえない
+  めずらしさ  席ごとの「めずらしさ」（1 − その属性を持つ語の割合）を掛けてから、広げて掛ける。大きさはそろえない
+引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --ask 問い.tsv [--teach 教え.tsv] --out 結果.md [--dark 0.001] [--key 今まで] [--dim 8192]
+手で置く物: 暗い側の強さ。上位を 3 つまで見せる事。いつもの属性・めずらしさを、材料でその席に出た語（1 語 1 回）から作る事。
 """
 from __future__ import annotations
 
@@ -93,8 +97,11 @@ def try_run(body, board, qs, teach, extra=None):
         rows.append(dict(種類=kind, 問い=show(q, si), 一回目=None if o["答え"] is None else o["答え"][0], 一回目の段=o["段"], 一回目の上位=top3(o["点"])))
     if not teach:
         return rows
+    signs = []
     for i, ws in sorted(teach.items()):
         kind, si, q = qs[i]
+        if board.pair.sign(si, q) is not None:
+            signs.append((si, board.pair.sign(si, q)))
         ans = rows[i]["一回目"]
         ok = True
         for w in ws:
@@ -113,6 +120,9 @@ def try_run(body, board, qs, teach, extra=None):
         row["板の答え"] = None if b is None else b[0]
         row["板の上位"] = top3({c: v for c, v in s.items() if v != 0})
         row["教えた組そのもの"] = board.taught(si, q)
+        p = board.pair.sign(si, q)
+        near = [float((p.conj() * t).sum().real) for sj, t in signs if sj == si] if p is not None else []
+        row["教えた組との一番の近さ"] = round(max(near), 4) if near else None
     return rows
 
 
@@ -120,21 +130,33 @@ def to_md(rows, taught):
     if not taught:
         head = "| 番号 | 種類 | 問い | 答え | 答えた段 | 上位 3 |\n|---|---|---|---|---|---|\n"
         return head + "".join("| %d | %s | %s | %s | %s | %s |\n" % (i + 1, r["種類"], r["問い"], r["一回目"], r["一回目の段"], r["一回目の上位"]) for i, r in enumerate(rows))
-    head = "| 番号 | 種類 | 問い | 教える前の答え | 教え | 板の答え | 板の上位 3 | 板を外した答え |\n|---|---|---|---|---|---|---|---|\n"
-    return head + "".join("| %d | %s | %s | %s | %s | %s | %s | %s%s |\n" % (
+    head = "| 番号 | 種類 | 問い | 教える前の答え | 教え | 板の答え | 板の上位 3 | 教えた組との一番の近さ | 板を外した答え |\n|---|---|---|---|---|---|---|---|---|\n"
+    return head + "".join("| %d | %s | %s | %s | %s | %s | %s | %s | %s%s |\n" % (
         i + 1, r["種類"], r["問い"], r["一回目"], r.get("教え", ""), r["板の答え"] if r["板の答え"] is not None else "（板は答えない）", r["板の上位"],
-        r["板を外した答え"], "" if r["外すと一回目と同じ"] else "（一回目と違う）") for i, r in enumerate(rows))
+        "" if r["教えた組との一番の近さ"] is None else "%.2f" % r["教えた組との一番の近さ"], r["板を外した答え"], "" if r["外すと一回目と同じ"] else "（一回目と違う）") for i, r in enumerate(rows))
+
+
+def board_of(attr_of, key, seats, dark=1.0 / 1000, dim=8192):
+    import i49zw_dense_pair as D
+    from i49zx_teach_board import TeachBoard
+    assert key in ("今まで", "引く", "めずらしさ"), key
+    if key == "今まで":
+        return TeachBoard(attr_of, dim=dim, dark=dark)
+    if key == "引く":
+        return TeachBoard(attr_of, dim=dim, dark=dark, amp="そのまま", usual=D.usual_of(attr_of, seats))
+    return TeachBoard(attr_of, dim=dim, dark=dark, amp="そのまま", rare=D.rare_of(attr_of, seats))
 
 
 def main():
     import i49c_read_words as Rw
     import i49m_attr_base as AB
-    from i49zx_teach_board import TeachBoard
     ap = argparse.ArgumentParser()
     for k in ("text", "wave", "content", "ask", "out"):
         ap.add_argument("--" + k, required=True)
     ap.add_argument("--teach")
     ap.add_argument("--dark", type=float, default=1.0 / 1000)
+    ap.add_argument("--key", default="今まで")
+    ap.add_argument("--dim", type=int, default=8192)
     a = ap.parse_args()
     talks = []
     for f in a.text.split(","):
@@ -154,11 +176,16 @@ def main():
     qs = read_ask(a.ask)
     teach = read_teach(a.teach) if a.teach else {}
     extra = read_extra(a.ask)
-    rows = try_run(body, TeachBoard(full.of, dark=a.dark), qs, teach, extra)
+    seats = [[tri[j] for tris, _, _ in talks for tri in tris] for j in range(3)]
     no_attr = sorted({w[0] for _, _, q in qs for w in q if w is not None and full.of(w) is None} | {w[0] for x in extra for w in x if full.of(w) is None})
-    md = to_md(rows, bool(teach)) + ("\n属性の無い語（板の鍵に使えない）: " + "、".join(no_attr) + "\n" if no_attr else "")
+    md, res = "", {}
+    for key in a.key.split(","):
+        rows = try_run(body, board_of(full.of, key, seats, a.dark, a.dim), qs, teach, extra)
+        md += "鍵の形: %s\n\n" % key + to_md(rows, bool(teach)) + "\n"
+        res[key] = rows
+    md += "属性の無い語（板の鍵に使えない）: " + "、".join(no_attr) + "\n" if no_attr else ""
     open(a.out, "w", encoding="utf-8").write(md)
-    json.dump(rows, open(os.path.splitext(a.out)[0] + ".json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    json.dump(res, open(os.path.splitext(a.out)[0] + ".json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(md)
 
 

@@ -17,6 +17,12 @@
       "そのまま"   属性の割合をそのまま置く（初めの形）
       "属性を 1"   持っている属性は、割合を見ずに全部 1 として置く
       "位相だけ"   広げた後、どの本も大きさを 1 にして位相だけを残す（力を全部の本に同じだけ配る）
+    usual（mode="広げる" の時だけ。I49zy）: 席ごとの「いつもの属性」の向き 3 つ（usual_of で作る）。置く前に、語の属性の波を長さ 1 にしてから、
+      その席のいつもの属性を引く。どの語も持つ属性が印に残らないようにする。None なら引かない（今まで通り）。
+    rare（mode="広げる" の時だけ。I49zy のもう 1 つの形）: 席ごとの「めずらしさ」3 つ（rare_of で作る）。置く前に、属性ごとに掛ける。
+      どの語も持つ属性は 0 に近くなり、持つ語が少ない属性ほどそのまま残る。引き算をしないので、まばらなまま。None なら掛けない。
+  rare_of(attr_of, 席ごとの語の並び) → 席ごとに、属性ごとの 1 −（その属性を持つ語の割合。1 語 1 回で数える）。属性を持つ語が無い席は None。
+  usual_of(attr_of, 席ごとの語の並び) → 席ごとに、語（1 語 1 回）の属性の波（長さ 1）の平均。属性を持つ語が無い席は None。
   置き直し: 席 s の語の属性 i は、(g_s × (i + 1)) mod dim 本目に置く。g_s は席ごとに違う奇数（どの席の語かで印が変わるように）。
 手で置く物: dim、g_s の作り方（dim × 黄金比の小数部 ×（席 + 1）に一番近い奇数）、印の長さを 1 にそろえる事、近さを cos の実部にした事。乱数は置かない。
 """
@@ -28,10 +34,11 @@ PHI = 0.6180339887498949
 
 
 class PairSolve:
-    def __init__(self, attr_of, mode="広げる", dim=8192, amp="そのまま"):
+    def __init__(self, attr_of, mode="広げる", dim=8192, amp="そのまま", usual=None, rare=None):
         assert mode in ("広げる", "まばら") and amp in ("そのまま", "属性を 1", "位相だけ")
         self.attr_of, self.mode, self.dim, self.amp = attr_of, mode, int(dim), amp
         self.g = [int(self.dim * PHI * (s + 1)) % self.dim | 1 for s in range(3)]
+        self.usual, self.rare = usual, rare
         self._d = {}
         self.mem = [{}, {}, {}]                            # 席 → 語 → 覚えた印の和
 
@@ -46,6 +53,10 @@ class PairSolve:
             v = self._attr(w)
             x = None
             if v is not None and float(np.linalg.norm(v)) > 0:
+                if self.usual is not None and self.usual[s] is not None:
+                    v = (v / np.float32(np.linalg.norm(v)) - self.usual[s]).astype(np.complex64)
+                if self.rare is not None and self.rare[s] is not None:
+                    v = (v * self.rare[s]).astype(np.complex64)
                 idx = np.nonzero(v)[0]
                 put = np.zeros(self.dim, dtype=np.complex64)
                 np.add.at(put, (self.g[s] * (idx + 1)) % self.dim, 1.0 if self.amp == "属性を 1" else v[idx])
@@ -107,6 +118,36 @@ class PairSolve:
             return None
         return dict(属性の数=(int(np.count_nonzero(x)), int(np.count_nonzero(y))), 共通の属性=int(np.count_nonzero(x * y)),
                     残る長さ=float(np.linalg.norm((x / nx) * (y / ny))))
+
+
+def usual_of(attr_of, words_by_seat):
+    out = []
+    for ws in words_by_seat:
+        m, n = None, 0
+        for w in sorted(set(ws), key=str):
+            v = attr_of(w)
+            if v is None:
+                continue
+            v = np.asarray(v, dtype=np.complex64)
+            nv = float(np.linalg.norm(v))
+            if nv > 0:
+                m, n = (v / np.float32(nv) if m is None else m + v / np.float32(nv)), n + 1
+        out.append(None if m is None else (m / np.float32(n)).astype(np.complex64))
+    return out
+
+
+def rare_of(attr_of, words_by_seat):
+    out = []
+    for ws in words_by_seat:
+        m, n = None, 0
+        for w in sorted(set(ws), key=str):
+            v = attr_of(w)
+            if v is None or not np.any(v):
+                continue
+            has = (np.abs(np.asarray(v)) > 0).astype(np.float32)
+            m, n = (has if m is None else m + has), n + 1
+        out.append(None if m is None else (1 - m / np.float32(n)).astype(np.float32))
+    return out
 
 
 class Both:

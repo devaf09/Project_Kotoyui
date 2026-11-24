@@ -3,7 +3,8 @@
 介入 = 答えを出した後に、外から届く「合っている・違う（違うなら正しい語）」。届かなければ、本体と全く同じ動き。
 I48 の決まりを引き継ぐ: 介入は本体に混ぜず、別の板に持つ。外せば元に戻る。だめな答えは、暗い側へ弱く入れる。薄れるだけで、消さない。
 
-  TeachBoard(attr_of, dim=8192, dark=1/1000, half=1024)
+  TeachBoard(attr_of, dim=8192, dark=1/1000, half=1024, amp="位相だけ", usual=None, rare=None)
+    amp・usual・rare: 鍵の作り方（I49zw の PairSolve にそのまま渡す）。I49zy の直しは amp="そのまま" と、usual（いつもの属性を引く）か rare（めずらしさを掛ける）。
     鍵 = 見せた 2 語の組の印（I49zw の PairSolve、広げてから掛けて大きさをそろえた物）。値 = その席の語。
     teach(隠した席, 3 つ組, 出した答え): 正しい語を明るい側に足す。出した答えが違っていたら、その語を暗い側に dark の重さで足す。
     points(隠した席, 問いの 3 つ組, 候補) → 候補 → 点（明るい側との近さ − 暗い側との近さ）。板に何も無ければ空。
@@ -24,8 +25,8 @@ from i49zw_dense_pair import PairSolve
 
 
 class TeachBoard:
-    def __init__(self, attr_of, dim=8192, dark=1.0 / 1000, half=1024.0):
-        self.pair = PairSolve(attr_of, dim=dim, amp="位相だけ")
+    def __init__(self, attr_of, dim=8192, dark=1.0 / 1000, half=1024.0, amp="位相だけ", usual=None, rare=None):
+        self.pair = PairSolve(attr_of, dim=dim, amp=amp, usual=usual, rare=rare)
         self.dark_w = float(dark)
         self.keep = np.float32(0.5 ** (1.0 / half))
         self.bright = [{}, {}, {}]
