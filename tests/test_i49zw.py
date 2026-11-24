@@ -100,3 +100,15 @@ def test_run_amp_shapes():
     d = R.run_amp(lambda w: attr(w[0]), talks, ks=(0,), dim=1024)["元の順"]
     assert len(d) == 7 and len(d["直の比べ"]) == 4
     assert all(0 <= v["正しい物"] <= 1 for k, v in d.items() if k != "直の比べ")
+
+
+def test_run_level_shapes():
+    import i49zp_text_talks_run as ZP
+    import i49zw_dense_pair_run as R
+    lines = ["太郎がりんごを食べる", "花子がみかんをかじる", "太郎が金づちを振る", "花子がのこぎりを振る", "太郎がみかんを食べる", "花子がりんごを食べる"]
+    talks, _, _ = ZP.talks_of(lines)
+    get = lambda w: attr(w[0])
+    d = R.run_level(get, get, talks, ks=(0,), dim=1024)["元の順"]
+    assert sum(h["問い"] for h in d.values()) == 18
+    for h in d.values():
+        assert h["解く形と組"] - h["解く形"] == h["当たりに変わった"] - h["外れに変わった"]
