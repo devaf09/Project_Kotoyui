@@ -90,6 +90,34 @@ def band_report(base, talks):
     return out
 
 
+def band_filter(base, spec):
+    """品詞ごとに、使う帯を変えた attr_of を返す（向きの長さは変えず、使わない帯の所を 0 にする）。
+    spec: "VERB:-D,NOUN:-E" なら、動詞は D を抜き、名詞は E を抜く。"VERB:+C+B" なら、動詞は C と B だけ。書いていない品詞は全部の帯。
+    使う帯に属性が 1 つも無い語は None（属性を持たない語と同じ扱い）。"""
+    rule = {}
+    for part in [x for x in (spec or "").split(",") if x.strip()]:
+        pos, r = part.strip().split(":")
+        mask = np.ones(base.n_attr, dtype=np.float32) if r[0] == "-" else np.zeros(base.n_attr, dtype=np.float32)
+        for b in [x for x in r.replace("-", "+").split("+") if x]:
+            ix = [i for (bb, _), i in base.ix.items() if bb == b]
+            assert ix, "帯が無い: %s" % b
+            mask[ix] = 0.0 if r[0] == "-" else 1.0
+        rule[pos] = mask
+    cache = {}
+
+    def of(word):
+        if word not in cache:
+            v = base.of(word)
+            m = rule.get(word[1]) if isinstance(word, tuple) else None
+            if v is not None and m is not None:
+                v = (v * m).astype(np.complex64)
+                v = v if np.abs(v).sum() > 0 else None
+            cache[word] = v
+        return cache[word]
+
+    return of
+
+
 def main():
     import i49m_attr_base as AB
     import i49zp_text_talks_run as ZP

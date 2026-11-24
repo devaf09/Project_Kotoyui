@@ -285,6 +285,7 @@ def main():
     ap.add_argument("--when", default="いつも", choices=("いつも", "外れた時"))
     ap.add_argument("--key", default="今まで")
     ap.add_argument("--ks", default="1,2")
+    ap.add_argument("--bands", default="")  # 品詞ごとに使う帯を変える（I49zzf。例 "VERB:-D,NOUN:-E"）。空なら全部の帯
     a = ap.parse_args()
     t0 = time.time()
     talks = []
@@ -298,15 +299,19 @@ def main():
 
     full = AB.AttrBase(json.load(open(a.content, encoding="utf-8")))
     res = dict(話=len(talks), 三つ組=sum(len(t[0]) for t in talks), 暗い側の強さ=a.dark)
+    attr_of = full.of
+    if a.bands:
+        import i49zzf_attr_bands as ZF
+        attr_of, res["使う帯"] = ZF.band_filter(full, a.bands), a.bands
     rates = tuple(float(x) for x in a.rates.split(","))
     if a.unheard and a.ceiling:
-        res.update(run_ceiling(wave_of, full.of, talks, ks=tuple(int(x) for x in a.ks.split(","))))
+        res.update(run_ceiling(wave_of, attr_of, talks, ks=tuple(int(x) for x in a.ks.split(","))))
     elif a.unheard:
         res["教えが届く時"] = a.when
         res["外付けの形"] = "本体と同じ形" if a.ext else "介入の板（鍵の形: %s）" % a.key
-        res.update(run_unheard(wave_of, full.of, talks, rates=rates, ks=tuple(int(x) for x in a.ks.split(",")), dark=a.dark, key=a.key, ext=a.ext, direct=a.direct, when=a.when, reflect=a.reflect))
+        res.update(run_unheard(wave_of, attr_of, talks, rates=rates, ks=tuple(int(x) for x in a.ks.split(",")), dark=a.dark, key=a.key, ext=a.ext, direct=a.direct, when=a.when, reflect=a.reflect))
     else:
-        res.update(run(wave_of, full.of, talks, rates=rates, dark=a.dark))
+        res.update(run(wave_of, attr_of, talks, rates=rates, dark=a.dark))
     res["秒"] = round(time.time() - t0)
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(json.dumps(res, ensure_ascii=False))

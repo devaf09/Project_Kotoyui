@@ -39,3 +39,16 @@ def test_band_report_finds_the_band_that_matches_usage():
     assert b["色"]["その帯を抜いた見分け"] >= d["全部の帯の見分け"]    # 合わない帯を抜くと、見分けは下がらない
     assert abs(sum(v["近さの取り分"] for v in b.values()) - d["cosの平均"]) < 1e-3
     assert abs(sum(v["力の取り分"] for v in b.values()) - 1.0) < 1e-3
+
+
+def test_band_filter_by_pos():
+    board = [dict(name="走る", pos="動詞", attrs={"C": {"動く": 1.0}, "D": {"事": .5}}),
+             dict(name="石", pos="名詞", attrs={"D": {"物": 1.0}})]
+    base = AB.AttrBase(board)
+    of = F.band_filter(base, "VERB:-D")
+    v = of(("走る", "VERB"))
+    assert v.shape == base.of(("走る", "VERB")).shape and np.count_nonzero(v) == 1      # 長さは同じで、D の所だけ 0
+    assert np.array_equal(of(("石", "NOUN")), base.of(("石", "NOUN")))                  # 書いていない品詞はそのまま
+    assert F.band_filter(base, "NOUN:+C")(("石", "NOUN")) is None                       # 使う帯に属性が無ければ None
+    assert np.count_nonzero(F.band_filter(base, "VERB:+C")(("走る", "VERB"))) == 1
+    assert F.band_filter(base, "")(("走る", "VERB")) is base.of(("走る", "VERB"))
