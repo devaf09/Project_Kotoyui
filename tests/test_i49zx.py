@@ -96,7 +96,7 @@ def test_teach_try_before_and_after(tmp_path):
     teach = tmp_path / "teach.tsv"
     teach.write_text("1\t食べる\n", encoding="utf-8")
     qs, tc = T.read_ask(str(ask)), T.read_teach(str(teach))
-    assert len(qs) == 3 and qs[0][1] == 2 and tc == {0: "食べる"}
+    assert len(qs) == 3 and qs[0][1] == 2 and tc == {0: ["食べる"]}
     get = lambda w: attr(w[0])
     body = Fixed(("振る", "VERB"))
     rows = T.try_run(body, X.TeachBoard(get, dim=1024), qs, {})
@@ -106,6 +106,11 @@ def test_teach_try_before_and_after(tmp_path):
     assert rows[1]["板の答え"] == "食べる" and not rows[1]["教えた組そのもの"]      # 似た問いへ広がる
     assert all(r["外すと一回目と同じ"] for r in rows)                                # 板を外せば元の答え
     assert "教える前の答え" in T.to_md(rows, True) and "上位 3" in T.to_md(rows, False)
+    teach.write_text("3\t振る\n3\tかじる\n", encoding="utf-8")          # 出した答えは合っていて、別の語も合っている
+    b2 = X.TeachBoard(get, dim=1024)
+    rows = T.try_run(body, b2, qs, T.read_teach(str(teach)))
+    assert rows[2]["教え"] == "合っている。かじる も合っている" and not b2.dark[2]      # 合っていた答えは暗い側に入れない
+    assert set(b2.bright[2]) == {("振る", "VERB"), ("かじる", "VERB")}
     ask.write_text("候補\t花子\tみかん、金づち\t食べる、かじる\n教える\t太郎\tりんご\t？\n", encoding="utf-8")
     ex = T.read_extra(str(ask))
     assert ("かじる", "VERB") in ex[2] and ("金づち", "NOUN") in ex[1] and len(T.read_ask(str(ask))) == 1

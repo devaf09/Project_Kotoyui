@@ -8,6 +8,7 @@
      本体の答えと板の答えの両方を出す。板を外した時の答え（= 本体の答え）が 1 回目と同じ事も確かめて出す。
 問いのファイル（UTF-8、タブ区切り、1 行 1 問）:  種類 <TAB> が <TAB> を <TAB> どうした    隠す席は「？」。種類は自由な名札（教える・似た問い・関係ない、など）
 教えのファイル（UTF-8、タブ区切り）:            問いの番号（1 から） <TAB> 正しい語      出した答えで合っていれば、その語をそのまま書く
+                                              同じ番号を何行も書ける（「この語も合っている」）。出した答えが、その番号の正しい語のどれかなら、暗い側には入れない
 候補: 問いのファイルと教えのファイルに出た語のうち、同じ席の語の全部。問いのファイルに「候補 <TAB> 語、語 <TAB> 語、語 <TAB> 語、語」の行を
       置くと、その語も席ごとの候補に足す（区切りは「、」）。
 引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --ask 問い.tsv [--teach 教え.tsv] --out 結果.md [--dark 0.001]
@@ -57,7 +58,9 @@ def read_teach(path):
     for line in open(path, encoding="utf-8").read().splitlines():
         p = [x.strip() for x in line.split("\t")]
         if len(p) == 2 and p[0].isdigit():
-            out[int(p[0]) - 1] = p[1]
+            out.setdefault(int(p[0]) - 1, [])
+            if p[1] not in out[int(p[0]) - 1]:
+                out[int(p[0]) - 1].append(p[1])
     return out
 
 
@@ -67,8 +70,8 @@ def cands_of(qs, teach, extra=None):
         for j, w in enumerate(q):
             if w is not None:
                 c[j].add(w)
-    for i, w in teach.items():
-        c[qs[i][1]].add((w, POS[qs[i][1]]))
+    for i, ws in teach.items():
+        c[qs[i][1]] |= {(w, POS[qs[i][1]]) for w in ws}
     return [sorted(x, key=str) for x in c]
 
 
@@ -90,12 +93,16 @@ def try_run(body, board, qs, teach, extra=None):
         rows.append(dict(種類=kind, 問い=show(q, si), 一回目=None if o["答え"] is None else o["答え"][0], 一回目の段=o["段"], 一回目の上位=top3(o["点"])))
     if not teach:
         return rows
-    for i, w in sorted(teach.items()):
+    for i, ws in sorted(teach.items()):
         kind, si, q = qs[i]
-        tri = tuple((w, POS[si]) if j == si else q[j] for j in range(3))
         ans = rows[i]["一回目"]
-        ok = board.teach(si, tri, None if ans is None else (ans, POS[si]))
-        rows[i]["教え"] = ("合っている" if ans == w else "違う。正しくは " + w) + ("" if ok else "（属性の無い語が有り、板に入らなかった）")
+        ok = True
+        for w in ws:
+            tri = tuple((w, POS[si]) if j == si else q[j] for j in range(3))
+            ok = board.teach(si, tri, None if ans is None or ans in ws else (ans, POS[si])) and ok
+        also = [w for w in ws if w != ans]
+        rows[i]["教え"] = (("合っている" + ("。" + "、".join(also) + " も合っている" if also else "")) if ans in ws else "違う。正しくは " + "、".join(ws)) \
+            + ("" if ok else "（属性の無い語が有り、板に入らなかった）")
     for row, (kind, si, q) in zip(rows, qs):
         cs = [c for c in cands[si] if c not in {w for w in q if w is not None}]
         o = body.ask(si, q, cs)
