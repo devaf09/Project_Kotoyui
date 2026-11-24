@@ -14,7 +14,11 @@ I49t で、解く形は正解を上位に入れているが、点の並んだ候
       "出た語"          点の上位 top 個の中で、この話で一番最近に出た語。どれも出ていなければ一位のまま（比べ役）
     minus_self: 候補自身がこの話で出た分を、流れの波から引いてから比べる（「もう出た語を選ぶだけ」になっていないかを見る）
     ask / learn / tick は rel と同じ形。picked は選び直しで答えが変わった数。
-手で置く物: 上位の数 top、九割、流れを足す重さ 1（薄めない）、話ごとに空に戻す事。
+  I49z（仮の板、持ち主の案・未確定）で足した物:
+    half: 3 つ組を half 個聞くと半分に薄れる（古い属性は消える）。None なら薄れない
+    by_seat: 席ごとに別の板を持つ（その席に前に来た語の属性だけを足す）。問う時は、隠した席の板と比べる
+    carry: 話が終わっても板を空に戻さない（薄れに任せる）
+手で置く物: 上位の数 top、九割、流れを足す重さ 1、薄れる速さ half、話ごとに空に戻すかどうか。
 """
 from __future__ import annotations
 
@@ -22,19 +26,23 @@ import numpy as np
 
 
 class FlowPick:
-    def __init__(self, rel, base_of, pick="上位", top=3, minus_self=False):
+    def __init__(self, rel, base_of, pick="上位", top=3, minus_self=False, half=None, by_seat=False, carry=False):
+        assert not (minus_self and (half is not None or by_seat or carry))
         self.rel, self.base_of, self.pick, self.top, self.minus_self = rel, base_of, pick, top, minus_self
+        self.keep = None if half is None else float(0.5 ** (1.0 / half))
+        self.by_seat, self.carry = by_seat, carry
         self.picked = 0
         self._reset()
 
     def _reset(self):
         self.ctx, self.said, self.t = None, {}, 0
+        self.seat_ctx = [None, None, None]
 
-    def near(self, c):
+    def near(self, c, si=None):
         b = self.base_of(c)
-        if b is None or self.ctx is None:
+        x = self.seat_ctx[si] if (self.by_seat and si is not None) else self.ctx
+        if b is None or x is None:
             return None
-        x = self.ctx
         if self.minus_self and c in self.said:
             x = x - self.said[c][0] * b
         nx, nb = float(np.linalg.norm(x)), float(np.linalg.norm(b))
@@ -58,7 +66,7 @@ class FlowPick:
         if self.pick == "出た語":
             best = max(pool, key=lambda c: (self.said.get(c, (0, -1))[1], -order.index(c)))
         else:
-            nr = {c: self.near(c) for c in pool}
+            nr = {c: self.near(c, si) for c in pool}
             if all(v is None for v in nr.values()):
                 return o
             lo = min(v for v in nr.values() if v is not None) - 1.0
@@ -76,13 +84,19 @@ class FlowPick:
     def learn(self, tri):
         self.rel.learn(tri)
         self.t += 1
-        for w in tri:
+        if self.keep is not None:
+            if self.ctx is not None:
+                self.ctx = self.ctx * self.keep
+            self.seat_ctx = [None if x is None else x * self.keep for x in self.seat_ctx]
+        for sj, w in enumerate(tri):
             b = self.base_of(w)
             if b is not None:
                 self.ctx = b.copy() if self.ctx is None else self.ctx + b
+                self.seat_ctx[sj] = b.copy() if self.seat_ctx[sj] is None else self.seat_ctx[sj] + b
             n = self.said.get(w, (0, 0))[0]
             self.said[w] = (n + 1, self.t)
 
     def tick(self):
         self.rel.tick()
-        self._reset()
+        if not self.carry:
+            self._reset()
