@@ -93,3 +93,19 @@ def test_stop_by_own_output_brings_denied_point_to_zero():
             assert abs(out[stop][far]) < 1e-3                          # 教えた問いの点が、ちょうど 0 になる
             assert not b.deny(2, far, "読む")                          # もう点が出ていないので、重ねて引かない
     assert out["出した分"][same] > out[1.0][same] and out["出した分"][tegami] > out[1.0][tegami]      # 引き過ぎない分、巻き込みが小さい
+
+
+def test_teach_try_denies_after_teaching_so_own_output_is_seen():
+    import i49zx_teach_try as T
+    get = lambda w: attr(w[0])
+    seats = [[(w, "NOUN") for w in ZY.SEATS[0]], [(w, "NOUN") for w in ZY.SEATS[1]], []]
+    qs = [("遠い問い", 2, (("学生", "NOUN"), ("歌", "NOUN"), None)), ("教える", 2, (("学生", "NOUN"), ("本", "NOUN"), None))]
+
+    class Body:
+        def ask(self, si, tri, cands):
+            return dict(段="本体", 点={("歌う", "VERB"): 1.0}, 答え=("歌う", "VERB"))
+
+    b = T.board_of(get, "めずらしさ", seats, stop="出した分")
+    rows = T.try_run(Body(), b, qs, {0: ["×読む"], 1: ["読む"]})        # 「違う」の行が先に書いてあっても、教えの後に入る
+    assert rows[0]["教え"] == "板の 読む は違う" and rows[0]["板の答え"] is None and ("読む", "VERB") in b.stop[2]
+    assert rows[1]["板の答え"] == "読む"

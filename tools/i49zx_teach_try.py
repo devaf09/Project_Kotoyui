@@ -102,11 +102,6 @@ def try_run(body, board, qs, teach, extra=None):
     signs = []
     deny = {i: [w[1:] for w in ws if w[:1] in DENY] for i, ws in teach.items()}
     teach = {i: [w for w in ws if w[:1] not in DENY] for i, ws in teach.items()}
-    for i, ws in sorted(deny.items()):
-        for w in ws:
-            board.deny(qs[i][1], qs[i][2], (w, POS[qs[i][1]]))
-        if ws:
-            rows[i]["教え"] = "板の " + "、".join(ws) + " は違う"
     for i, ws in sorted(teach.items()):
         if not ws:
             continue
@@ -121,6 +116,11 @@ def try_run(body, board, qs, teach, extra=None):
         also = [w for w in ws if w != ans]
         rows[i]["教え"] = (("合っている" + ("。" + "、".join(also) + " も合っている" if also else "")) if ans in ws else "違う。正しくは " + "、".join(ws)) \
             + ("" if ok else "（属性の無い語が有り、板に入らなかった）")
+    for i, ws in sorted(deny.items()):                     # 「違う」は、合っている教えを全部入れた後に入れる（板が出した分を見るため）
+        done = [board.deny(qs[i][1], qs[i][2], (w, POS[qs[i][1]])) for w in ws]
+        if ws:
+            rows[i]["教え"] = (rows[i]["教え"] + "。" if rows[i].get("教え") else "") + "板の " + "、".join(ws) + " は違う" \
+                + ("" if all(done) else "（板はその語を出していなかったので、何も入れていない）")
     for row, (kind, si, q) in zip(rows, qs):
         cs = [c for c in cands[si] if c not in {w for w in q if w is not None}]
         o = body.ask(si, q, cs)
