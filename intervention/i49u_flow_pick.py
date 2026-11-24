@@ -12,6 +12,8 @@ I49t で、解く形は正解を上位に入れているが、点の並んだ候
       "九割以内"        一位の 9 割以上の点の候補の中で、流れの波に一番近い語
       "順位を足す"      全候補で、点の順位と流れへの近さの順位を足して、一番小さい語
       "出た語"          点の上位 top 個の中で、この話で一番最近に出た語。どれも出ていなければ一位のまま（比べ役）
+      "出た語・九割以内"  上と同じ事を、一位の 9 割以上の点の候補の中だけでする
+      "出た語→板"        上位 top 個の中にこの話で出た語が有ればそれ。無ければ、一位の 9 割以上の候補の中で板に一番近い語
     minus_self: 候補自身がこの話で出た分を、流れの波から引いてから比べる（「もう出た語を選ぶだけ」になっていないかを見る）
     ask / learn / tick は rel と同じ形。picked は選び直しで答えが変わった数。
   I49z（仮の板、持ち主の案・未確定）で足した物:
@@ -94,15 +96,18 @@ class FlowPick:
             return o
         cands = list(cands)
         order = sorted(pts, key=lambda c: (-pts[c], cands.index(c)))
-        if self.pick == "九割以内":
-            pool = [c for c in order if pts[c] >= 0.9 * pts[order[0]]]
+        near90 = [c for c in order if pts[c] >= 0.9 * pts[order[0]]]
+        if self.pick in ("九割以内", "出た語・九割以内"):
+            pool = near90
         elif self.pick == "順位を足す":
             pool = order
         else:
             pool = order[:self.top]
-        if self.pick == "出た語":
+        if self.pick in ("出た語", "出た語・九割以内") or (self.pick == "出た語→板" and any(c in self.said for c in pool)):
             best = max(pool, key=lambda c: (self.said.get(c, (0, -1))[1], -order.index(c)))
         else:
+            if self.pick == "出た語→板":
+                pool = near90
             nr = {c: self.near(c, si) for c in pool}
             if all(v is None for v in nr.values()):
                 return o
@@ -143,3 +148,5 @@ class FlowPick:
         self.rel.tick()
         if not self.carry:
             self._reset()
+        else:
+            self.said = {}                                # この話で出た語は、話ごとに空に戻す
