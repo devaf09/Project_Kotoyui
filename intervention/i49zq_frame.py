@@ -11,6 +11,10 @@
       m/n            m 個は同じ語、残りは見ない。m = n-1, …, 1
       借りる         全部、似た語の数を近さを掛けて足す
     I49e と違う所: 「述語側を先に見る」という順を置かない。同じ語の数だけで段を決める。
+  FrameSeatTable(vec_of, half=1024)   I49zs: 「どの席が同じ語だったか」で段を分ける表。I49zr で FrameTable が今までの表に届かなかった所の直し。
+    段 = （同じ語だった席の組, 残りを似た語で借りるか見ないか）。同じ語の数が多い段が先（ここは FrameTable と同じ）。
+    同じ数の段どうしの順は手で置かない。答え合わせ（learn）のたびに、段ごとの 1 位が当たったかを数え、それまでに多く当たってきた段を先に使う。
+    数えは問う前の分だけ。同じなら、借りる方、席の並びの早い方。tally は (隠す席, 段) → [当たり, 問い]。
   FrameVec(base_of) / FrameSolve(fv, online=True)   波で解く形（I49k の SeatVec・Unbind の、席の数を決めない形）
     語の波 = 一緒に座った語の元の向きを、（自分の席, 相手の席）ごとに決まった位相の回し方で回して足した物。
     問われたら、見せた語を隠した席から見た回し方で回して足し、それに波が近い候補を答える。
@@ -122,6 +126,89 @@ class FrameTable:
                 out = dict(段="借りる", 点=s, 答え=max(cands, key=lambda c: (s.get(c, 0.0), -cands.index(c))))
         self.rec.append((self.now, si, out["段"], out["答え"]))
         return out
+
+
+class FrameSeatTable(FrameTable):
+    def __init__(self, vec_of, half=1024.0):
+        super().__init__(vec_of, half)
+        self.tally, self._wait = {}, []
+
+    def _rate(self, si, key):
+        h = self.tally.get((si, key))
+        return h[0] / h[1] if h and h[1] else 0.0
+
+    def ask(self, si, frame, cands):
+        cands = list(cands)
+        shown = [(j, w) for j, w in enumerate(frame) if j != si and w is not None]
+        n = len(shown)
+        ok = set(cands)
+        lv = {}                                           # (同じ語だった席の組, 借りるか) → 候補 → 点
+        pool = set()
+        for key in shown:
+            pool |= self.by.get(key, set())
+        for t in pool:
+            c = t[si]
+            if c not in ok:
+                continue
+            same = tuple(j for j, w in shown if t[j] == w)
+            cnt = self._count(t)
+            g = 1.0
+            for j, w in shown:
+                if t[j] != w:
+                    g *= 0.0 if t[j] is None else self.near(w, t[j])
+                    if g == 0.0:
+                        break
+            for sub in _subsets(same):
+                s = lv.setdefault((sub, False), {})
+                s[c] = s.get(c, 0.0) + cnt
+                if len(sub) < n and g > 0:
+                    s = lv.setdefault((sub, True), {})
+                    s[c] = s.get(c, 0.0) + g * cnt
+
+        def top(s):
+            return max(cands, key=lambda c: (s.get(c, 0.0), -cands.index(c)))
+        live = [(k, s) for k, s in lv.items() if any(v > 0 for v in s.values())]
+        live.sort(key=lambda ks: (-len(ks[0][0]), -self._rate(si, ks[0]), not ks[0][1], ks[0][0]))
+        self._wait.append((si, [(k, top(s)) for k, s in live]))
+        out = dict(段="答えられない", 点={}, 答え=None)
+        if live:
+            k, s = live[0]
+            name = "＋".join(SEATS[j] for j in k[0]) + ("・借りる" if k[1] else "")
+            out = dict(段="%s｜%s" % (SEATS[si], name), 点=s, 答え=top(s))
+        elif n:
+            s = {}
+            for t in self.fr:
+                c = t[si]
+                if c not in ok:
+                    continue
+                g = 1.0
+                for j, w in shown:
+                    g *= 0.0 if t[j] is None else self.near(w, t[j])
+                    if g == 0.0:
+                        break
+                if g > 0:
+                    s[c] = s.get(c, 0.0) + g * self._count(t)
+            if any(v > 0 for v in s.values()):
+                out = dict(段="借りる", 点=s, 答え=top(s))
+        self.rec.append((self.now, si, out["段"], out["答え"]))
+        return out
+
+    def learn(self, frame):
+        for si, tops in self._wait:
+            for k, a in tops:
+                h = self.tally.setdefault((si, k), [0, 0])
+                h[0] += a == frame[si]
+                h[1] += 1
+        self._wait = []
+        super().learn(frame)
+
+
+def _subsets(same):
+    """空でない部分の組を全部（席は多くて 3〜4 個なので、小さい）。"""
+    out = []
+    for m in range(1, 1 << len(same)):
+        out.append(tuple(same[i] for i in range(len(same)) if m >> i & 1))
+    return out
 
 
 class FrameVec:

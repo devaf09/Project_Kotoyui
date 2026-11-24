@@ -80,3 +80,37 @@ def test_mix_takes_frames():
                 m.ask(si, f, sorted(NAMES))
         m.learn(f)
     assert m.ask(0, f, sorted(NAMES))["答え"] == "友達" and sum(h[2] for h in m.tally.values()) == 6
+
+
+def test_seat_table_learns_which_seat_to_trust():
+    """I49zs: 同じ数の段どうしでは、それまでに多く当たってきた席の段が先に使われる。"""
+    import i49zq_frame as Q
+    t = Q.FrameSeatTable(V.get)
+    si = Q.SEATS.index("が")
+    # 「どうした」が同じなら「が」も同じ、「を」が同じでも「が」は決まらない、という材料
+    data = [("友達", "魚", "釣る"), ("先生", "魚", "泳ぐ"), ("友達", "海", "釣る"), ("先生", "海", "泳ぐ"),
+            ("友達", "ゲーム", "釣る"), ("先生", "ゲーム", "泳ぐ"), ("友達", "学校", "釣る"), ("先生", "学校", "泳ぐ")]
+    for s, o, v in data:
+        f = F(が=s, を=o, どうした=v)
+        t.ask(si, F(を=o, どうした=v), ["友達", "先生"])
+        t.learn(f)
+    vi, oi = Q.SEATS.index("どうした"), Q.SEATS.index("を")
+    assert t._rate(si, ((vi,), False)) > t._rate(si, ((oi,), False))
+    o = t.ask(si, F(を="勉強", どうした="泳ぐ"), ["友達", "先生"])
+    assert o["答え"] == "先生" and "どうした" in o["段"]
+    o = t.ask(si, F(を="魚", どうした="釣る"), ["友達", "先生"])
+    assert o["答え"] == "友達" and o["段"] == "が｜を＋どうした"            # 全部同じ枠が有れば、それが先
+    assert Q.FrameSeatTable(V.get).ask(si, F(を="魚"), ["友達"])["段"] == "答えられない"
+
+
+def test_seat_table_fades_and_works_in_mix():
+    import i49zq_frame as Q
+    from i49zb_mix import Mix
+    m = Mix(Q.FrameSeatTable(V.get), Q.FrameSolve(Q.FrameVec(V.get)), upper=None)
+    si = Q.SEATS.index("を")
+    for _ in range(3):
+        m.ask(si, F(が="友達", どうした="釣る"), ["魚", "海"])
+        m.learn(F(が="友達", を="魚", どうした="釣る"))
+        m.tick()
+    assert m.ask(si, F(が="友達", どうした="釣る"), ["魚", "海"])["答え"] == "魚"
+    assert m.table.tally and all(h[0] <= h[1] for h in m.table.tally.values())

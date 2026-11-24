@@ -11,6 +11,7 @@
   全部の席  切れた行を全部。隠す席ごと・見せた席の数ごとの当たりも出す。
   席を見せない  全部の席と同じ行を覚えるが、問う時に が・を・どうした 以外の席を見せない（同じ問いで、足した席が効いたかを見る）。
 形: 表（FrameTable） ／ 解く形・属性（FrameSolve） ／ 数えて選ぶ（Mix、手で置く段は無し）。
+    I49zs: 表・席ごと（FrameSeatTable）と、それを使う 数えて選ぶ・席ごと も並べる。
 話の並べ方: 元の順と、乱数を使わない並べ替え 3 通り。
 引数: --text 材料 --wave 語の波 --content 内容語の板 --out 記録.json [--frames_out 枠に切った物.txt]
 手で置く物: 席の並び、助詞と見る決まり、並べ替えの k、後ろ 2 割。
@@ -162,7 +163,9 @@ def forms(wave_of, attr_of):
     import i49zq_frame as Q
     from i49zb_mix import Mix
     return (("表", lambda: Q.FrameTable(wave_of)), ("解く形", lambda: Q.FrameSolve(Q.FrameVec(attr_of))),
-            ("数えて選ぶ", lambda: Mix(Q.FrameTable(wave_of), Q.FrameSolve(Q.FrameVec(attr_of)), upper=None)))
+            ("数えて選ぶ", lambda: Mix(Q.FrameTable(wave_of), Q.FrameSolve(Q.FrameVec(attr_of)), upper=None)),
+            ("表・席ごと", lambda: Q.FrameSeatTable(wave_of)),
+            ("数えて選ぶ・席ごと", lambda: Mix(Q.FrameSeatTable(wave_of), Q.FrameSolve(Q.FrameVec(attr_of)), upper=None)))
 
 
 class Tri:
@@ -227,6 +230,10 @@ def run(wave_of, attr_of, talks, ks=(0, 1, 2, 3)):
         d["直の比べ"] = {"三つの席｜今までの表 → 表": duel(keep[("三", "今までの表")], keep[("三", "表")]),
                       "三つの席｜今までの解く形 → 解く形": duel(keep[("三", "今までの解く形")], keep[("三", "解く形")]),
                       "三つの席｜今までの数えて選ぶ → 数えて選ぶ": duel(keep[("三", "今までの数えて選ぶ")], keep[("三", "数えて選ぶ")]),
+                      "三つの席｜今までの表 → 表・席ごと": duel(keep[("三", "今までの表")], keep[("三", "表・席ごと")]),
+                      "三つの席｜今までの数えて選ぶ → 数えて選ぶ・席ごと": duel(keep[("三", "今までの数えて選ぶ")], keep[("三", "数えて選ぶ・席ごと")]),
+                      "全部の席｜表 → 表・席ごと": duel(keep[("全", "表")], keep[("全", "表・席ごと")]),
+                      "全部の席｜数えて選ぶ → 数えて選ぶ・席ごと": duel(keep[("全", "数えて選ぶ")], keep[("全", "数えて選ぶ・席ごと")]),
                       "全部の席｜表 → 数えて選ぶ": duel(keep[("全", "表")], keep[("全", "数えて選ぶ")]),
                       "全部の席｜表 → 解く形": duel(keep[("全", "表")], keep[("全", "解く形")])}
         out[name_k] = d
