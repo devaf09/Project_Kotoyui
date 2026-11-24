@@ -18,7 +18,14 @@ I49t で、解く形は正解を上位に入れているが、点の並んだ候
     half: 3 つ組を half 個聞くと半分に薄れる（古い属性は消える）。None なら薄れない
     by_seat: 席ごとに別の板を持つ（その席に前に来た語の属性だけを足す）。問う時は、隠した席の板と比べる
     carry: 話が終わっても板を空に戻さない（薄れに任せる）
-手で置く物: 上位の数 top、九割、流れを足す重さ 1、薄れる速さ half、話ごとに空に戻すかどうか。
+  I49za（行の折り畳みの決まりを板に入れる、持ち主の案・未確定）で足した物:
+    usual: 板の属性を「ふだん」（今までに聞いた全部の語の属性の平均。席ごとの板なら、その席の平均）と比べる
+      None              比べない
+      "明るい分だけ"     ふだんより明るい分だけを残す（板の平均 − ふだん の、正の所）
+      "残す・ほかは半分"  ふだんより明るい属性はそのまま、ほかは半分に薄める（記憶板 I40b の FADE と同じ形）
+      "引く"            板からも候補からも、ふだんを引いてから比べる
+    hear_usual(tri): ふだんだけに足す（先に聞かせた材料の分）
+手で置く物: 上位の数 top、九割、流れを足す重さ 1、薄れる速さ half、話ごとに空に戻すかどうか、「ほかは半分」の半分。
 """
 from __future__ import annotations
 
@@ -26,8 +33,11 @@ import numpy as np
 
 
 class FlowPick:
-    def __init__(self, rel, base_of, pick="上位", top=3, minus_self=False, half=None, by_seat=False, carry=False):
-        assert not (minus_self and (half is not None or by_seat or carry))
+    def __init__(self, rel, base_of, pick="上位", top=3, minus_self=False, half=None, by_seat=False, carry=False, usual=None):
+        assert not (minus_self and (half is not None or by_seat or carry or usual))
+        assert usual in (None, "明るい分だけ", "残す・ほかは半分", "引く")
+        self.usual = usual
+        self.u_sum, self.u_n = [None, None, None, None], [0, 0, 0, 0]      # 席 3 つ + 全部
         self.rel, self.base_of, self.pick, self.top, self.minus_self = rel, base_of, pick, top, minus_self
         self.keep = None if half is None else float(0.5 ** (1.0 / half))
         self.by_seat, self.carry = by_seat, carry
@@ -37,12 +47,39 @@ class FlowPick:
     def _reset(self):
         self.ctx, self.said, self.t = None, {}, 0
         self.seat_ctx = [None, None, None]
+        self.w, self.seat_w = 0.0, [0.0, 0.0, 0.0]
+
+    def hear_usual(self, tri):
+        for sj, w in enumerate(tri):
+            b = self.base_of(w)
+            if b is not None:
+                for k in (sj, 3):
+                    self.u_sum[k] = b.copy() if self.u_sum[k] is None else self.u_sum[k] + b
+                    self.u_n[k] += 1
 
     def near(self, c, si=None):
         b = self.base_of(c)
-        x = self.seat_ctx[si] if (self.by_seat and si is not None) else self.ctx
+        seat = self.by_seat and si is not None
+        x = self.seat_ctx[si] if seat else self.ctx
         if b is None or x is None:
             return None
+        if self.usual:
+            k = si if seat else 3
+            wsum = self.seat_w[si] if seat else self.w
+            if self.u_sum[k] is None or wsum <= 0:
+                return None
+            u = np.real(self.u_sum[k]) / self.u_n[k]
+            x = np.real(x) / wsum
+            if self.usual == "明るい分だけ":
+                x = np.maximum(0.0, x - u)
+            elif self.usual == "残す・ほかは半分":
+                x = np.where(x > u, x, 0.5 * x)
+            else:
+                x, b = x - u, np.real(b) - u
+            nx, nb = float(np.linalg.norm(x)), float(np.linalg.norm(b))
+            if nx <= 1e-9 or nb <= 1e-9:
+                return None
+            return float(np.real(np.vdot(x, b))) / (nx * nb)
         if self.minus_self and c in self.said:
             x = x - self.said[c][0] * b
         nx, nb = float(np.linalg.norm(x)), float(np.linalg.norm(b))
@@ -88,13 +125,19 @@ class FlowPick:
             if self.ctx is not None:
                 self.ctx = self.ctx * self.keep
             self.seat_ctx = [None if x is None else x * self.keep for x in self.seat_ctx]
+            self.w *= self.keep
+            self.seat_w = [v * self.keep for v in self.seat_w]
         for sj, w in enumerate(tri):
             b = self.base_of(w)
             if b is not None:
                 self.ctx = b.copy() if self.ctx is None else self.ctx + b
                 self.seat_ctx[sj] = b.copy() if self.seat_ctx[sj] is None else self.seat_ctx[sj] + b
+                self.w += 1.0
+                self.seat_w[sj] += 1.0
             n = self.said.get(w, (0, 0))[0]
             self.said[w] = (n + 1, self.t)
+        if self.usual:
+            self.hear_usual(tri)
 
     def tick(self):
         self.rel.tick()
