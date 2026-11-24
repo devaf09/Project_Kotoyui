@@ -163,3 +163,21 @@ def test_unheard_run_board_carries_what_body_never_heard():
     assert s["教えた数"] > 0 and s["板が答えを持った問い"] > 0
     assert s["板が答えを持てばいつも板（比べ役）"] > base["本体"]                    # 本体が聞いていない事を、板が運ぶ
     assert s["板を付けた形"] >= base["本体"]
+
+
+def test_ceiling_counts_pair_memory_limit():
+    import i49zp_text_talks_run as ZP
+    import i49zx_teach_board_run as R
+    from test_i49zw import attr as small
+    lines = ["太郎が金づちを振る", "花子が金づちを振る", "",
+             "花子が金づちを振る", "太郎が金づちを振る", "花子が金づちを振る", "",
+             "太郎がりんごを食べる", "花子がみかんをかじる", "太郎がみかんを食べる", "",
+             "花子がりんごをかじる", "太郎がりんごを食べる", "花子がみかんをかじる", "太郎がみかんを食べる"]
+    talks, _, _ = ZP.talks_of(lines)
+    get = lambda w: small(w[0])
+    d = R.run_ceiling(get, get, talks, ks=(0,))["元の順"]
+    a, b, c = d["同じ組が後半でもう出た問い"], d["同じ組がまだ出ていない問い"], d["全部"]
+    assert a["問い"] + b["問い"] == c["問い"] and a["問い"] > 0
+    assert b["正解がその組で前に出た語のどれか"] == 0 and b["一番多く出た語で答えた時の当たり"] == 0
+    assert a["一番多く出た語で答えた時の当たり"] <= a["正解がその組で前に出た語のどれか"] <= 1
+    assert a["その組で前に出た語の種類の平均"] >= 1

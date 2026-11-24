@@ -12,6 +12,8 @@
   話を並べ替えて前半と後半に分け、本体には前半だけを聞かせる（問わない）。後半は問うだけで、本体には聞かせない。
   後半の問いのうち決めた割合でだけ「正しい語」が届き、介入の板に入る。並べる物:
     本体だけ（後半を聞かない） ／ 介入の板を付けた形（割合ごと） ／ 板が答えを持てばいつも板（比べ役） ／ 本体が後半も聞く・板なし（比べ役。同じ事を本体が全部聞けた時）
+  --unheard と --ceiling を付けると、板を使わずに「2 語の組で覚える」事の上限を数える（I49zzc）。後半の問いを、同じ 2 語の組が後半でもう出たか
+  どうかで分け、本体（聞かない・聞く）の当たり、正解がその組で前に出た語のどれかである割合（上限）、その組で一番多く出た語で答えた時の当たりを出す。
   鍵の形は --key（今まで・引く・めずらしさ。tools/i49zx_teach_try.py と同じ）。
 引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --out 記録.json [--rates 0.1,0.3,1.0] [--dark 0.001] [--unheard] [--key 今まで] [--ks 1,2]
 手で置く物: 介入の割合、暗い側の強さ、板の薄れる速さ・本数（部品の既定）、並べ替えの k（0 と 1）。
@@ -139,6 +141,52 @@ def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=
     return out
 
 
+def run_ceiling(wave_of, attr_of, talks, ks=(1, 2)):
+    out = {}
+    for k in ks:
+        plain_t = [(t[0], t[1]) for t in talks]
+        seq = [plain_t[i] for i in ZP.order(len(plain_t), k)]
+        first, second = seq[:len(seq) // 2], seq[len(seq) // 2:]
+
+        def heard_body():
+            b = body_of(wave_of, attr_of)
+            for tris, _ in first:
+                for tri in tris:
+                    b.learn(tri)
+                b.tick()
+            return b
+
+        frozen = stream(heard_body(), second, 0, hear=False)
+        hearing = stream(heard_body(), second, 0, hear=True)
+        seen, rows, i = {}, [], 0                          # 組（隠した席, 見せた 2 語）→ {語: 回数}
+        for tris, words in second:
+            for tri in tris:
+                for si in range(3):
+                    cands = {w for w in words if w not in {tri[j] for j in range(3) if j != si}} | {tri[si]}
+                    if len(cands) < 2:
+                        continue
+                    key = (si,) + tuple(tri[j] for j in range(3) if j != si)
+                    had = seen.get(key)
+                    best = None if not had else max(sorted(had, key=str), key=lambda w: had[w])
+                    rows.append((had is not None, frozen[i][0], hearing[i][0], bool(had) and tri[si] in had, best == tri[si], len(had) if had else 0))
+                    i += 1
+                for si in range(3):
+                    key = (si,) + tuple(tri[j] for j in range(3) if j != si)
+                    seen.setdefault(key, {})
+                    seen[key][tri[si]] = seen[key].get(tri[si], 0) + 1
+        assert i == len(frozen) == len(hearing)
+        d = {}
+        for name, pick in (("同じ組が後半でもう出た問い", True), ("同じ組がまだ出ていない問い", False), ("全部", None)):
+            rs = [r for r in rows if pick is None or r[0] == pick]
+            m = max(1, len(rs))
+            d[name] = dict(問い=len(rs), 本体_聞かない=round(sum(r[1] for r in rs) / m, 4), 本体_聞く=round(sum(r[2] for r in rs) / m, 4),
+                           正解がその組で前に出た語のどれか=round(sum(r[3] for r in rs) / m, 4), 一番多く出た語で答えた時の当たり=round(sum(r[4] for r in rs) / m, 4),
+                           その組で前に出た語の種類の平均=round(sum(r[5] for r in rs) / m, 2))
+        out["元の順" if k == 0 else "並べ替え %d" % k] = d
+        print(k, d, flush=True)
+    return out
+
+
 def main():
     import i49c_read_words as Rw
     import i49m_attr_base as AB
@@ -148,6 +196,7 @@ def main():
     ap.add_argument("--rates", default="0.1,0.3,1.0")
     ap.add_argument("--dark", type=float, default=1.0 / 1000)
     ap.add_argument("--unheard", action="store_true")
+    ap.add_argument("--ceiling", action="store_true")
     ap.add_argument("--key", default="今まで")
     ap.add_argument("--ks", default="1,2")
     a = ap.parse_args()
@@ -164,7 +213,9 @@ def main():
     full = AB.AttrBase(json.load(open(a.content, encoding="utf-8")))
     res = dict(話=len(talks), 三つ組=sum(len(t[0]) for t in talks), 暗い側の強さ=a.dark)
     rates = tuple(float(x) for x in a.rates.split(","))
-    if a.unheard:
+    if a.unheard and a.ceiling:
+        res.update(run_ceiling(wave_of, full.of, talks, ks=tuple(int(x) for x in a.ks.split(","))))
+    elif a.unheard:
         res["鍵の形"] = a.key
         res.update(run_unheard(wave_of, full.of, talks, rates=rates, ks=tuple(int(x) for x in a.ks.split(",")), dark=a.dark, key=a.key))
     else:
