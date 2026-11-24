@@ -1,0 +1,88 @@
+"""I49zx の関門: 介入の板（別に持つ・外せば元に戻る・暗い側・薄れるだけ）。"""
+import os
+import sys
+
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "intervention"))
+sys.path.insert(0, os.path.join(HERE, "..", "tools"))
+from test_i49zw import attr  # noqa: E402
+
+
+class Fixed:
+    """いつも同じ語を答える本体（板との違いを見るための物）。"""
+
+    def __init__(self, word):
+        self.word, self.heard = word, 0
+
+    def ask(self, si, tri, cands):
+        return dict(段="本体", 点={self.word: 1.0}, 答え=self.word)
+
+    def learn(self, tri):
+        self.heard += 1
+
+    def tick(self):
+        pass
+
+
+def test_no_teaching_means_same_as_body():
+    import i49zx_teach_board as X
+    t = X.Taught(Fixed("振る"), X.TeachBoard(attr, dim=1024))
+    o = t.ask(2, ("太郎", "りんご", None), ["食べる", "振る"])
+    assert o == dict(段="本体", 点={"振る": 1.0}, 答え="振る") and t.last[0] is False
+    t.learn(("太郎", "りんご", "食べる"))
+    assert t.tally == [0, 0, 0] and t.body.heard == 1
+
+
+def test_board_fixes_taught_pair_and_spreads_to_similar_pair():
+    import i49zx_teach_board as X
+    b = X.TeachBoard(attr, dim=1024)
+    assert b.teach(2, ("太郎", "りんご", "食べる"), "振る")
+    assert b.taught(2, ("太郎", "りんご", None)) and not b.taught(2, ("花子", "みかん", None))
+    s = b.points(2, ("太郎", "りんご", None), ["食べる", "振る"])
+    assert s["食べる"] > .9 and s["振る"] < 0                        # 明るい側に正しい語、暗い側に違った答え
+    s = b.points(2, ("花子", "みかん", None), ["食べる", "振る"])
+    assert s["食べる"] > .5                                          # 似た組にも効く
+    s = b.points(2, ("太郎", "金づち", None), ["食べる", "振る"])
+    assert abs(s["食べる"]) < .2                                     # 片方だけ同じ組には、ほとんど効かない
+    assert abs(s["振る"]) <= b.dark_w + 1e-6                         # 暗い側は弱い
+
+
+def test_board_is_used_only_after_it_has_won_more():
+    import i49zx_teach_board as X
+    t = X.Taught(Fixed("振る"), X.TeachBoard(attr, dim=1024))
+    t.teach(2, ("太郎", "りんご", "食べる"), "振る")
+    q = ("花子", "みかん", None)
+    o = t.ask(2, q, ["食べる", "振る"])
+    assert o["答え"] == "振る" and t.last == (True, False, "振る", "食べる")   # まだ数えが無いので、本体のまま
+    t.learn(("花子", "みかん", "食べる"))
+    assert t.tally == [0, 1, 1]
+    assert t.ask(2, q, ["食べる", "振る"])["答え"] == "食べる"                # 板の方が当たってきたので、板を使う
+
+
+def test_board_fades_but_never_deletes():
+    import i49zx_teach_board as X
+    b = X.TeachBoard(attr, dim=1024, half=1)
+    b.teach(2, ("太郎", "りんご", "食べる"), "食べる")
+    first = float(np.linalg.norm(b.bright[2]["食べる"]))
+    b.teach(2, ("太郎", "金づち", "振る"), "振る")
+    assert abs(float(np.linalg.norm(b.bright[2]["食べる"])) - first / 2) < 1e-4 and "食べる" in b.bright[2]
+    assert not b.dark[2]                                              # 合っていた答えは、暗い側に入れない
+
+
+def test_run_shapes_and_body_unchanged():
+    import i49zp_text_talks_run as ZP
+    import i49zx_teach_board_run as R
+    lines = ["太郎がりんごを食べる", "花子がみかんをかじる", "太郎が金づちを振る", "花子がりんごを食べる", "太郎がみかんを食べる", "",
+             "花子が金づちを振る", "太郎がりんごをかじる", "花子がみかんを食べる", "太郎が金づちを振る"]
+    talks, _, _ = ZP.talks_of(lines)
+    get = lambda w: attr(w[0])
+    res = R.run(get, get, talks, rates=(0.5, 1.0), ks=(0,), dim=1024)
+    d = res["元の順"]
+    assert d["介入 100%"]["教えた数"] >= d["介入 50%"]["教えた数"] > 0
+    for name in ("介入 50%", "介入 100%"):
+        s = d[name]
+        assert s["本体"] == d["板なし"]["本体"] and s["本体の答えが板なしと違った数"] == 0     # 板を付けても本体は変わらない（外せば元に戻る）
+        assert 0 <= s["板を付けた形"] <= 1
+        assert s["教えた組そのもの"]["問い"] + s["似た組"]["問い"] <= s["問い"]
