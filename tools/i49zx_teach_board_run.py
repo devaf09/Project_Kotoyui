@@ -17,6 +17,8 @@
   --unheard と --ext を付けると、介入の板の代わりに、本体と同じ形の外付け（intervention/i49zzd_taught_body.py）で数える（I49zzd）。
     --direct を足すと、比べ役として「教わった 3 つ組を本体に直に聞かせる（混ぜる）」形も数える（分けて持つ事の代金を見る）。
     --when 外れた時 にすると、最後の答えが外れた時にだけ教えが届く。害がどの段の組で出たかも出す（外付けを使った問いの、当たりに変わった数・外れに変わった数）。
+    --reflect を足すと、「話の終わりに、外付けの中身を本体へ反映して外付けを空にする」形も数える（I49zze）。反映の前のセーブから戻した本体が、
+    元の本体と同じ答えを出すか（違った数）も出す。
   鍵の形は --key（今まで・引く・めずらしさ。tools/i49zx_teach_try.py と同じ）。
 引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --out 記録.json [--rates 0.1,0.3,1.0] [--dark 0.001] [--unheard] [--key 今まで] [--ks 1,2]
 手で置く物: 介入の割合、暗い側の強さ、板の薄れる速さ・本数（部品の既定）、並べ替えの k（0 と 1）。
@@ -110,7 +112,7 @@ def run(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(0, 1), dark=1.0 / 10
     return out
 
 
-def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=1.0 / 1000, dim=8192, key="今まで", ext=False, direct=False, when="いつも"):
+def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=1.0 / 1000, dim=8192, key="今まで", ext=False, direct=False, when="いつも", reflect=False):
     import i49zx_teach_try as TT
     from i49zx_teach_board import Taught
     from i49zzd_taught_body import Direct, TaughtBody
@@ -145,6 +147,17 @@ def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=
                 dr = Direct(heard_body())
                 rd = stream(dr, second, rate, hear=False, when=when)
                 s["本体に直に混ぜる（比べ役）"] = dict(当たり=round(sum(r[1] for r in rd) / n, 4), 教えた数=dr.n)
+            if reflect:
+                fresh = lambda: body_of(wave_of, attr_of)
+                tr = TaughtBody(heard_body(), fresh(), fresh=fresh, reflect=True)
+                snap = tr.save()
+                rr = stream(tr, second, rate, hear=False, when=when)
+                tr.restore(snap)
+                back = stream(tr.body, second, 0, hear=False)
+                up, dn = sum((not p[0]) and r[1] for r, p in zip(rr, plain)), sum(p[0] and not r[1] for r, p in zip(rr, plain))
+                s["話の終わりに本体へ反映する"] = dict(当たり=round(sum(r[1] for r in rr) / n, 4), 当たりに変わった=up, 外れに変わった_害=dn,
+                                           z=round((up - dn) / max(1.0, (up + dn) ** 0.5), 2), 反映した三つ組=tr.reflected, 使った答え=dict(tr.used),
+                                           セーブから戻した本体の答えが元と違った数=sum(b[4] != p[4] for b, p in zip(back, plain)))
             if ext:
                 cells = {}
                 for r, p, (cell, used) in zip(recs, plain, t.log):
@@ -222,6 +235,7 @@ def main():
     ap.add_argument("--ceiling", action="store_true")
     ap.add_argument("--ext", action="store_true")
     ap.add_argument("--direct", action="store_true")
+    ap.add_argument("--reflect", action="store_true")
     ap.add_argument("--when", default="いつも", choices=("いつも", "外れた時"))
     ap.add_argument("--key", default="今まで")
     ap.add_argument("--ks", default="1,2")
@@ -244,7 +258,7 @@ def main():
     elif a.unheard:
         res["教えが届く時"] = a.when
         res["外付けの形"] = "本体と同じ形" if a.ext else "介入の板（鍵の形: %s）" % a.key
-        res.update(run_unheard(wave_of, full.of, talks, rates=rates, ks=tuple(int(x) for x in a.ks.split(",")), dark=a.dark, key=a.key, ext=a.ext, direct=a.direct, when=a.when))
+        res.update(run_unheard(wave_of, full.of, talks, rates=rates, ks=tuple(int(x) for x in a.ks.split(",")), dark=a.dark, key=a.key, ext=a.ext, direct=a.direct, when=a.when, reflect=a.reflect))
     else:
         res.update(run(wave_of, full.of, talks, rates=rates, dark=a.dark))
     res["秒"] = round(time.time() - t0)

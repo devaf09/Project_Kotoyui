@@ -4,8 +4,12 @@ I49zzb・I49zzc で、介入の板（鍵 = 2 語の組）は、本体が聞い�
 本体が聞いて上がる分は、語ごとの覚えから来ていた。ここでは、介入が運ぶ物を、本体と同じ粒で持つ。
 I48 の決まりは引き継ぐ: 介入は本体に混ぜず、外付けに持つ。外せば元に戻る。
 
-  TaughtBody(body, ext)
+  TaughtBody(body, ext, fresh=None, reflect=False)
     body: 本体。ext: 本体と同じ形の、空の外付け（教えられた 3 つ組だけを聞く）。
+    反映とセーブ（I49zze。持ち主の言葉「外付けを短期記憶とかその場の考え・一時的なスキルと考えれば不自然ではないと思うけど、
+      しいて言えば本体への反映と本体からのセーブがあればなおいいかも？」から。未確定の試し）:
+      reflect=True なら、話の終わり（rest か tick）に、外付けが聞いた 3 つ組を本体に聞かせ、外付けを空に戻す（fresh() で作り直す）。
+      save() は本体の写しを返す。restore(写し) で、本体をその時の姿に戻し、外付けも空にする（「外せば元に戻る」の代わりに「セーブした所まで戻れる」）。
     ask: 本体の答えと、外付けの答えを出す。どちらを使うかは重さを置かず、（本体の答えた段, 外付けの答えた段）ごとに、
          それまでにどちらが多く当たったかで決める（同じなら本体）。数えは問う前の分だけ。
     teach(隠した席, 3 つ組, 出した答え): その 3 つ組を「教えられた」と印を付ける。外付けが聞くのは、その 3 つ組の問いが全部終わった後
@@ -24,8 +28,10 @@ from __future__ import annotations
 
 
 class TaughtBody:
-    def __init__(self, body, ext):
-        self.body, self.ext = body, ext
+    def __init__(self, body, ext, fresh=None, reflect=False):
+        assert not reflect or fresh is not None
+        self.body, self.ext, self.fresh, self.do_reflect = body, ext, fresh, bool(reflect)
+        self._held, self.reflected = [], 0
         self.tally, self._wait, self.last = {}, [], None
         self._mark, self._seats, self.keys, self.n = False, set(), set(), 0
         self.used = dict(本体=0, 外付け=0)
@@ -68,6 +74,7 @@ class TaughtBody:
         self._wait = []
         if self._mark:
             self.ext.learn(tri)
+            self._held.append(tri)
             self.n += 1
         elif hasattr(self.ext, "drop"):
             self.ext.drop()
@@ -77,12 +84,42 @@ class TaughtBody:
         self.settle(tri, every=True)
         self.body.learn(tri)
 
+    def reflect(self):
+        """外付けが聞いた 3 つ組を本体に聞かせ、外付けを空に戻す。反映した 3 つ組の数を返す。"""
+        if hasattr(self.body, "drop"):
+            self.body.drop()
+        for tri in self._held:
+            self.body.learn(tri)
+        k = len(self._held)
+        if k:
+            self.body.tick()
+        self.reflected += k
+        self.ext, self._held, self.n = self.fresh(), [], 0
+        return k
+
+    def save(self):
+        import copy
+        return copy.deepcopy(self.body)
+
+    def restore(self, snap):
+        import copy
+        self.body = copy.deepcopy(snap)
+        self._held, self.n, self._wait = [], 0, []
+        if self.fresh is not None:
+            self.ext = self.fresh()
+
     def tick(self):
         self.body.tick()
-        self.ext.tick()
+        if self.do_reflect:
+            self.reflect()
+        else:
+            self.ext.tick()
 
     def rest(self):
-        self.ext.tick()
+        if self.do_reflect:
+            self.reflect()
+        else:
+            self.ext.tick()
 
 
 class Direct:
