@@ -10,7 +10,9 @@ I48 の決まりは引き継ぐ: 介入は本体に混ぜず、外付けに持�
          それまでにどちらが多く当たったかで決める（同じなら本体）。数えは問う前の分だけ。
     teach(隠した席, 3 つ組, 出した答え): その 3 つ組を「教えられた」と印を付ける。外付けが聞くのは、その 3 つ組の問いが全部終わった後
          （settle か learn の時）。先に聞かせると、同じ 3 つ組のほかの席の問いで答えを知っている事になるため。
-    settle(3 つ組): 本体には聞かせず、数えを進め、印が有れば外付けに聞かせる。learn(3 つ組): 同じ事をして、本体にも聞かせる。
+    settle(3 つ組): 本体には聞かせず、印が有れば外付けに聞かせる。どちらが当たったかの数えは、教えが届いた席の問いの分だけ進める
+         （教えが届かなかった問いの正解は、知らないはずなので使わない）。
+    learn(3 つ組): 本体にも聞かせる。3 つ組の全部を聞くので、数えは全部の席の分を進める。
     tick(): 本体と外付けの両方。rest(): 外付けだけ（本体が聞かない場面の、話の終わり用）。
     last = 直前の問いの (外付けが答えを持ったか, その 2 語の組を教えた事が有るか, 本体の答え, 外付けの答え)。
     tally = (本体の段, 外付けの段) → [本体の当たり, 外付けの当たり, 問い]。used = どちらの答えを使ったかの数。
@@ -23,7 +25,7 @@ class TaughtBody:
     def __init__(self, body, ext):
         self.body, self.ext = body, ext
         self.tally, self._wait, self.last = {}, [], None
-        self._mark, self.keys, self.n = False, set(), 0
+        self._mark, self._seats, self.keys, self.n = False, set(), set(), 0
         self.used = dict(本体=0, 外付け=0)
 
     def ask(self, si, tri, cands):
@@ -46,11 +48,14 @@ class TaughtBody:
 
     def teach(self, si, tri, answered):
         self._mark = True
+        self._seats.add(si)
         self.keys.add((si,) + tuple(w for j, w in enumerate(tri) if j != si))
         return True
 
-    def settle(self, tri):
+    def settle(self, tri, every=False):
         for si, cell, a, b in self._wait:
+            if not every and si not in self._seats:
+                continue
             h = self.tally.setdefault(cell, [0, 0, 0])
             h[0] += a == tri[si]
             h[1] += b == tri[si]
@@ -61,10 +66,10 @@ class TaughtBody:
             self.n += 1
         elif hasattr(self.ext, "drop"):
             self.ext.drop()
-        self._mark = False
+        self._mark, self._seats = False, set()
 
     def learn(self, tri):
-        self.settle(tri)
+        self.settle(tri, every=True)
         self.body.learn(tri)
 
     def tick(self):

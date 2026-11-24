@@ -73,6 +73,7 @@ def test_ext_is_used_only_after_it_has_won_more_in_that_cell():
     t.settle(tri)
     q = ("花子", "りんご", None)
     assert t.ask(2, q, ["食べる", "振る"])["答え"] == "振る" and t.last == (True, False, "振る", "食べる")     # まだ数えが無いので本体
+    t.teach(2, ("花子", "りんご", "食べる"), "振る")
     t.settle(("花子", "りんご", "食べる"))
     assert t.tally[("本体", "聞いた")] == [0, 1, 1]
     o = t.ask(2, q, ["食べる", "振る"])
@@ -93,3 +94,33 @@ def test_unheard_run_with_ext_body():
     assert s["本体"] == base["本体"] and s["本体の答えが板なしと違った数"] == 0       # 本体は変わらない（外せば元に戻る）
     assert s["教えた数"] > 0 and s["板が答えを持った問い"] > 0 and "段ごとの数え" in s
     assert s["板を付けた形"] >= base["本体"]
+
+
+def test_settle_counts_only_questions_that_were_taught():
+    import i49zx_teach_board as X
+    import i49zzd_taught_body as Z
+    t = Z.TaughtBody(Fixed("振る"), Echo())
+    t.ext.heard.append(("花子", "みかん", "食べる"))
+    t.n = 1
+    tri = ("太郎", "りんご", "食べる")
+    t.ask(2, ("太郎", "りんご", None), ["食べる", "振る"])
+    t.ask(0, (None, "りんご", "食べる"), ["太郎", "花子"])
+    t.teach(2, tri, "振る")
+    t.settle(tri)
+    assert sum(h[2] for h in t.tally.values()) == 1                     # 教えが届いた席（どうした）の問いだけを数える
+    t.ask(2, ("太郎", "りんご", None), ["食べる", "振る"])
+    t.settle(tri)
+    assert sum(h[2] for h in t.tally.values()) == 1                     # 教えが無ければ、数えは進まない
+    t.ask(2, ("太郎", "りんご", None), ["食べる", "振る"])
+    t.learn(tri)
+    assert sum(h[2] for h in t.tally.values()) == 2                     # 本体が 3 つ組を聞く時は、全部数える
+    b = X.Taught(Fixed("振る"), X.TeachBoard(small, dim=1024))
+    b.teach(2, tri, "振る")
+    b.settle(tri)
+    b.ask(2, ("太郎", "りんご", None), ["食べる", "振る"])
+    b.settle(tri)
+    assert b.tally == [0, 0, 0]                                         # 介入の板の形でも同じ
+    b.ask(2, ("太郎", "りんご", None), ["食べる", "振る"])
+    b.teach(2, tri, "振る")
+    b.settle(tri)
+    assert b.tally == [0, 1, 1]

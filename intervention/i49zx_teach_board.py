@@ -18,7 +18,8 @@ I48 の決まりを引き継ぐ: 介入は本体に混ぜず、別の板に持�
   Taught(body, board)   本体に介入の板を外付けする。
     ask: 本体の答えと、板の答え（点が正の候補が有る時だけ）を出す。どちらを使うかは重さを置かず、板が答えを持った問いで
          それまでにどちらが多く当たったかで決める（同じなら本体）。数えは問う前の分だけ。
-    learn / tick: 本体と同じ。settle(3 つ組): 本体には聞かせず、どちらが当たったかの数えだけ進める（本体が聞かない場面の数え用。I49zzb）。teach(隠した席, 3 つ組, 出した答え): 板に教える。
+    learn / tick: 本体と同じ。settle(3 つ組): 本体には聞かせず、どちらが当たったかの数えだけ進める（本体が聞かない場面の数え用。I49zzb）。
+         数えるのは、教えが届いた席の問いの分だけ（届かなかった問いの正解は、知らないはずなので使わない）。teach(隠した席, 3 つ組, 出した答え): 板に教える。
     last = 直前の問いの (板が答えを持ったか, 教えた組そのものか, 本体の答え, 板の答え)。tally = [本体の当たり, 板の当たり, 問い]。
 手で置く物: stop（止める側の重さ 1。明るい側と同じ強さ。"出した分" なら置かない）、dark（持ち主の 1/1,000〜1/10,000 の上の端）、half、dim、同じなら本体。乱数は置かない。
 """
@@ -111,6 +112,7 @@ class Taught:
     def __init__(self, body, board):
         self.body, self.board = body, board
         self.tally, self._wait, self.last = [0, 0, 0], [], None
+        self._seats = set()
 
     def ask(self, si, tri, cands):
         cands = list(cands)
@@ -125,19 +127,22 @@ class Taught:
             return dict(o, 段="介入の板", 答え=b)
         return o
 
-    def settle(self, tri):
+    def settle(self, tri, every=False):
         for si, a, b in self._wait:
+            if not every and si not in self._seats:
+                continue
             self.tally[0] += a == tri[si]
             self.tally[1] += b == tri[si]
             self.tally[2] += 1
-        self._wait = []
+        self._wait, self._seats = [], set()
 
     def learn(self, tri):
-        self.settle(tri)
+        self.settle(tri, every=True)
         self.body.learn(tri)
 
     def tick(self):
         self.body.tick()
 
     def teach(self, si, tri, answered):
+        self._seats.add(si)
         return self.board.teach(si, tri, answered)
