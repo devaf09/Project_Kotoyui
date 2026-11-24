@@ -5,7 +5,8 @@ I49y と同じ数え（tools/i49y_who_wins_run.py の who）を、3 つの形で
   直さない ／ 振幅だけ直す（毎回・席ごと・.01） ／ 位相＋振幅を直す（位相 .1・合図 聞いた組）
 数える物（正解が 2〜3 位だった問い）: その数と全体に占める割合、1 位が正しいと言える物だった割合、
   1 位と正解の属性の近さの平均、正解とほかの候補の近さの平均、席ごとの内訳。
-近さは、その時の語の元の波どうしで測る（位相を動かす形では、動かした後の波。ずれは小さいので、属性の近さとほぼ同じ）。
+近さは、動かす前の属性の波どうしで測る（位相を動かす形でも、物差しは同じ）。
+  初めの版は動かした後の波で測っていて、位相を動かす形だけ近さが全体に下がり、比べられなかった。それを直した。
 流れ・引数は tools/i49y_who_wins_run.py と同じ（--content 付き）。記録はリポジトリの外。
 手で置く物: 「上位」を 3 位までとする事、直す速さ、temp .05。
 """
@@ -29,7 +30,36 @@ BOTH = dict(phase_lr=.1, teach="聞いた組", rule="毎回", lr=.01, by_seat=Tr
 VERS = (("直さない", None), ("振幅だけ直す", AMP), ("位相＋振幅を直す", BOTH))
 
 
+def attr_cos(attr_of):
+    """動かす前の属性の波どうしの近さ（I49y の _cos と同じ形。sv は見ない）。"""
+    import numpy as np
+    unit = {}
+
+    def u(w):
+        if w not in unit:
+            v = attr_of(w)
+            if v is not None:
+                v = np.asarray(v, dtype=np.complex64)
+                n = float(np.linalg.norm(v))
+                v = v / n if n > 0 else None
+            unit[w] = v
+        return unit[w]
+
+    def cos(sv, a, b):
+        x, y = u(a), u(b)
+        return None if x is None or y is None else float(np.real(np.vdot(x, y)))
+    return cos
+
+
 def run(attr_of, talks, aoz):
+    old, Y._cos = Y._cos, attr_cos(attr_of)
+    try:
+        return _run(attr_of, talks, aoz)
+    finally:
+        Y._cos = old
+
+
+def _run(attr_of, talks, aoz):
     import i49k_seat_vec as KV
     from i49zj_phase_read import PhaseRead
     ok = WR.ok_sets([t for tris, _ in talks for t in tris] + [tuple(t) for t in aoz])
