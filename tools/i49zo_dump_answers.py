@@ -52,6 +52,18 @@ class Rec:
         self.inner.tick()
 
 
+def show(w):
+    """語を文字に直す。組（見出し語と品詞など）なら「／」でつなぐ。"""
+    if w is None:
+        return ""
+    return "／".join(str(x) for x in w) if isinstance(w, (tuple, list)) else str(w)
+
+
+def plain(s):
+    """ローカル AI と読む用には、「／」より前（見出し語）だけを見せる。"""
+    return s.split("／", 1)[0]
+
+
 def questions(talks):
     """tools/i49za_fold_run.py の stream と同じ順で、問いを並べる。"""
     out = []
@@ -95,8 +107,8 @@ def dump(wave_of, attr_of, talks, aoz):
             cols.append(rec.ans)
             print(start, name, round(sum(a == q[2][q[1]] for a, q in zip(rec.ans, qs)) / max(1, len(qs)), 4), flush=True)
         for k, (ti, si, tri) in enumerate(qs):
-            shown = ["？" if j == si else tri[j] for j in range(3)]
-            rows.append([start, str(ti), SEATS[si]] + shown + [tri[si]] + [str(c[k]) if c[k] is not None else "" for c in cols])
+            shown = ["？" if j == si else show(tri[j]) for j in range(3)]
+            rows.append([start, str(ti), SEATS[si]] + shown + [show(tri[si])] + [show(c[k]) for c in cols])
     return rows
 
 
@@ -168,7 +180,7 @@ def write_text(path, done, old, new):
     with open(path, "w", encoding="utf-8") as f:
         f.write("問い（？ が隠した所）\t正解\t%s\t点\t%s\t点\t正解の点\n" % (old, new))
         for r, p in done:
-            f.write("%s が %s を %s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (r["だれが"], r["何を"], r["どうした"], r["正解"], r[old], p[0], r[new], p[1], p[2]))
+            f.write("%s が %s を %s\t%s\t%s\t%s\t%s\t%s\t%s\n" % (plain(r["だれが"]), plain(r["何を"]), plain(r["どうした"]), plain(r["正解"]), plain(r[old]), p[0], plain(r[new]), p[1], p[2]))
 
 
 def main_look(argv):
@@ -192,7 +204,7 @@ def main_look(argv):
 
     def score(tri):
         try:
-            m = re.search(r"[1-5]", ai._post([dict(role="system", content=ai.system), dict(role="user", content=ASK % tri)], temperature=0.0, max_tokens=8))
+            m = re.search(r"[1-5]", ai._post([dict(role="system", content=ai.system), dict(role="user", content=ASK % tuple(plain(x) for x in tri))], temperature=0.0, max_tokens=8))
         except OSError:
             return None
         return int(m.group()) if m else None

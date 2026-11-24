@@ -53,3 +53,16 @@ def test_time_cap(tmp_path):
         r["属性だけ"], r["属性＋固有の位相"] = "魚", "海"
     st, done = Z.look(back, lambda tri: 3, minutes=0)
     assert st["見終わった問い"] == 0 and done == []
+
+
+def test_tuple_words(tmp_path):
+    """語が組（見出し語と品詞）でも、テキストに出せる。"""
+    import i49zo_dump_answers as Z
+    T = lambda w: (w, "名詞")
+    get = lambda w: V.get(w[0])
+    talks = [([(T("友達"), T("魚"), T("釣る")), (T("先生"), T("魚"), T("釣る"))], {T(n) for n in NAMES})]
+    rows = Z.dump(get, get, talks, [])
+    p = str(tmp_path / "a.tsv")
+    Z.write_rows(p, rows)
+    back = Z.read_rows(p)
+    assert back[0]["正解"].endswith("／名詞") and Z.plain(back[0]["正解"]) in NAMES
