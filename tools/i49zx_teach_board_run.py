@@ -112,6 +112,37 @@ def run(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(0, 1), dark=1.0 / 10
     return out
 
 
+class _Late:
+    """比べ役: 本体が後半も聞くが、話の終わりにまとめて聞く（段の数えは進めない）。"""
+
+    def __init__(self, body):
+        self.body, self.held = body, []
+
+    def ask(self, si, tri, cands):
+        return self.body.ask(si, tri, cands)
+
+    def learn(self, tri):
+        self.held.append(tri)
+
+    def tick(self):
+        self.body.drop()
+        for tri in self.held:
+            self.body.learn(tri)
+        self.held = []
+        self.body.tick()
+
+
+class _Frozen(_Late):
+    """比べ役: 本体が後半もすぐ聞くが、段の数えは進めない。"""
+
+    def learn(self, tri):
+        self.body.drop()
+        self.body.learn(tri)
+
+    def tick(self):
+        self.body.tick()
+
+
 def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=1.0 / 1000, dim=8192, key="今まで", ext=False, direct=False, when="いつも", reflect=False):
     import i49zx_teach_try as TT
     from i49zx_teach_board import Taught
@@ -158,6 +189,11 @@ def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=
                 s["話の終わりに本体へ反映する"] = dict(当たり=round(sum(r[1] for r in rr) / n, 4), 当たりに変わった=up, 外れに変わった_害=dn,
                                            z=round((up - dn) / max(1.0, (up + dn) ** 0.5), 2), 反映した三つ組=tr.reflected, 使った答え=dict(tr.used),
                                            セーブから戻した本体の答えが元と違った数=sum(b[4] != p[4] for b, p in zip(back, plain)))
+                if "比べ役・話の終わりにまとめて聞く" not in d:  # 越えた分が、聞く時機から来るのか、段の数えを止めた事から来るのか
+                    for name, cls in (("比べ役・話の終わりにまとめて聞く", _Late), ("比べ役・すぐ聞くが段の数えを止める", _Frozen)):
+                        rc = stream(cls(heard_body()), second, 0, hear=True)
+                        d[name] = dict(本体=round(sum(r[0] for r in rc) / n, 4), こちらだけ当たり=sum(r[0] and not b[0] for r, b in zip(rc, both)),
+                                       聞く方だけ当たり=sum(b[0] and not r[0] for r, b in zip(rc, both)))
                 if len(both) == len(rr):  # 「本体が後半も聞く」と問いごとに比べる（越えた分がどこで出たか）
                     vs = {}
                     for r, b, (cell, used) in zip(rr, both, tr.log):
