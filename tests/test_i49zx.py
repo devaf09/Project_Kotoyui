@@ -86,3 +86,23 @@ def test_run_shapes_and_body_unchanged():
         assert s["本体"] == d["板なし"]["本体"] and s["本体の答えが板なしと違った数"] == 0     # 板を付けても本体は変わらない（外せば元に戻る）
         assert 0 <= s["板を付けた形"] <= 1
         assert s["教えた組そのもの"]["問い"] + s["似た組"]["問い"] <= s["問い"]
+
+
+def test_teach_try_before_and_after(tmp_path):
+    import i49zx_teach_board as X
+    import i49zx_teach_try as T
+    ask = tmp_path / "ask.tsv"
+    ask.write_text("教える\t太郎\tりんご\t？\n似た問い\t花子\tみかん\t？\n関係ない\t太郎\t金づち\t？\n読めない行\n", encoding="utf-8")
+    teach = tmp_path / "teach.tsv"
+    teach.write_text("1\t食べる\n", encoding="utf-8")
+    qs, tc = T.read_ask(str(ask)), T.read_teach(str(teach))
+    assert len(qs) == 3 and qs[0][1] == 2 and tc == {0: "食べる"}
+    get = lambda w: attr(w[0])
+    body = Fixed(("振る", "VERB"))
+    rows = T.try_run(body, X.TeachBoard(get, dim=1024), qs, {})
+    assert [r["一回目"] for r in rows] == ["振る"] * 3 and "板の答え" not in rows[0]
+    rows = T.try_run(body, X.TeachBoard(get, dim=1024), qs, tc)
+    assert rows[0]["教え"].startswith("違う") and rows[0]["板の答え"] == "食べる" and rows[0]["教えた組そのもの"]
+    assert rows[1]["板の答え"] == "食べる" and not rows[1]["教えた組そのもの"]      # 似た問いへ広がる
+    assert all(r["外すと一回目と同じ"] for r in rows)                                # 板を外せば元の答え
+    assert "教える前の答え" in T.to_md(rows, True) and "上位 3" in T.to_md(rows, False)
