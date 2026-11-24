@@ -35,8 +35,8 @@ def ok_sets(tris):
 
 def grade(rel, talks, ok_talk, ok_wide):
     n = 0
-    hit = dict(正しい物=0, 言える・話だけ=0, 言える・話と青空=0)
-    seat = [dict(問い=0, 正しい物=0, 言える・話だけ=0, 言える・話と青空=0) for _ in SEATS]
+    hit = {"正しい物": 0, "言える・話だけ": 0, "言える・話と青空": 0}
+    seat = [{"問い": 0, "正しい物": 0, "言える・話だけ": 0, "言える・話と青空": 0} for _ in SEATS]
     size = dict(話だけ=0, 話と青空=0)
     many = dict(話だけ=0, 話と青空=0)
     for tris, words in talks:
