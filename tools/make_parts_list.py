@@ -25,7 +25,7 @@ def first_line(path):
     except SyntaxError:
         doc = None
     line = (doc or "（説明なし）").strip().splitlines()[0].strip()
-    return re.sub(r"Sin-CNN\d*", "前のプロジェクト", line).replace("|", "／")
+    return re.sub(r"Sin[-]CNN\d*", "前のプロジェクト", line).replace("|", "／")
 
 
 def group_of(name):
