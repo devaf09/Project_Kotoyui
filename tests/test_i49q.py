@@ -37,3 +37,26 @@ def test_attr_and_gate_tools_run_on_a_tiny_world():
     assert get("属性 19 本") >= get("属性 4 本（話 16 個で 1 つ）・聞かない")
     assert any(r["足した本数"] for r in rows if "外れた時に足す" in r["形"])
     assert len(Gt.run(T=16, Ms=(0,), passes=1)) == 20
+
+
+def test_stream_world_orders_forms_like_the_real_count():
+    import i49q_small_world_stream as St
+    talks = St.make(talks=150)
+    words = sorted({w for _, ws in talks for w in ws})
+    idx = {w: i for i, w in enumerate(words)}
+    B = St.base_dense(words, 64)
+    r = {name: St.stream(mk(len(words), B), talks, idx)[0] for name, mk in St.FORMS}
+    assert St.make(talks=150)[0] == talks[0]
+    assert r["関係の表"] > r["元の向きを足す・席なし"] > r["今の波に足す・席なし"]
+    assert r["元の向きを足す・席あり"] > r["元の向きを足す・席なし"]
+
+
+def test_grow_adds_a_frequency_on_a_miss():
+    import i49q_small_world_grow as Gr
+    import i49q_small_world_stream as St
+    talks = St.make(talks=40)
+    words = sorted({w for _, ws in talks for w in ws})
+    idx = {w: i for i, w in enumerate(words)}
+    g = Gr.Grow(len(words), St.base_dense(words, 32), 64, "外れ")
+    rate = St.stream(g, talks, idx)[0]
+    assert 0 < g.added <= 40 * 14 and 0 < rate < 1
