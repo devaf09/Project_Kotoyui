@@ -52,3 +52,10 @@ def test_run_shapes():
             assert 0 <= d[name]["正しい物"] <= 1 and 0 <= d[name]["後ろ 2 割"] <= 1
     c = Z.cover(talks, get, get)
     assert c["語の種類"] >= 4 and 0 <= c["属性が無い語を含む行の割合"] <= 1
+
+
+def test_same_talk_twice_is_dropped():
+    import i49zp_text_talks_run as Z
+    a = ["友達が魚を釣る", "先生が魚を見る", "友達が海を見る"]
+    talks, why, _ = Z.talks_of(a + [""] + ["犬が魚を運ぶ", "犬が海を見る"] + [""] + a)
+    assert len(talks) == 2 and why["同じ話の重なり"] == 1
