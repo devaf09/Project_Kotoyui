@@ -56,7 +56,7 @@ class Relation:
         t = tuple(tri)
         self.tri[t] = [self._count(t) + 1.0 if t in self.tri else 1.0, self.now]
         for si, w in enumerate(t):
-            self.by[si].setdefault(w, set()).add(t)
+            self.by[si].setdefault(w, {})[t] = None        # 聞いた順に並ぶ入れ物（集合だと、たどる順が走らせるたびに変わり、足し算の下の桁が揺れた。I49zzg）
 
     # ---- 問う ----
     def _unit_of(self, w):

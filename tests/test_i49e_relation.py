@@ -67,3 +67,13 @@ def test_memory_fades_but_is_not_deleted():
     assert o["答え"] == "捕る" and abs(o["点"]["食べる"] - 0.25) < 1e-6 and o["点"]["捕る"] == 1.0
     r.learn(("猫", "魚", "食べる"))                        # 薄れた数に足す
     assert abs(r.ask(2, ("猫", "魚", None), ["食べる", "捕る"])["点"]["食べる"] - 1.25) < 1e-6
+
+
+def test_pools_keep_heard_order():
+    # 語ごとの 3 つ組の入れ物は、聞いた順に並ぶ（集合だと、走らせるたびにたどる順が変わり、同じ数えが 1 問ずつ揺れた）
+    import i49e_relation as RL
+    r = RL.Relation(lambda w: None)
+    tris = [("太郎", "りんご%d" % i, "食べる") for i in range(30)]
+    for t in tris:
+        r.learn(t)
+    assert list(r.by[0]["太郎"]) == tris and list(r.by[2]["食べる"]) == tris
