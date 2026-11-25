@@ -268,7 +268,7 @@ def run_breaks(runs):
     hi = float(np.median(f[y])) if y.any() else None
     return dict(学ぶ続き=len(train), 試す続き=len(held), 切れ目の直後の発言=int((~y).sum()), 続きの中の発言=int(y.sum()),
                 続きの中の方が合う割合=dict(学んだ波=ZF.rank_share(f, y), 同じ切り出しの数=ZF.rank_share(c, y)),
-                確かめ・前の発言だけ別の場の物に替えた時より合う割合=ctrl,
+                前の発言だけ別の場の物に替えた時より合う割合=ctrl,
                 合い方の真ん中の値=dict(切れ目の直後=None if lo is None else round(lo, 4), 続きの中=None if hi is None else round(hi, 4)))
 
 
