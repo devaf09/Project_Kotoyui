@@ -22,6 +22,7 @@ I48 の決まりは引き継ぐ: 介入は本体に混ぜず、外付けに持�
     tick(): 本体と外付けの両方。rest(): 外付けだけ（本体が聞かない場面の、話の終わり用）。
     last = 直前の問いの (外付けが答えを持ったか, その 2 語の組を教えた事が有るか, 本体の答え, 外付けの答え)。
     tally = (本体の段, 外付けの段) → [本体の当たり, 外付けの当たり, 問い]。used = どちらの答えを使ったかの数。
+    seen = 問いごとの (その段の組での本体の当たり, 外付けの当たり, 2 つの答えが同じか) か None。選ぶ時に見た数え。害がどこで出るかを数える用。
     log = 問いごとの (段の組か None, 外付けの答えを使ったか)。数える道具が、害の出た場面を見るために使う。
   Direct(body)   比べ役: 教わった 3 つ組を、本体に直に聞かせる（混ぜる。外せない）。teach / settle / learn / tick は TaughtBody と同じ呼び方。
 手で置く物: 同じなら本体。乱数は置かない。
@@ -39,6 +40,7 @@ class TaughtBody:
         self._mark, self._seats, self.keys, self.n = False, set(), set(), 0
         self.used = dict(本体=0, 外付け=0)
         self.log = []
+        self.seen = []
 
     def ask(self, si, tri, cands):
         cands = list(cands)
@@ -49,11 +51,13 @@ class TaughtBody:
         if e["答え"] is None:
             self.used["本体"] += 1
             self.log.append((None, False))
+            self.seen.append(None)
             return o
         cell = (o["段"], e["段"])
         self._wait.append((si, cell, o["答え"], e["答え"]))
         h = self.tally.get(cell, (0, 0, 0))
         self.log.append((cell, h[1] > h[0]))
+        self.seen.append((h[0], h[1], o["答え"] == e["答え"]))
         if h[1] > h[0]:
             self.used["外付け"] += 1
             return dict(e, 段="外付け")

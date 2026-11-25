@@ -38,6 +38,7 @@ sys.path.insert(0, HERE)
 import i49zp_text_talks_run as ZP  # noqa: E402
 
 KINDS = ("教えた組そのもの", "似た組")
+GAPS = ((-3, "−3 より下"), (-2, "−3〜−2"), (-1, "−2〜−1"), (0, "−1〜0"), (1e-9, "0"), (1, "0〜1"), (2, "1〜2"), (3, "2〜3"), (float("inf"), "3 以上"))  # 数えの差の区切り（見るための区切りで、選び方には使わない）
 
 
 def body_of(wave_of, attr_of):
@@ -215,6 +216,17 @@ def run_unheard(wave_of, attr_of, talks, rates=(0.1, 0.3, 1.0), ks=(1, 2), dark=
                         c["当たりに変わった"] += (not p[0]) and r[1]
                         c["外れに変わった"] += p[0] and not r[1]
                 s["外付けを使った段の組"] = dict(sorted(cells.items(), key=lambda kv: -kv[1]["外付けを使った問い"]))
+                gaps = {}  # 2 つの答えが違った問いを、選ぶ時に見た数えの差（(外付け − 本体) ÷ √(外付け + 本体)）ごとに分ける
+                for r, sn in zip(recs, t.seen):
+                    if sn is None or sn[2]:
+                        continue
+                    z = (sn[1] - sn[0]) / max(1.0, (sn[0] + sn[1]) ** 0.5)
+                    name = next(nm for lim, nm in GAPS if z < lim)
+                    c = gaps.setdefault(name, dict(問い=0, 外付けだけ当たり=0, 本体だけ当たり=0))
+                    c["問い"] += 1
+                    c["外付けだけ当たり"] += bool(r[3]) and not r[0]
+                    c["本体だけ当たり"] += bool(r[0]) and not r[3]
+                s["答えが違った問いの、数えの差ごと"] = {nm: gaps[nm] for _, nm in GAPS if nm in gaps}
                 s["使った答え"] = dict(t.used)
                 s["段ごとの数え"] = {"%s｜%s" % c: dict(本体の当たり=h[0], 外付けの当たり=h[1], 問い=h[2]) for c, h in sorted(t.tally.items(), key=str)}
             else:
