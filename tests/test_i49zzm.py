@@ -60,3 +60,25 @@ def test_lags_show_style_that_returns_every_other_utterance():
     assert len(runs) == 56 and all(len(x) == 6 for x in runs)
     assert r["続き方"]["1"]["丁寧"]["倍"] < .1 and r["続き方"]["2"]["丁寧"]["倍"] > 1.5
     assert r["二つから選ぶ"]["問い"] > 0 and set(r["二つから選ぶ"]["重ねる"]) == {"1 個前まで", "2 個前まで"}
+
+
+def test_breaks_are_seen_when_the_scene_style_changes():
+    # 続きごとに場の口調が決まっている世界（丁寧な場と、くだけた場が交互）。切れ目の直後は、前の発言と合わない。
+    who = ("犬", "猫", "鳥", "馬", "牛", "魚", "虫", "人")
+    lines = []
+    k = 0
+    for i, a in enumerate(who):
+        for j, b in enumerate(who):
+            if i == j:
+                continue
+            end = ("ました。", "ます。") if k % 2 == 0 else ("たぞ。", "るぞ。")
+            lines += ["%sが来%s" % (a, end[0]), "%sも来%s" % (b, end[1]), "%sを見%s" % (a, end[0]), "%sも見%s" % (b, end[1]), ""]
+            k += 1
+    keep = (M.MIN, M.SEATS)
+    M.MIN, M.SEATS = 2, 200
+    try:
+        r = M.run_breaks(M.runs_of(lines))
+    finally:
+        M.MIN, M.SEATS = keep
+    assert r["切れ目の直後の発言"] == 27 and r["続きの中の発言"] == 56
+    assert r["続きの中の方が合う割合"]["学んだ波"] > .9

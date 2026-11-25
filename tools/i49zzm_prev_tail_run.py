@@ -227,18 +227,64 @@ def run_lags(runs, max_lag=4):
     return dict(続き=len(runs), 発話=sum(len(r) for r in runs), 続き方=carry_by, 二つから選ぶ=dict(問い=n, 重ねる=stack, 一つだけ=alone))
 
 
+def run_breaks(runs):
+    """状況波が合わなくなった所を、場の切れ目として読めるかを数える（持ち主:「作品の切れ目シチュエーションが変わるからだね。」）。
+    続きを並びのまま前半と後半に分け、前半で 1 個前・2 個前の波を学ぶ。後半で、発言ごとに「前の 2 つの発言との合い方」（点の足し算）を出す。
+    切れ目の直後の発言（前の 2 つは別の続き）と、続きの中の発言（3 つ目以降）で、合い方を比べる。
+    出す物: 続きの中の方が合い方が高い割合（順位で数える。.5 = 見分けられない）。比べ役は、同じ切り出しの数（真似るだけ）。
+    確かめ: 切れ目の直後の発言は「場の初めの発言」でもあり、それだけで終わり方が違うかもしれない。
+      なので、続きの中の発言はそのままに、前の発言だけ別の続きの物に替えた時と比べた割合も出す（位置は同じで、場だけ違う）。"""
+    import i49zzf_attr_bands as ZF
+    half = len(runs) // 2
+    train, held = runs[:half], runs[half:]
+    assoc = {}
+    for lag in (1, 2):
+        seen = {}
+        for r in train:
+            for i in range(lag, len(r)):
+                seen.setdefault((r[i - lag][1], r[i][0]), None)
+        assoc[lag] = Assoc(list(seen))
+    fit, copy, inside = [], [], []
+    kept = []
+
+    def add(p1, p2, c, is_inside):
+        if is_inside:
+            kept.append((p1, p2, c))
+        fit.append(assoc[1].score(p1, c) + assoc[2].score(p2, c))
+        copy.append(overlap(p1, c) + overlap(p2, c))
+        inside.append(is_inside)
+
+    for k, r in enumerate(held):
+        if k and len(held[k - 1]) >= 2:
+            add(held[k - 1][-1][1], held[k - 1][-2][1], r[0][0], False)
+        for i in range(2, len(r)):
+            add(r[i - 1][1], r[i - 2][1], r[i][0], True)
+    f, c, y = np.array(fit, dtype=np.float64), np.array(copy, dtype=np.float64), np.array(inside, dtype=bool)
+    # 確かめ: 続きの中の発言に、別の続きの中の前の発言を当てた時（発言の位置は同じで、場だけ違う）と比べる
+    n = len(kept)
+    swap = [assoc[1].score(kept[(i + n // 2 + 1) % n][0], kept[i][2]) + assoc[2].score(kept[(i + n // 2 + 1) % n][1], kept[i][2]) for i in range(n)]
+    ctrl = ZF.rank_share(np.array([x for x in f[y]] + swap, dtype=np.float64), np.array([True] * n + [False] * n)) if n else None
+    lo = float(np.median(f[~y])) if (~y).any() else None
+    hi = float(np.median(f[y])) if y.any() else None
+    return dict(学ぶ続き=len(train), 試す続き=len(held), 切れ目の直後の発言=int((~y).sum()), 続きの中の発言=int(y.sum()),
+                続きの中の方が合う割合=dict(学んだ波=ZF.rank_share(f, y), 同じ切り出しの数=ZF.rank_share(c, y)),
+                確かめ・前の発言だけ別の場の物に替えた時より合う割合=ctrl,
+                合い方の真ん中の値=dict(切れ目の直後=None if lo is None else round(lo, 4), 続きの中=None if hi is None else round(hi, 4)))
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--breaks", action="store_true")  # 状況波が合わなくなった所を、場の切れ目として読めるか
     ap.add_argument("--text", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--lags", action="store_true")   # 空の行を続きの切れ目として、何個前の発話まで見るかを変えて数える
     a = ap.parse_args()
-    if a.lags:
+    if a.lags or a.breaks:
         t0 = time.time()
         lines = []
         for f in a.text.split(","):
             lines += open(f, encoding="utf-8", errors="replace").read().split("\n")
-        res = dict(行=len(lines), 手で置いた値=dict(TAIL=ZL.TAIL, SEATS=SEATS, MIN=MIN), **run_lags(runs_of(lines)))
+        res = dict(行=len(lines), 手で置いた値=dict(TAIL=ZL.TAIL, SEATS=SEATS, MIN=MIN), **(run_breaks if a.breaks else run_lags)(runs_of(lines)))
         res["秒"] = round(time.time() - t0)
         json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         return
