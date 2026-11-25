@@ -11,7 +11,7 @@ I49zzk の作り方を本物の文に掛ける。文の終わり（述語の在�
   1 で: 時の語の有る文の割合、席ごとに強い終わりの切り出し、独立に動く向きの数、
        並べ替えた前半で学び、後半で「終わりの切り出しの波から時の語を当てる」割合（一番多い時の語を言い続けた時と比べる）。
   2 で: 独立に動く向きの数、強い向きごとの終わりの切り出し、1 の波どうしの近さと 2 の波どうしの近さの合い方（同じ切り出しで比べる）。
-手で置いた物: TAIL、SEATS2、数える切り出しの下限 MIN、平均を引く事、時の語の一覧（1 の時）。
+手で置いた物: 同じ文を 1 回だけ数える事、時の語より後ろだけを終わりとして見る事（その時に頭の助詞の字を落とす事）、TAIL、SEATS2、数える切り出しの下限 MIN、平均を引く事、時の語の一覧（1 の時）。
 材料の文は出さない。出すのは数と、文の終わりの短い切り出し（語尾）だけ。
 """
 from __future__ import annotations
@@ -46,8 +46,22 @@ def spans(text):
     return [text[i:j] for i in range(len(text)) for j in range(i + 1, len(text) + 1)]
 
 
-def tail_of(s):
-    return s[-TAIL:]
+def tail_of(s, seats=()):
+    """文の終わりの TAIL 文字。seats を渡した時は、最後の時の語より後ろだけを見る（時の語そのものを終わりに数えない）。"""
+    cut = 0
+    for w in seats:
+        i = s.rfind(w)
+        if i >= 0:
+            cut = max(cut, i + len(w))
+    return DROP.sub("", s[cut:].lstrip("、，, 　はもにでがをのと"))[-TAIL:] if cut else s[-TAIL:]
+
+
+def distinct(sents):
+    """同じ文は 1 回だけ数える（芝居の決まり文句などが何度も出て、向きを引っ張るのを避ける）。初めて出た順。"""
+    seen = {}
+    for s in sents:
+        seen.setdefault(s, None)
+    return list(seen)
 
 
 def seats_in(s, seats):
@@ -143,7 +157,9 @@ def run_seats(sents, seats):
         with_seat += 1
         for x in ws:
             per[x] = per.get(x, 0) + 1
-        tail = tail_of(s)
+        tail = tail_of(s, ws)
+        if not tail:
+            continue
         if k < half:
             for x in ws:
                 for sp in spans(tail):
@@ -249,10 +265,11 @@ def main():
         lines += open(f, encoding="utf-8", errors="replace").read().splitlines()
     if a.limit:
         lines = lines[:a.limit]
-    sents = list(sentences(lines))
+    all_sents = list(sentences(lines))
+    sents = distinct(all_sents)
     seats = [x for x in a.seats.split(",") if x]
     r1, w1 = run_seats(sents, seats)
-    res = dict(行=len(lines), 手で置いた値=dict(TAIL=TAIL, SEATS2=SEATS2, MIN=MIN), 時の語=seats, 介入で席を作る=r1)
+    res = dict(行=len(lines), 切った文=len(all_sents), 同じ文を除いた文=len(sents), 手で置いた値=dict(TAIL=TAIL, SEATS2=SEATS2, MIN=MIN), 時の語=seats, 介入で席を作る=r1)
     if a.auto:
         r2, w2 = run_auto(sents)
         res["全部の語を席にする"] = r2

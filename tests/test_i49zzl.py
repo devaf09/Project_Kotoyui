@@ -49,3 +49,11 @@ def test_run_auto_and_agreement():
     assert r2["席"] > 3 and r2["独立に動く向き"]
     ag = T.agreement(w1, w2)
     assert ag["共通の切り出し"] > 3 and ag["相関"] > .5       # 全部の語を席にしても、時の語で作った近さが浮き出る
+
+
+def test_tail_does_not_include_the_time_word():
+    assert T.tail_of("歩いたのはまだ", ["まだ"]) == ""                 # 時の語が文の終わりなら、終わりの切り出しは無い
+    assert T.tail_of("まだ歩く", ["まだ"]) == "歩く"
+    assert T.tail_of("今日は歩いた", ["今日"]) == "歩いた"            # 時の語のすぐ後の助詞の字は落とす
+    assert T.tail_of("犬が歩いていた") == "歩いていた"
+    assert T.distinct(["あ", "い", "あ"]) == ["あ", "い"]
