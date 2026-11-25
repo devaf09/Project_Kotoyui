@@ -52,7 +52,7 @@ python examples/quickstart.py     # 言葉の解析・光の語板・キャラ�
 
 ```bash
 bash tools/fetch_dialogue.sh      # RealPersonaChat・JMultiWOZ（CC BY-SA 4.0）・名大会話コーパス（研究の比べ用）
-python tools/make_manifest.py     # 取ったデータの指紋を MANIFEST.json に（任意）
+python tools/past/make_manifest.py     # 取ったデータの指紋を MANIFEST.json に（任意）
 ```
 
 どれも取得元のライセンス・条件に従ってください（README の「ライセンスとデータの出典」）。RealPersonaChat は、話者の特定やなりすましに使わない条件があります。
@@ -77,21 +77,21 @@ reply, confidence = bot.reply(["犬を飼っているんですが、散歩が大
 ### 4.1 ブラウザの会話コンソール（グッド・バッドの評点つき）
 
 ```bash
-python tools/console.py --light          # http://127.0.0.1:8765 をブラウザで開く
+python tools/past/console.py --light          # http://127.0.0.1:8765 をブラウザで開く
 ```
 
 返事ごとに 👍・👎 を押すと、非公開の置き場の `ratings/ratings.jsonl` に、会話の履歴・返事・評点・自信・設定が 1 行ずつ残ります（手元の PC の中だけで動きます。外の部品は使いません）。
 空のまま送ると、会話を最初からやり直します。
 
-**評点だけの画面**: `python tools/console.py --batch --ai=<モデル名>`（http://127.0.0.1:8766）。試しの会話の発言にことゆいの返事を付けて 1 つずつ出すので、👍・👎（キーボードの J・K、とばすは L）を押すだけです。`--ai` を付けると、ローカル AI にも同じ返事を 1〜5 で評点させ、押した後に見せます（持ち主の評点と合うかを見るため。同じファイルに mode=batch で残ります）。評点を付けた問は、次に起動したときに飛ばします。
+**評点だけの画面**: `python tools/past/console.py --batch --ai=<モデル名>`（http://127.0.0.1:8766）。試しの会話の発言にことゆいの返事を付けて 1 つずつ出すので、👍・👎（キーボードの J・K、とばすは L）を押すだけです。`--ai` を付けると、ローカル AI にも同じ返事を 1〜5 で評点させ、押した後に見せます（持ち主の評点と合うかを見るため。同じファイルに mode=batch で残ります）。評点を付けた問は、次に起動したときに飛ばします。
 
 ### 4.2 ローカル AI（Ollama）と並べる
 
-[Ollama](https://ollama.com/) を入れてモデルを用意すると、`http://localhost:11434` の API に、`tools/ollama_client.py` からつなげます（外の部品は使いません）。
+[Ollama](https://ollama.com/) を入れてモデルを用意すると、`http://localhost:11434` の API に、`tools/past/ollama_client.py` からつなげます（外の部品は使いません）。
 
 ```bash
-python tools/ollama_client.py <モデル名> "こんにちは"      # つながるか確かめる
-python tools/console.py --ai=<モデル名>                   # ことゆいの返事の下に、ローカル AI の返事も並べる
+python tools/past/ollama_client.py <モデル名> "こんにちは"      # つながるか確かめる
+python tools/past/console.py --ai=<モデル名>                   # ことゆいの返事の下に、ローカル AI の返事も並べる
 ```
 
 `Ollama(モデル名).rate(履歴, 返事)` で、返事の自然さの評点（1〜5）と理由も聞けます（評価役の補助。持ち主の評点の代わりではありません）。
@@ -99,8 +99,8 @@ python tools/console.py --ai=<モデル名>                   # ことゆいの�
 ## 5. 自分で集めた会話を足す
 
 ```bash
-python tools/import_dialogues.py my_chats.txt --check
-python tools/import_dialogues.py my_chats.txt --name mine
+python tools/past/import_dialogues.py my_chats.txt --check
+python tools/past/import_dialogues.py my_chats.txt --name mine
 python kotoyui.py --rebuild
 ```
 

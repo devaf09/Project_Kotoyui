@@ -28,6 +28,7 @@ KOTO = KOTO_ROOT
 sys.path.insert(0, KOTO)
 sys.path.insert(0, os.path.join(KOTO, "experiments"))
 sys.path.insert(0, os.path.join(KOTO, "tools"))
+sys.path.insert(0, os.path.join(KOTO, "tools", "past"))  # 前の試しの道具（past/）
 import kotoyui as K  # noqa: E402
 import est_flavor_counts as efc  # noqa: E402
 import textlight  # noqa: E402

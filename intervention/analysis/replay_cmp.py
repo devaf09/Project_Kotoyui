@@ -3,6 +3,7 @@ _HERE = _os.path.dirname(_os.path.abspath(__file__))
 _PRIV = _os.environ.get("KOTOYUI_PRIVATE", _os.path.join(_HERE, "..", "..", "..", "Project_Kotoyui_private")).replace("\\", "/").rstrip("/") + "/"   # 非公開の置き場（記録・結果）
 import json,sys,io
 sys.path.insert(0,_os.path.join(_HERE, ".."))
+sys.path.insert(0, _os.path.join(_HERE, "..", "past"))  # 前の試しの部品（past/）
 import memory_board as MB, i35_route_grain as R
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 P=_PRIV

@@ -55,6 +55,14 @@ class Mix:
         """答え合わせが来なかった問いの分を捨てる（I49zzd: 教えられた 3 つ組だけを聞く使い方で、数えが別の 3 つ組とずれないように）。"""
         self._wait = []
 
+    def take(self):
+        """答え合わせを待っている問いの分を取り出して空にする（I49zzd の反映: 後でその 3 つ組を聞かせる時に give で戻す）。"""
+        w, self._wait = self._wait, []
+        return w
+
+    def give(self, waits):
+        self._wait = list(waits)
+
     def tick(self):
         self.table.tick()
         self.solve.tick()

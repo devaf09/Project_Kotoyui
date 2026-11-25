@@ -89,7 +89,7 @@ flowchart LR
   M --> S
 ```
 
-器と思考のループより前に作った、1 往復の道具です。今の会話のボット（`intervention/chat_bot3.py`）はこの形で動いています。これらの道具を、上の思考のループの「連想」「違和感」「組立」の口に差し込んでいく予定です。部品の名前と環のくわしい説明は [intervention/docs/thinking_parts.md](intervention/docs/thinking_parts.md)。
+器と思考のループより前に作った、1 往復の道具です。今の会話のボット（`intervention/past/chat_bot3.py`）はこの形で動いています。これらの道具を、上の思考のループの「連想」「違和感」「組立」の口に差し込んでいく予定です。部品の名前と環のくわしい説明は [intervention/docs/thinking_parts.md](intervention/docs/thinking_parts.md)。
 
 ### 部品
 
@@ -97,15 +97,15 @@ flowchart LR
 |---|---|---|---|
 | 内面の器 | 時間の流れと自分の状態を持つ | 半減期 1〜1,024 刻みの波 20 本。聞く前に言い当て、外れ（驚き）で感度を自分で調整する。口は `tick`・`hear`・`want`・`settle` の 4 つ | `intervention/i49a_inner_vessel.py` |
 | 思考のループ | 自分で読み、考え、話す | 指揮者が違和感を見て、連想・組立・話す・待つを選ぶ。実験の間は観察と調整の口があり、最後に外して固められる（`seal`） | `intervention/i49c_think_loop.py`・`i49d_two_loops.py` |
-| 3 人の席と聞き返し | 先生と一緒に読む・通じるまで言い直す | 本 → 先生 A → 先生 B → ことゆい → 先生 A の順に番を回す。聞いた語が次の番に拾われたかを数えて、拾われやすさを育てる | `intervention/i49e_three.py`・`i49e_listen.py`・`i49e_askback.py` |
-| 語板 | 語の意味を持つ | 1 語（1 つの意味）= 1 枚の板。出口の明るさが属性（色・形・動き…）の割合 | `intervention/i01_small_world.py`・`board_ops.py`・`lexicon/` |
-| 経験の器（グレイン） | 判断を出す | 場面を記号の組にして数え上げ、「この場面でこうしたら、どうなったか」の割合を答える。すべての判断の土台 | `intervention/i18_combo.py` ほか |
-| 気づきの器・違和感の種類 | 違和感・発見に気づく | 手のしきい値ではなく、本や自分の経験から作った期待と、実際との差で出す。迷い・自信のなさ・組の珍しさ などに分けて持つ | `intervention/chat_bot2.py`・`i38_novelty.py`・`i48bi_odd_kinds.py` |
-| 記憶板・大事な板 | 話したことを覚える | 行の板 → 分 → 時 → 日 → 週。上の段は下の段の和で、消さずに薄れる。名前・予定・頼まれごとは相手ごとに別の板に残す | `intervention/memory_board.py` |
-| 自分の板 | 自分のことに答える | プロフィールの「自分のこと」から、問いの語に近い所を選んで答える | `intervention/self_board.py` |
-| 融合の板と逆引き | 述語の形を自分で組む | 語幹とここまでの流れを融合した板から次の語を出す。意味の組（過去・進行・否定・丁寧）から形を引く | `intervention/i42_fused_flow.py` |
+| 3 人の席と聞き返し | 先生と一緒に読む・通じるまで言い直す | 本 → 先生 A → 先生 B → ことゆい → 先生 A の順に番を回す。聞いた語が次の番に拾われたかを数えて、拾われやすさを育てる | `intervention/past/i49e_three.py`・`i49e_listen.py`・`i49e_askback.py` |
+| 語板 | 語の意味を持つ | 1 語（1 つの意味）= 1 枚の板。出口の明るさが属性（色・形・動き…）の割合 | `intervention/past/i01_small_world.py`・`board_ops.py`・`lexicon/` |
+| 経験の器（グレイン） | 判断を出す | 場面を記号の組にして数え上げ、「この場面でこうしたら、どうなったか」の割合を答える。すべての判断の土台 | `intervention/past/i18_combo.py` ほか |
+| 気づきの器・違和感の種類 | 違和感・発見に気づく | 手のしきい値ではなく、本や自分の経験から作った期待と、実際との差で出す。迷い・自信のなさ・組の珍しさ などに分けて持つ | `intervention/past/chat_bot2.py`・`i38_novelty.py`・`i48bi_odd_kinds.py` |
+| 記憶板・大事な板 | 話したことを覚える | 行の板 → 分 → 時 → 日 → 週。上の段は下の段の和で、消さずに薄れる。名前・予定・頼まれごとは相手ごとに別の板に残す | `intervention/past/memory_board.py` |
+| 自分の板 | 自分のことに答える | プロフィールの「自分のこと」から、問いの語に近い所を選んで答える | `intervention/past/self_board.py` |
+| 融合の板と逆引き | 述語の形を自分で組む | 語幹とここまでの流れを融合した板から次の語を出す。意味の組（過去・進行・否定・丁寧）から形を引く | `intervention/past/i42_fused_flow.py` |
 | 意味の波 | 似た場面を重ねて読む | 語を位相の束（波）にし、行・場面の波を重ねる。すくった後も周波数のまま持ち、語に戻すのは最後だけ。否定は別の周波数の帯で持つ | `intervention/i47_*.py`・`i48_wave_board.py` |
-| 判断の板・つなぎの板 | 手順の間違いを見つける | 答えが違った時、一手ずつ替えて解き直し、道が分かれた一手を覚える。算術と文の圧縮で確かめた | `intervention/i20_judge_board.py`・`i28_route_board.py` |
+| 判断の板・つなぎの板 | 手順の間違いを見つける | 答えが違った時、一手ずつ替えて解き直し、道が分かれた一手を覚える。算術と文の圧縮で確かめた | `intervention/past/i20_judge_board.py`・`i28_route_board.py` |
 
 仕組みの説明は [intervention/docs/mechanisms.md](intervention/docs/mechanisms.md)（算術・文の圧縮）、[intervention/docs/memory_mechanism.md](intervention/docs/memory_mechanism.md)（記憶）、[docs/i48_working_parts.md](docs/i48_working_parts.md)（意味の波で効いた技術と足りない物）、デジタルの重みと手で決めた部分の一覧は [intervention/docs/digital_weights.md](intervention/docs/digital_weights.md)。
 
@@ -210,7 +210,7 @@ python -m pytest tests            # テスト（データは要らない）
 ```bash
 python intervention/i49a_inner_vessel.py --demo /tmp/i49a.npz   # 内面の器の試運転
 python intervention/i49c_think_loop.py   --demo /tmp/i49c.npz   # 自分で読み、話すループ
-python intervention/i49d_two_loops.py    --demo /tmp/i49d.npz   # 考えと気持ちを分けたループ
+python intervention/past/i49d_two_loops.py    --demo /tmp/i49d.npz   # 考えと気持ちを分けたループ
 ```
 
 本を読ませる試し（`tools/i49b_*`・`i49c_read_words.py`・`i49e_*`）は、手元で取った青空文庫の本文と、手元で作った語の波が要ります。先生と読む試しには、先生役の AI（ローカル、または外のサービス）が要ります。
@@ -221,7 +221,7 @@ python intervention/i49d_two_loops.py    --demo /tmp/i49d.npz   # 考えと気�
 python examples/quickstart.py     # 言葉の解析・光の語板・キャラクタを試す（データは要らない）
 bash tools/fetch_dialogue.sh      # 会話のデータを取る（リポジトリの外に置く）
 python kotoyui.py --chat --light  # 話す（初回は表と語板を作る、CPU で約 10 分）
-CUDA_VISIBLE_DEVICES= python intervention/i01_small_world.py --seed 0   # 小さな世界で、分ける・違和感・介入の問い
+CUDA_VISIBLE_DEVICES= python intervention/past/i01_small_world.py --seed 0   # 小さな世界で、分ける・違和感・介入の問い
 ```
 
 環境と手順は [docs/quickstart.md](docs/quickstart.md)、実験の一覧は [intervention/README.md](intervention/README.md)。
@@ -259,17 +259,17 @@ CUDA_VISIBLE_DEVICES= python intervention/i01_small_world.py --seed 0   # 小さ
 
 - コード・文書・assets/ の表: MIT ライセンス（[LICENSE](LICENSE)、Copyright (c) 2026 devaf09）。vendor/ のコードも同じ著作権者の MIT です。
 - 学習した重み・数えた表は公開しません（会話のデータから作るため）。tools/ の取得ツールで、使う人がデータを取り、手元で作ります。
-- データはリポジトリに入れていません。会話のデータ・それから作った表・例は、リポジトリの外の非公開の置き場 `../Project_Kotoyui_private/data/` に置きます（2026-11-03 から。置き場は環境変数 `KOTOYUI_DATA` で変えられます。取得は `bash tools/fetch_dialogue.sh`・`python tools/fetch_aozora.py`）。使っているデータ:
+- データはリポジトリに入れていません。会話のデータ・それから作った表・例は、リポジトリの外の非公開の置き場 `../Project_Kotoyui_private/data/` に置きます（2026-11-03 から。置き場は環境変数 `KOTOYUI_DATA` で変えられます。取得は `bash tools/fetch_dialogue.sh`・`python tools/past/fetch_aozora.py`）。使っているデータ:
 
 | データ | 取得元 | ライセンス・条件 | 使い方 |
 |---|---|---|---|
-| 青空文庫の小説（分類 913・新字新仮名、作品・作者とも著作権フラグなし。最初の 1,000 作品と、2026-10-24 に足した残りの作品） | [青空文庫](https://www.aozora.gr.jp/)（公式の作品一覧 list_person_all_extended_utf8.zip から。最初の 1,000 作品は SN2-Parts-2D が取得したものを持ち主の許可を得て写した。残りは tools/fetch_aozora.py） | 著作権の切れた作品。青空文庫の「収録ファイルの取り扱い規準」により自由に利用できる | 会話文（「」の中）を取り出して、話者の見分けと次の単位の予測に使う |
+| 青空文庫の小説（分類 913・新字新仮名、作品・作者とも著作権フラグなし。最初の 1,000 作品と、2026-10-24 に足した残りの作品） | [青空文庫](https://www.aozora.gr.jp/)（公式の作品一覧 list_person_all_extended_utf8.zip から。最初の 1,000 作品は SN2-Parts-2D が取得したものを持ち主の許可を得て写した。残りは tools/past/fetch_aozora.py） | 著作権の切れた作品。青空文庫の「収録ファイルの取り扱い規準」により自由に利用できる | 会話文（「」の中）を取り出して、話者の見分けと次の単位の予測に使う |
 | RealPersonaChat 1.0.0（名古屋大学・京都大学） | [nu-dialogue/real-persona-chat](https://github.com/nu-dialogue/real-persona-chat)（tools/fetch_dialogue.sh） | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)。話者を特定しようとしない・特定の話者へのなりすましに使わない | 現代の 1 対 1 の雑談。話者の番号つき |
 | JMultiWOZ 1.0（名古屋大学ほか） | [nu-dialogue/jmultiwoz](https://github.com/nu-dialogue/jmultiwoz)（2026-11-02 取得） | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) | 旅行の案内の対話。返事の選び方の数え上げ（共鳴・状態遷移・格の好み）に使う |
 | MRMP 1.0.0（Multi-Relational Multi-Party Chat、名古屋大学） | [nu-dialogue/multi-relational-multi-party-chat-corpus](https://github.com/nu-dialogue/multi-relational-multi-party-chat-corpus) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)。話者を特定しようとしない・なりすましに使わない | 3 人の雑談。意味の波（I47）で、返事の流れを学ぶ・測る |
 | 名大会話コーパス（国立国語研究所） | [mmsrv.ninjal.ac.jp/nucc](https://mmsrv.ninjal.ac.jp/nucc/)（tools/fetch_dialogue.sh） | [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/)。非営利、加工したデータは配らない。文献: 藤村逸子・大曾美恵子・大島ディヴィッド義和（2011）「会話コーパスの構築によるコミュニケーション研究」藤村逸子・滝沢直宏編『言語研究の技法：データの収集と分析』ひつじ書房 | 現代の雑談の書き起こし。話者の番号つき |
 
-どのデータも、取り直したものが同じか確かめられるように、取得元・取得日・ファイルの指紋を 非公開の置き場の MANIFEST.json（python tools/make_manifest.py）に記録しています。学習した重みは、当面公開しません（名大会話コーパスの改変禁止の条件のため。公開するときは名大会話コーパスを学習から外した版を作る）。
+どのデータも、取り直したものが同じか確かめられるように、取得元・取得日・ファイルの指紋を 非公開の置き場の MANIFEST.json（python tools/past/make_manifest.py）に記録しています。学習した重みは、当面公開しません（名大会話コーパスの改変禁止の条件のため。公開するときは名大会話コーパスを学習から外した版を作る）。
 
 data_wild/（出どころ・ライセンスがはっきりしないデータの置き場）も非公開の置き場 `../Project_Kotoyui_private/data_wild/` にあり、このリポジトリの結果・例・図には使いません。
 

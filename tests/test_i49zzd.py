@@ -158,3 +158,68 @@ def test_unheard_run_direct_and_only_when_wrong():
     assert sum(c["当たりに変わった"] for c in s["外付けを使った段の組"].values()) == s["当たりに変わった"]
     w = R.run_unheard(get, get, _talks(), rates=(1.0,), ks=(0,), dim=1024, ext=True, when="外れた時")["元の順"]["介入 100%"]
     assert 0 < w["教えた数"] <= s["教えた数"] and w["本体の答えが板なしと違った数"] == 0
+
+
+def test_reflect_moves_taught_triples_into_body_and_empties_ext():
+    import i49zzd_taught_body as Z
+    t = Z.TaughtBody(Fixed("振る"), Echo(), fresh=Echo, reflect=True)
+    tri = ("太郎", "りんご", "食べる")
+    t.ask(2, ("太郎", "りんご", None), ["食べる", "振る"])
+    t.teach(2, tri, "振る")
+    t.settle(tri)
+    assert t.ext.heard == [tri] and not t.body.heard                    # 話の途中は、外付けだけが知っている
+    t.rest()
+    assert t.body.heard == [tri] and not t.ext.heard and t.n == 0 and t.reflected == 1     # 話の終わりに本体へ反映し、外付けは空
+    t.rest()
+    assert t.body.heard == [tri]                                        # 反映する物が無ければ、何もしない
+
+
+def test_save_and_restore_bring_body_back():
+    import i49zzd_taught_body as Z
+    t = Z.TaughtBody(Fixed("振る"), Echo(), fresh=Echo, reflect=True)
+    snap = t.save()
+    tri = ("太郎", "りんご", "食べる")
+    t.teach(2, tri, "振る")
+    t.settle(tri)
+    t.rest()
+    assert t.body.heard == [tri]
+    t.restore(snap)
+    assert t.body.heard == [] and not t.ext.heard                       # セーブした所まで戻る
+    assert snap.heard == []                                             # セーブそのものは、反映で書き換わらない
+
+
+def test_unheard_run_reflect():
+    import i49zx_teach_board_run as R
+    get = lambda w: small(w[0])
+    d = R.run_unheard(get, get, _talks(), rates=(1.0,), ks=(0,), dim=1024, ext=True, direct=True, reflect=True)["元の順"]
+    s = d["介入 100%"]
+    r = s["話の終わりに本体へ反映する"]
+    assert r["反映した三つ組"] == s["教えた数"] > 0 and r["セーブから戻した本体の答えが元と違った数"] == 0
+    assert r["当たり"] >= d["本体だけ（後半を聞かない）"]["本体"]
+    g = s["答えが違った問いの、数えの差ごと"]                                        # 選ぶ時に見た数えの差ごとの数えが付く
+    assert all(v["問い"] >= v["外付けだけ当たり"] + v["本体だけ当たり"] for v in g.values())
+    vs = r["本体が後半も聞く時との比べ"]                                           # 問いごとに「本体が後半も聞く」と比べた数が付く
+    assert sum(v["問い"] for k, v in vs.items() if k.endswith("使った問い")) == d["本体だけ（後半を聞かない）"]["問い"]
+    for name in ("比べ役・話の終わりにまとめて聞く", "比べ役・すぐ聞くが段の数えを止める"):   # 越えた理由を分ける比べ役が付く
+        assert 0 <= d[name]["本体"] <= 1
+
+
+def test_reflect_can_advance_the_body_tally():
+    # 反映の時に、本体の中の段の数えも進める形: 教えが届いた席の問いの分だけ、反映で答え合わせをする
+    import i49_foundation as FD
+    import i49zzd_taught_body as Z
+    get = lambda w: small(w[0])
+    tri = (("犬", "NOUN"), ("骨", "NOUN"), ("かじる", "VERB"))
+    for flag, want in ((False, 0), (True, 1)):
+        fresh = lambda: FD.body(get, get)
+        base = fresh()
+        base.learn(tri)
+        base.tick()
+        t = Z.TaughtBody(base, fresh(), fresh=fresh, reflect=True, tally_body=flag)
+        before = sum(h[2] for h in t.body.tally.values())
+        t.ask(2, (tri[0], tri[1], None), [tri[2], ("読む", "VERB")])
+        t.teach(2, tri, None)
+        t.ask(1, (tri[0], None, tri[2]), [tri[1], ("本", "NOUN")])          # 教えが届かなかった席の問いは数えない
+        t.settle(tri)
+        t.tick()
+        assert sum(h[2] for h in t.body.tally.values()) - before == want

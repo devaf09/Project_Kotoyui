@@ -33,8 +33,8 @@ SN2-Parts-2D（2 次元の SinWave の部品集）の光の部品（vendor/sn2_p
                         話し相手の身内は対話者グレインと一緒に保存し、次に話すとき「お母さまはお元気ですか？」と聞く。
                         主語を隠して人称を当てる実験19〜21 で、発言 1 つの手がかりでは誰の話かが 55% ほどしか決まらなかったため、会話を通して人を追う。
     0.3.0 (2026-11-03)  共感の「〜んですね」を、気持ち・困りごとが出ている発言にだけ付ける（ほかは 2 割。Bot(empathy_plain=…)、人格の重み「共感の強さ_ふだん」）。
-                        持ち主の評点で「〜んですね」が多すぎて不自然だったため。ローカル AI の評点で比べた（tools/eval_ai.py）。
-                        会話コンソール（tools/console.py）・ローカル AI の接続（tools/ollama_client.py）。
+                        持ち主の評点で「〜んですね」が多すぎて不自然だったため。ローカル AI の評点で比べた（tools/past/eval_ai.py）。
+                        会話コンソール（tools/past/console.py）・ローカル AI の接続（tools/past/ollama_client.py）。
     0.2.0 (2026-11-03)  次の発言の共鳴を、語板（1 語 = 1 台の光の器、Sin-CNN3 のライブラリ sincnn3 0.1.0 の器の形）で持てるようにした（LightResonance、
                         Bot(light=True) か --light。既定は数え上げのまま）。10 択で数え上げの PMI 59.0% に対して 57.9%（3 seed、実験09）。
     0.1.0 (2026-11-02)  Sin-CNN3 のテストボット02（tools/testbot02.py と実験115・119・120・121、コミット 9cbca0a）を、関数とクラスにまとめ直して取り込んだ
@@ -152,7 +152,7 @@ JMW_FILE = os.path.join(DATA, "jmultiwoz", "dataset", "JMultiWOZ_1.0", "dialogue
 
 def load_conversations():
     """会話 → {"train": [(出どころ, 発言の並び)], "test": [...]}（4 発言以上の会話だけ）。出どころは "rpc"（RealPersonaChat、雑談）・
-    "jmw"（JMultiWOZ、旅行の案内の対話。あれば）・"own"（使う人が自分で集めた会話。DATA/own/*.jsonl、tools/import_dialogues.py で作る。あれば）。
+    "jmw"（JMultiWOZ、旅行の案内の対話。あれば）・"own"（使う人が自分で集めた会話。DATA/own/*.jsonl、tools/past/import_dialogues.py で作る。あれば）。
     会話ごとに教え 9 : 試し 1（会話の番号の crc32）。"""
     import glob
     convs = {"train": [], "test": []}

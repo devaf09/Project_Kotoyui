@@ -1,6 +1,6 @@
 # I48 のコードの形と整理の段取り
 
-持ち主の不安点 7（コードを整理して分けた方が良いか）への答え。整理の前後で数字が 1 つも変わらない事を、答え合わせの道具（`tools/i48_golden.py`）で確かめながら進める。
+持ち主の不安点 7（コードを整理して分けた方が良いか）への答え。整理の前後で数字が 1 つも変わらない事を、答え合わせの道具（`tools/past/i48_golden.py`）で確かめながら進める。
 
 ## 1. 今の形（2026-11-19）
 
@@ -53,7 +53,7 @@ intervention/i48a*_*.py   試し（main と、その試しだけの差し込み�
 1. **入口をまとめる**（済み）。
    - `i48core` で、今の実装を部品の名前で見せる（中身は動かさない）。
    - 手の値の一覧（`i48core.hands.HANDS`）。
-   - 答え合わせの道具（`tools/i48_golden.py`）。
+   - 答え合わせの道具（`tools/past/i48_golden.py`）。
 2. **選びの本体に差し込みの口を作る**（済み）。
    - `AK.Model` の `gap_scores`・`refresh`・`clone` に `extras` を通した。
    - 差し込みにした物:
@@ -103,8 +103,8 @@ AK.Model.gap_scores: 今の点 ＋ 介入の別の板（Li） ＋ Σ extras の 
 ## 4. 答え合わせ
 
 ```
-python tools/i48_golden.py --conllu <tatoeba_ginza.conllu> --content <content_boards.json> --func <func_boards.json> --out golden.json   # 整理の前に 1 回
-python tools/i48_golden.py --conllu ... --content ... --func ... --check golden.json                                                  # 段ごとに
+python tools/past/i48_golden.py --conllu <tatoeba_ginza.conllu> --content <content_boards.json> --func <func_boards.json> --out golden.json   # 整理の前に 1 回
+python tools/past/i48_golden.py --conllu ... --content ... --func ... --check golden.json                                                  # 段ごとに
 ```
 
 - 学び 5,000 文・試し 200 文。次の 4 つの数え（間・文末・文・助詞ごとの当たりと害・と の例の順位・β）が、小数 1e-9 まで同じなら「同じ」。

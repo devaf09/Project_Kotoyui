@@ -1,7 +1,7 @@
 # 介入の研究: いまの記憶の仕組み（I1〜I10 の時点、2026-11-05）
 
 図: [mech_4_memory.png](mech_4_memory.png)（全体図）、[mech_5_memory_time.png](mech_5_memory_time.png)（時間の流れ）。
-図を描くコード: リポジトリの `intervention/tools_fig_memory.py`（出力先は `--out` で非公開のフォルダを指定）。
+図を描くコード: リポジトリの `intervention/past/tools_fig_memory.py`（出力先は `--out` で非公開のフォルダを指定）。
 
 ## ひとことで
 

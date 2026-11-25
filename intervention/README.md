@@ -79,4 +79,4 @@
 
 仕組みの説明は [docs/mechanisms.md](docs/mechanisms.md)、デジタルの重み・手で決めた部分の一覧は [docs/digital_weights.md](docs/digital_weights.md)。
 
-実行（CPU だけ）: `CUDA_VISIBLE_DEVICES= python intervention/i01_small_world.py --seed 0`
+実行（CPU だけ）: `CUDA_VISIBLE_DEVICES= python intervention/past/i01_small_world.py --seed 0`

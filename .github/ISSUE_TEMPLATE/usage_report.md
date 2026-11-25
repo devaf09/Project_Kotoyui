@@ -8,6 +8,6 @@ labels: usage-report
 知らせてくれてありがとうございます。書ける所だけで構いません。
 
 - 何に使いましたか（研究・製品・記事・授業・個人の試し など）:
-- 使った部分（例: intervention/memory_board.py、意味の波の考え方）:
+- 使った部分（例: intervention/past/memory_board.py、意味の波の考え方）:
 - 公開している物があればリンク:
 - ひとこと（良かった所・困った所）:
