@@ -15,6 +15,7 @@
   4. 見せていない式の答えを当てる（黄金比の並びで 5 つに 1 つを取り分ける）。
      波で選ぶ（候補は覚えた式に出た答えの全部）、一番多い答えを言い続ける。外れの大きさ（数の差の平均）も出す。
      位相の足し算で選ぶ形は、答えが 1 文字の式だけで数える。
+  5. ずれを運ぶ（shift_test）: 見せていない式を、片方の数だけが 1 違う覚えた式から運んで答える（2+3=5 から 3+3= を答える）。
 `--base 16` で、0〜F の 16 進の世界で同じ事を数える（他は同じ）。
 手で置いた物: 世界の作り方、取り分ける割合、確かめ用の並べ替えの作り方、位相の足し算で選ぶ時の決まり（φ(0) を 0 とし、＋は足し、−は引き、一番近い数字を取る）。
 """
@@ -177,6 +178,90 @@ def held_out(lines, offsets=True, digits=DIGITS):
     return out
 
 
+def neighbours(x, train, digits, step=1):
+    """x と、片方の数だけが step 違う、覚えた式。→ (覚えた式, どちらの数が違うか 0/2, 違う数の元, 違う数の今)。"""
+    out = []
+    for y in train:
+        if y[1] != x[1] or len(ans(y)) != 1:
+            continue
+        for pos, other in ((0, 2), (2, 0)):
+            if y[other] == x[other] and abs(digits.index(y[pos]) - digits.index(x[pos])) == step:
+                out.append((y, pos, y[pos], x[pos]))
+    return out
+
+
+def learn_signs(train, f):
+    """片方の数だけが違う覚えた式の組で、数の位相が増えた時に答えの位相が増えたか減ったかを数える。→ (＋か−, どちらの数) ごとの向き。
+    「引く数が増えると答えは減る」を手で与えないための数え。"""
+    cnt = {}
+    one = [y for y in train if len(ans(y)) == 1]
+    for i, y in enumerate(one):
+        for z in one[i + 1:]:
+            if y[1] != z[1]:
+                continue
+            for pos, other in ((0, 2), (2, 0)):
+                if y[other] == z[other] and y[pos] != z[pos] and ans(y) != ans(z):
+                    same = (f[y[pos]] - f[z[pos]]) * (f[ans(y)] - f[ans(z)]) > 0
+                    c = cnt.setdefault((y[1], pos), [0, 0])
+                    c[0 if same else 1] += 1
+    return {k: (1 if v[0] >= v[1] else -1) for k, v in cnt.items()}
+
+
+def vote(preds):
+    c = {}
+    for p in preds:
+        c[p] = c.get(p, 0) + 1
+    return sorted(c, key=lambda k: (-c[k], k))[0] if c else None
+
+
+def shift_test(lines, offsets=True, digits=DIGITS, step=1):
+    """持ち主の頼み:「２＋３＝５の位相を３＋３＝に合わせると６にはなれるか」。
+    見せていない式（答えが 1 文字）を、片方の数だけが step 違う覚えた式から運んで答える。3 通りを並べる:
+      そのまま借りる: 覚えた式の答えをそのまま言う（表の借り方。必ず外れる）。
+      位相で運ぶ: 答えの位相 + 向き ×（今の数の位相 − 元の数の位相）に一番近い数字。位相は強い 2 つの向きの面の角度。
+      位置で運ぶ: 同じ事を、一番強い向きの上の座標（グラデーションそのもの）でやる。
+      順で運ぶ: 位置の順に数字を並べ、その並びの上で同じ歩数だけ動く（間隔を等しいとみなす。ここは手で置いた物）。
+    向き（増えるか減るか）は learn_signs で数える。位相も向きも、覚えた式だけから作る。"""
+    order = golden_order(len(lines))
+    test = [lines[i] for k, i in enumerate(order) if k % HOLD == 0]
+    hold = set(test)
+    train = [x for x in lines if x not in hold]
+    w = CharWave(offsets=offsets)
+    for x in train:
+        w.learn(x)
+    have, ph = w.phase(digits)
+    _, p, _ = w.plane(digits)
+    f = dict(zip(have, [float(v) for v in ph]))            # 位相（強い 2 つの向きの面の角度）
+    g = dict(zip(have, [float(v) for v in p[:, 0]]))       # 位置（一番強い向きの上の座標）
+    ranked = sorted(have, key=lambda c: (g[c], c))
+    rk = {c: float(i) for i, c in enumerate(ranked)}       # 順（位置の順に並べた時の番号）
+    reads = {"位相で運ぶ": f, "位置で運ぶ": g, "順で運ぶ": rk}
+    signs = {k: learn_signs(train, v) for k, v in reads.items()}
+    keys = ("そのまま借りる",) + tuple(reads)
+    res = {k: dict(当たり=0.0, 外れの大きさ=0.0) for k in keys}
+    n = 0
+    for x in test:
+        if len(ans(x)) != 1 or any(c not in f for c in (x[0], x[2])):
+            continue
+        nb = [t for t in neighbours(x, train, digits, step) if ans(t[0]) in f]
+        if not nb:
+            continue
+        n += 1
+        preds = {k: [] for k in keys}
+        for y, pos, old, new in nb:
+            preds["そのまま借りる"].append(ans(y))
+            for k, v in reads.items():
+                t = v[ans(y)] + signs[k].get((x[1], pos), 1) * (v[new] - v[old])
+                preds[k].append(min(have, key=lambda c: (abs(v[c] - t), c)))
+        for k in keys:
+            got = vote(preds[k])
+            res[k]["当たり"] += got == ans(x)
+            res[k]["外れの大きさ"] += abs(num(got, digits) - num(ans(x), digits))
+    return dict(試した式=n, 位置の順が数の順と同じ=bool(ranked == list(have) or ranked == list(have)[::-1]),
+                数えた向き={"%s の %s" % (op, "前の数" if pos == 0 else "後ろの数"): v for (op, pos), v in sorted(signs["位置で運ぶ"].items())},
+                **{k: {a: round(b / max(n, 1), 4) for a, b in v.items()} for k, v in res.items()})
+
+
 def run(lines, offsets=True, digits=DIGITS):
     w = CharWave(offsets=offsets)
     for x in lines:
@@ -186,7 +271,8 @@ def run(lines, offsets=True, digits=DIGITS):
     return dict(式=len(lines), 席=len(w.seat), 数の差ごとの近さ=by_diff(w, digits), 位相=phase_report(w, digits),
                 足すと引くの近さ=round(w.near("+", "-"), 4), 等しいと足すの近さ=round(w.near("=", "+"), 4),
                 位相の足し算が合う式の割合_全部覚えた時=round(sum(seen) / max(len(seen), 1), 4),
-                見せていない式=held_out(lines, offsets, digits))
+                見せていない式=held_out(lines, offsets, digits),
+                ずれを運ぶ=shift_test(lines, offsets, digits))
 
 
 def main():

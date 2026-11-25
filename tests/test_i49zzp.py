@@ -79,3 +79,23 @@ def test_hex_world():
     add, sub = R.ring_world(R.HEX)
     assert "F+3=2" in add
     assert R.run(add + sub, True, R.HEX)["位相"]["数字の波の散らばり"] < 1e-3     # 16 進でも、回数の偏りが無ければ波は全部同じ
+
+
+def test_shift_carries_the_answer():
+    # 2+3=5 を覚えていて、3+3= に答える。小さい世界では、位置で運ぶ形が、借りるだけの形と、答えを入れ替えた世界を大きく上回る。
+    add, sub = R.world()
+    r = R.shift_test(add + sub)
+    assert r["そのまま借りる"]["当たり"] == 0.0                      # 片方が 1 違う式の答えは、必ず違う
+    assert r["位置で運ぶ"]["当たり"] > .6
+    assert r["数えた向き"] == {"+ の 前の数": 1, "+ の 後ろの数": 1, "- の 前の数": 1, "- の 後ろの数": -1}
+    null = R.shift_test(R.null_world(add + sub))
+    assert null["位置で運ぶ"]["当たり"] < .3
+
+
+def test_neighbours_and_signs():
+    train = ["2+3=5", "3+2=5", "4+3=7", "5-2=3", "5-3=2"]
+    nb = R.neighbours("3+3=6", train, R.DIGITS)
+    assert {(y, pos) for y, pos, _, _ in nb} == {("2+3=5", 0), ("4+3=7", 0), ("3+2=5", 2)}
+    f = {c: float(i) for i, c in enumerate(R.DIGITS)}
+    assert R.learn_signs(train, f) == {("+", 0): 1, ("-", 2): -1}
+    assert R.vote(["6", "6", "7"]) == "6" and R.vote([]) is None
