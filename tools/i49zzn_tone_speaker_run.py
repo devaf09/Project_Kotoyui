@@ -107,7 +107,7 @@ def guess_speaker(talks):
                 cnt[x["who"]] = cnt.get(x["who"], 0) + 1
                 p = prof.setdefault(x["who"], {})
                 for t in x["tails"]:
-                    for s in set(ZL.spans(t)):
+                    for s in sorted(set(ZL.spans(t))):
                         j = ix.setdefault(s, len(ix))
                         p[j] = p.get(j, 0) + 1
             if len(prof) < 2:
@@ -125,7 +125,7 @@ def guess_speaker(talks):
                     continue
                 v = np.zeros(len(ix), dtype=np.float32)
                 for t in x["tails"]:
-                    for s in set(ZL.spans(t)):
+                    for s in sorted(set(ZL.spans(t))):
                         if s in ix:
                             v[ix[s]] += 1
                 sc = m @ v

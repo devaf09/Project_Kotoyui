@@ -19,49 +19,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import time
 
 import numpy as np
 
-TAIL = 6       # 文の終わりの何文字を見るか（手で置いた値）
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "intervention"))
+
+from i49_situation import CUT, DROP, PHI, STRIP, TAIL, distinct, golden_order, sentences, spans, tail_of  # noqa: E402,F401  文を切る部品は i49_situation に有る
+
 SEATS2 = 2000  # 2 で席にする切り出しの数（手で置いた値）
 MIN = 30       # 数える終わりの切り出しの、出た回数の下限（手で置いた値）
-PHI = 0.6180339887498949
-CUT = re.compile(r"[。！？!?]+")
-DROP = re.compile(r"[「」『』（）()〔〕［］\[\]【】〈〉《》\s　…‥・、，,.．―─－ー〜～\"'“”‘’]+$")
-STRIP = re.compile(r"[「」『』（）()〔〕［］\[\]【】〈〉《》\s　\"'“”‘’]")
-
-
-def sentences(lines):
-    for line in lines:
-        for s in CUT.split(STRIP.sub("", line)):
-            s = DROP.sub("", s)
-            if len(s) >= 2:
-                yield s
-
-
-def spans(text):
-    return [text[i:j] for i in range(len(text)) for j in range(i + 1, len(text) + 1)]
-
-
-def tail_of(s, seats=()):
-    """文の終わりの TAIL 文字。seats を渡した時は、最後の時の語より後ろだけを見る（時の語そのものを終わりに数えない）。"""
-    cut = 0
-    for w in seats:
-        i = s.rfind(w)
-        if i >= 0:
-            cut = max(cut, i + len(w))
-    return DROP.sub("", s[cut:].lstrip("、，, 　はもにでがをのと"))[-TAIL:] if cut else s[-TAIL:]
-
-
-def distinct(sents):
-    """同じ文は 1 回だけ数える（芝居の決まり文句などが何度も出て、向きを引っ張るのを避ける）。初めて出た順。"""
-    seen = {}
-    for s in sents:
-        seen.setdefault(s, None)
-    return list(seen)
 
 
 def seats_in(s, seats):
@@ -73,10 +41,6 @@ def seats_in(s, seats):
             out += [w] * n
             s = s.replace(w, "\0")
     return out
-
-
-def golden_order(n):
-    return sorted(range(n), key=lambda i: ((i + 1) * PHI) % 1.0)
 
 
 class Table:

@@ -27,81 +27,9 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, "..", "intervention")]
 
+import i49_situation as SIT
 import i49zzl_tense_text_run as ZL
-
-SEATS = 1000   # 席にする前の文の終わりの切り出しの数（手で置いた値）
-MIN = 30       # 数える今の文の終わりの切り出しの、出た回数の下限（手で置いた値）
-POLITE = ("ます", "です", "ました", "でした", "ません", "でしょう", "ましょう", "ございま")
-TRAIL = "よねわなのかぞさぜ"
-
-
-def marks(tail):
-    """読むための 3 つの印（丁寧・過去・問い）。手で決めた物で、学習には使わない。"""
-    core = tail.rstrip(TRAIL)
-    return dict(丁寧=any(p in tail for p in POLITE), 過去=core.endswith("た"), 問い=tail.endswith(("か", "かい", "かね", "の")))
-
-
-def pairs_of(lines):
-    """→ (同じ行の中の組, 行をまたぐ組)。組は (前の文の終わり, 今の文の終わり)。同じ組は 1 回だけ。"""
-    inside, across = {}, {}
-    last = None
-    for line in lines:
-        ss = [ZL.tail_of(s) for s in ZL.sentences([line])]
-        if not ss:
-            last = None
-            continue
-        if last is not None:
-            across.setdefault((last, ss[0]), None)
-        for a, b in zip(ss, ss[1:]):
-            inside.setdefault((a, b), None)
-        last = ss[-1]
-    return list(inside), list(across)
-
-
-class Assoc:
-    """今の文の終わりの切り出し × 前の文の終わりの切り出し（席）の回数から、平均を引いた波を作る。"""
-
-    def __init__(self, train, seats=None, min_count=None):
-        seats = SEATS if seats is None else seats
-        mc = MIN if min_count is None else min_count
-        pc, cc = {}, {}
-        for p, c in train:
-            for x in set(ZL.spans(p)):
-                pc[x] = pc.get(x, 0) + 1
-            for x in set(ZL.spans(c)):
-                cc[x] = cc.get(x, 0) + 1
-        self.seats = sorted(pc, key=lambda x: (-pc[x], x))[:seats]
-        self.units = sorted((x for x, n in cc.items() if n >= mc), key=lambda x: (-cc[x], x))
-        self.six = {x: i for i, x in enumerate(self.seats)}
-        self.uix = {x: i for i, x in enumerate(self.units)}
-        nu, ns = len(self.units), len(self.seats)
-        flat = np.zeros(nu * ns, dtype=np.float64)
-        buf = []
-        for p, c in train:
-            us, ps = self.ids(c, self.uix), self.ids(p, self.six)
-            if len(us) and len(ps):
-                buf.append((us[:, None] * ns + ps[None, :]).ravel())
-            if len(buf) >= 4096:
-                flat += np.bincount(np.concatenate(buf), minlength=nu * ns)
-                buf = []
-        if buf:
-            flat += np.bincount(np.concatenate(buf), minlength=nu * ns)
-        m = flat.reshape(nu, ns)
-        tot = m.sum(axis=0)
-        n = m.sum(axis=1, keepdims=True)
-        self.w = (m / np.where(n > 0, n, 1) - (tot / max(tot.sum(), 1))[None, :]).astype(np.float32) if nu and ns else np.zeros((nu, ns), dtype=np.float32)
-
-    @staticmethod
-    def ids(tail, ix):
-        return np.array(sorted({ix[x] for x in ZL.spans(tail) if x in ix}), dtype=np.int64)
-
-    def score(self, prev, cur):
-        us, ps = self.ids(cur, self.uix), self.ids(prev, self.six)
-        return float(self.w[np.ix_(us, ps)].sum()) if len(us) and len(ps) else 0.0
-
-
-def overlap(prev, cur):
-    return len(set(ZL.spans(prev)) & set(ZL.spans(cur)))
+from i49_situation import Assoc, marks, overlap, pairs_of, runs_of  # noqa: F401  波の部品は i49_situation に有る
 
 
 def two_choice(a, held):
@@ -164,22 +92,6 @@ def run_one(pairs):
     share, dirs = directions(a)
     return dict(組=len(pairs), 席=len(a.seats), 数えた切り出し=len(a.units), 二つから選ぶ=two_choice(a, held),
                 続き方=carry(pairs), 独立に動く向き=share, 強い向き=dirs)
-
-
-def runs_of(lines):
-    """空の行を続きの切れ目として、続きごとの発話の並びにする。発話は (初めの文の終わり, 最後の文の終わり)。"""
-    runs, cur = [], []
-    for line in lines:
-        ss = [ZL.tail_of(x) for x in ZL.sentences([line])]
-        if not line.strip():
-            if cur:
-                runs.append(cur)
-            cur = []
-        elif ss:
-            cur.append((ss[0], ss[-1]))
-    if cur:
-        runs.append(cur)
-    return runs
 
 
 def run_lags(runs, max_lag=4):
@@ -284,7 +196,7 @@ def main():
         lines = []
         for f in a.text.split(","):
             lines += open(f, encoding="utf-8", errors="replace").read().split("\n")
-        res = dict(行=len(lines), 手で置いた値=dict(TAIL=ZL.TAIL, SEATS=SEATS, MIN=MIN), **(run_breaks if a.breaks else run_lags)(runs_of(lines)))
+        res = dict(行=len(lines), 手で置いた値=dict(TAIL=ZL.TAIL, SEATS=SIT.SEATS, MIN=SIT.MIN), **(run_breaks if a.breaks else run_lags)(runs_of(lines)))
         res["秒"] = round(time.time() - t0)
         json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         return
@@ -293,7 +205,7 @@ def main():
     for f in a.text.split(","):
         lines += open(f, encoding="utf-8", errors="replace").read().splitlines()
     inside, across = pairs_of(lines)
-    res = dict(行=len(lines), 手で置いた値=dict(TAIL=ZL.TAIL, SEATS=SEATS, MIN=MIN), 同じ行の中=run_one(inside), 行をまたぐ=run_one(across))
+    res = dict(行=len(lines), 手で置いた値=dict(TAIL=ZL.TAIL, SEATS=SIT.SEATS, MIN=SIT.MIN), 同じ行の中=run_one(inside), 行をまたぐ=run_one(across))
     res["秒"] = round(time.time() - t0)
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 

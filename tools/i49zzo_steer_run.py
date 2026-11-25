@@ -23,12 +23,18 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, "..", "intervention")]
 
+import i49_situation as SIT
 import i49zzl_tense_text_run as ZL
 import i49zzm_prev_tail_run as ZM
+from i49_situation import across_pairs, joins, rewrite  # noqa: F401  書き替えの部品は i49_situation に有る
+
+
+def marks(tail):
+    """読むための印（古風も入れる）。"""
+    return SIT.marks(tail, old=True)
 
 COUNT = 20   # 候補にする終わりの、出た回数の下限（手で置いた値）
 TOP = 50     # 割合を見る上位の数（手で置いた値）
-OLD = ("ござ", "まする", "おりま", "じゃ", "ぬ", "申し")
 # 状況の名前 → (波の名前, 向き, 前の文の終わりとして入れる物)
 PROBES = {
     "間柄: 丁寧": ("間柄", "+", ("ですね", "ました", "ますよ")),
@@ -42,12 +48,6 @@ PROBES = {
 }
 MARK_OF = {"間柄": "丁寧", "時": "過去", "言葉づかい": "古風", "やり取り": "問い"}
 STEMS = ("行", "知", "思", "来", "分", "い")
-
-
-def marks(tail):
-    m = ZM.marks(tail)
-    m["古風"] = any(x in tail for x in OLD)
-    return m
 
 
 def candidates(tails):
@@ -73,49 +73,8 @@ def steer(assoc, cands):
     return dict(候補=len(cands), 候補の全体の割合=base, 状況ごとの上位の割合=share, 例=examples)
 
 
-def across_pairs(runs):
-    """1 個前の発話の最後の文の終わり → 今の発話の初めの文の終わり（続きの切れ目はまたがない。同じ組は 1 回）。"""
-    across = {}
-    for r in runs:
-        for i in range(1, len(r)):
-            across.setdefault((r[i - 1][1], r[i][0]), None)
-    return across
-
-
-JOIN = 2     # つなぎ目の左側として見る文字の数（手で置いた値）
-SEEN = 3     # つなぎ目が材料に出た回数の下限（手で置いた値）
 PICK = 6     # 材料から抜き出す行の数（手で置いた値）
 MODE_OF = {"間柄": "同じ話し手が続ける", "言葉づかい": "同じ話し手が続ける", "時": "次の話し手が受ける", "やり取り": "次の話し手が受ける"}
-
-
-def joins(sents):
-    """つなぎ目の表: 文の終わりを k 文字（1〜TAIL）で切った時の、左の JOIN 文字 → 右の終わり → 出た回数。
-    分ける道具は使わない。「この 2 文字の後に、この終わりが続いた事が有る」を数えるだけ。"""
-    out = {}
-    for s in sents:
-        for k in range(1, ZL.TAIL + 1):
-            if len(s) >= k + JOIN:
-                d = out.setdefault(s[-k - JOIN:-k], {})
-                e = s[-k:]
-                d[e] = d.get(e, 0) + 1
-    return out
-
-
-def rewrite(sent, probe, assoc, table, n=1):
-    """行の終わりだけを書き替える。切る所（終わりの 1〜TAIL 文字）ごとに、左の JOIN 文字の後に材料で SEEN 回以上続いた終わりへ替え、
-    状況（probe）との合い方が一番高い物を取る。元の行と同じ物は除く。→ 上から n 個の (書き替えた行, 点)。"""
-    best = {}
-    for k in range(1, ZL.TAIL + 1):
-        if len(sent) < k + JOIN:
-            continue
-        for e, c in table.get(sent[-k - JOIN:-k], {}).items():
-            new = sent[:-k] + e
-            if c < SEEN or new == sent:
-                continue
-            sc = sum(assoc.score(p, ZL.tail_of(new)) for p in probe)
-            if new not in best or sc > best[new]:
-                best[new] = sc
-    return sorted(best.items(), key=lambda x: (-x[1], x[0]))[:n]
 
 
 def run_rewrite(lines, extra=()):
@@ -147,13 +106,13 @@ def main():
     for f in a.text.split(","):
         lines += open(f, encoding="utf-8", errors="replace").read().split("\n")
     if a.rewrite:
-        res = dict(手で置いた値=dict(JOIN=JOIN, SEEN=SEEN, PICK=PICK, TAIL=ZL.TAIL), **run_rewrite(lines, [x for x in a.lines.split("｜") if x]))
+        res = dict(手で置いた値=dict(JOIN=SIT.JOIN, SEEN=SIT.SEEN, PICK=PICK, TAIL=ZL.TAIL), **run_rewrite(lines, [x for x in a.lines.split("｜") if x]))
         res["秒"] = round(time.time() - t0)
         json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         return
     inside, _ = ZM.pairs_of(lines)
     across = list(across_pairs(ZM.runs_of(lines)))
-    res = dict(行=len(lines), 手で置いた値=dict(COUNT=COUNT, TOP=TOP, TAIL=ZL.TAIL, SEATS=ZM.SEATS, MIN=ZM.MIN),
+    res = dict(行=len(lines), 手で置いた値=dict(COUNT=COUNT, TOP=TOP, TAIL=ZL.TAIL, SEATS=SIT.SEATS, MIN=SIT.MIN),
                同じ話し手が続ける=steer(ZM.Assoc(inside), candidates([c for _, c in inside])),
                次の話し手が受ける=steer(ZM.Assoc(across), candidates([c for _, c in across])))
     res["秒"] = round(time.time() - t0)
