@@ -40,3 +40,23 @@ def test_learned_wave_follows_the_carried_style():
     assert r["続き方"]["丁寧"]["倍"] > 1.5
     a = M.Assoc(inside, seats=200, min_count=2)
     assert a.score("犬が来ました", "馬も来ます") > a.score("犬が来ました", "馬も来るぞ")
+
+
+def test_lags_show_style_that_returns_every_other_utterance():
+    # 2 人の会話。A はいつも丁寧、B はいつもくだけている世界。丁寧さは 1 個前では続かず、2 個前から続く。
+    who = ("犬", "猫", "鳥", "馬", "牛", "魚", "虫", "人")
+    lines = []
+    for i, a in enumerate(who):
+        for j, b in enumerate(who):
+            if i != j:
+                lines += ["%sが来ました。" % a, "%sも来るぞ。" % b, "%sは帰ります。" % b, "%sも帰るぞ。" % a, "%sを見ました。" % a, "%sも見たぞ。" % b, ""]
+    keep = (M.MIN, M.SEATS)
+    M.MIN, M.SEATS = 2, 200
+    try:
+        runs = M.runs_of(lines)
+        r = M.run_lags(runs, max_lag=2)
+    finally:
+        M.MIN, M.SEATS = keep
+    assert len(runs) == 56 and all(len(x) == 6 for x in runs)
+    assert r["続き方"]["1"]["丁寧"]["倍"] < .1 and r["続き方"]["2"]["丁寧"]["倍"] > 1.5
+    assert r["二つから選ぶ"]["問い"] > 0 and set(r["二つから選ぶ"]["重ねる"]) == {"1 個前まで", "2 個前まで"}

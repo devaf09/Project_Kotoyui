@@ -166,11 +166,82 @@ def run_one(pairs):
                 続き方=carry(pairs), 独立に動く向き=share, 強い向き=dirs)
 
 
+def runs_of(lines):
+    """空の行を続きの切れ目として、続きごとの発話の並びにする。発話は (初めの文の終わり, 最後の文の終わり)。"""
+    runs, cur = [], []
+    for line in lines:
+        ss = [ZL.tail_of(x) for x in ZL.sentences([line])]
+        if not line.strip():
+            if cur:
+                runs.append(cur)
+            cur = []
+        elif ss:
+            cur.append((ss[0], ss[-1]))
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def run_lags(runs, max_lag=4):
+    """何個前の発話まで見るかを変えて数える（持ち主の問い: 弱くても重ねれば強くなるか、丁寧さは相手との関係で決まるか）。
+    組: lag 個前の発話の最後の文の終わり → 今の発話の初めの文の終わり。続きの切れ目はまたがない。
+    1. 続き方: lag ごとに、3 つの印が続く倍率。2 人の会話なら、lag 2 は同じ話し手に戻る事が多い。
+    2. 重ねる: 続きを並べ替えて半分で学び、残りで、1 個前だけ・2 個前まで・… と足して 2 つから選ぶ。lag ごとに別の波を持ち、点を足すだけ。"""
+    carry_by = {}
+    for lag in range(1, max_lag + 1):
+        ps = [(r[i - lag][1], r[i][0]) for r in runs for i in range(lag, len(r))]
+        carry_by[str(lag)] = dict(組=len(ps), **carry(ps))
+    order = ZL.golden_order(len(runs))
+    half = len(order) // 2
+    train = [runs[i] for i in order[:half]]
+    held = [runs[i] for i in order[half:]]
+    assoc = {}
+    for lag in range(1, max_lag + 1):
+        seen = {}
+        for r in train:
+            for i in range(lag, len(r)):
+                seen.setdefault((r[i - lag][1], r[i][0]), None)
+        assoc[lag] = Assoc(list(seen))
+    items = [([r[i - lag][1] for lag in range(1, max_lag + 1)], r[i][0]) for r in held for i in range(max_lag, len(r))]
+    n = len(items)
+    stack = {}
+    alone = {}
+    if n >= 2:
+        shift = n // 2 + 1
+        ok = [0.0] * max_lag
+        one = [0.0] * max_lag
+        for i, (prevs, c) in enumerate(items):
+            other = items[(i + shift) % n][1]
+            if other == c:
+                ok = [x + .5 for x in ok]
+                one = [x + .5 for x in one]
+                continue
+            d = [assoc[lag].score(prevs[lag - 1], c) - assoc[lag].score(prevs[lag - 1], other) for lag in range(1, max_lag + 1)]
+            tot = 0.0
+            for k in range(max_lag):
+                tot += d[k]
+                ok[k] += 1.0 if tot > 0 else (.5 if tot == 0 else 0.0)
+                one[k] += 1.0 if d[k] > 0 else (.5 if d[k] == 0 else 0.0)
+        stack = {"%d 個前まで" % (k + 1): round(ok[k] / n, 4) for k in range(max_lag)}
+        alone = {"%d 個前だけ" % (k + 1): round(one[k] / n, 4) for k in range(max_lag)}
+    return dict(続き=len(runs), 発話=sum(len(r) for r in runs), 続き方=carry_by, 二つから選ぶ=dict(問い=n, 重ねる=stack, 一つだけ=alone))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--text", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--lags", action="store_true")   # 空の行を続きの切れ目として、何個前の発話まで見るかを変えて数える
     a = ap.parse_args()
+    if a.lags:
+        t0 = time.time()
+        lines = []
+        for f in a.text.split(","):
+            lines += open(f, encoding="utf-8", errors="replace").read().split("\n")
+        res = dict(行=len(lines), 手で置いた値=dict(TAIL=ZL.TAIL, SEATS=SEATS, MIN=MIN), **run_lags(runs_of(lines)))
+        res["秒"] = round(time.time() - t0)
+        json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        return
     t0 = time.time()
     lines = []
     for f in a.text.split(","):
