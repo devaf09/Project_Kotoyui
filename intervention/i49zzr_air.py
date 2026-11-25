@@ -9,7 +9,8 @@
   air_directions: 状況波に自然に出た強い向き（名前は付けない）を、位相の波として取り出す。
   shifted: 状況波を、向きに沿ってずらす。
   rewrites: 行の終わりを、つなぎ目の表（i49_situation.joins）に有る終わりへ替えた候補の全部と、状況波との合い方。
-手で置いた物: N（違和感を見る並びの長さ）、ずらす大きさ BETA、向きの数。
+  varieties: 終わりごとの、手前の並びの種類の数。中身を守る時（消す終わりと入れる終わりを、どこにでも付く終わりに限る）に使う。
+手で置いた物: N（違和感を見る並びの長さ）、ずらす大きさ BETA、向きの数、中身を守る時の種類の数の下限。
 乱数は使わない。float32 / complex64。
 """
 from __future__ import annotations
@@ -70,17 +71,34 @@ def shifted(base, direction, sign, ref, beta=None):
     return (base + np.complex64(sign * beta * ref / n) * direction).astype(np.complex64)
 
 
-def rewrites(sent, sit, phase, table):
-    """行の終わりを替えた候補の全部。→ 点の高い順の (書き替えた行, 点, 替えた終わりの文字の数)。元の行も、替えない候補として入れる（文字の数 0）。"""
-    best = {sent: (phase.fit(sit, SIT.tail_of(sent)), 0)}
+def varieties(table):
+    """終わりごとの、手前の並びの種類の数（つなぎ目の表から数える）。
+    「た」「ですね」のような終わりは、いろいろな並びの後に出る（種類が多い）。「食べたの」のように中身の語を含む終わりは、決まった並びの後にしか出ない（種類が少ない）。
+    分ける道具も辞書も使わず、「どこまでが終わりで、どこからが中身か」の手掛かりにする。"""
+    v = {}
+    for d in table.values():
+        for e in d:
+            v[e] = v.get(e, 0) + 1
+    return v
+
+
+def rewrites(sent, sit, phase, table, variety=None, least=0):
+    """行の終わりを替えた候補の全部。→ 点の高い順の (書き替えた行, 点, 新しい終わりの文字の数, 消した終わりの文字の数)。
+    元の行も、替えない候補として入れる（文字の数 0）。
+    variety と least を渡すと、中身を守る: 消す終わりも、入れる終わりも、手前の並びの種類が least 以上の物（どこにでも付く終わり）に限る。"""
+    best = {sent: (phase.fit(sit, SIT.tail_of(sent)), 0, 0)}
     for k in range(1, SIT.TAIL + 1):
         if len(sent) < k + SIT.JOIN:
+            continue
+        if variety is not None and variety.get(sent[-k:], 0) < least:
             continue
         for e, c in table.get(sent[-k - SIT.JOIN:-k], {}).items():
             new = sent[:-k] + e
             if c < SIT.SEEN or new == sent:
                 continue
+            if variety is not None and variety.get(e, 0) < least:
+                continue
             sc = phase.fit(sit, SIT.tail_of(new))
             if new not in best or sc > best[new][0]:
-                best[new] = (sc, len(e))
-    return sorted(((n, sc, k) for n, (sc, k) in best.items()), key=lambda x: (-x[1], x[0]))
+                best[new] = (sc, len(e), k)
+    return sorted(((n, sc, ne, k) for n, (sc, ne, k) in best.items()), key=lambda x: (-x[1], x[0]))

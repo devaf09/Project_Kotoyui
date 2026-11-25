@@ -60,15 +60,42 @@ def test_shift_moves_the_situation():
         casual = down if d_up > 0 else up
         assert AIR.rewrites("牛も行くんだ", polite, p, table)[0][0] == "牛も行きますよ"
         assert AIR.rewrites("牛も行きますよ", casual, p, table)[0][0] == "牛も行くんだ"
-        assert AIR.rewrites("あ", polite, p, table) == [("あ", 0.0, 0)]
+        assert AIR.rewrites("あ", polite, p, table) == [("あ", 0.0, 0, 0)]
     _small(go)
 
 
+def test_variety_keeps_the_content():
+    # 「来た」「来ました」はどの生き物の後にも付く（種類が多い）。「魚を食べた」の「を食べた」は 1 つの並びの後にしか出ない（種類が少ない）。
+    sents = ["%sが来た" % a for a in "犬猫鳥馬牛"] + ["%sが来ました" % a for a in "犬猫鳥馬牛"] + ["猫が魚を食べた", "犬が魚を食べた"]
+    table = SIT.joins(sents)
+    v = AIR.varieties(table)
+    assert v["た"] > v["を食べた"] and v["来ました"] >= 5
+
+    class Flat:                       # どの終わりにも同じ点を付ける（状況波を見ない）
+        def fit(self, sit, cur):
+            return 1.0 if cur.endswith("ました") else 0.0
+
+    keep = SIT.SEEN
+    SIT.SEEN = 1
+    try:
+        free = AIR.rewrites("猫が魚を食べた", None, Flat(), table)
+        kept = AIR.rewrites("猫が魚を食べた", None, Flat(), table, v, 5)
+    finally:
+        SIT.SEEN = keep
+    assert all(n.startswith("猫が") for n, _, _, _ in free)
+    assert all("魚を食べ" in n for n, _, _, _ in kept)                 # 守ると、中身の語ごと替える候補が消える
+    assert len(kept) < len(free) and any(n == "猫が魚を食べた" for n, _, _, _ in kept)
+
+
 def test_tool_runs_and_counts():
-    r = _small(lambda: R.run(_lines(), talk=("牛も行くんだ", "馬が来ました"), dims=256, pick=10))
-    assert len(r["会話"]) == 2 * 2 * len(r["向きの取り分"])
-    assert {"チェック無し", "チェック有り", "チェック無しは通るか", "打ち消しが変わった"} <= set(r["会話"][0])
+    r = _small(lambda: R.run(_lines(), talk=("牛も行くんだ", "馬が来ました"), dims=256, pick=10, keeps=(0, 3), show=3))
+    assert len(r["会話"]) == 2 * 2 * len(r["向きの取り分"]) == len(r["会話_中身を守る"])
+    assert {"チェック無し", "チェック有り", "チェック無しは通るか", "打ち消しが変わった", "中身の字が消えた", "残った頭"} <= set(r["会話"][0])
     t = r["材料の文での数え"]
-    assert t["書き替え"] == t["抜いた文"] * 2 * len(r["向きの取り分"]) and 0 <= t["変わった行のうち通る割合"] <= 1
+    assert set(t["下限ごと"]) == {"0", "3"}
+    for v in t["下限ごと"].values():
+        assert v["書き替え"] == t["抜いた文"] * 2 * len(r["向きの取り分"]) and 0 <= v["変わった行のうち通る割合"] <= 1
+    assert t["下限ごと"]["3"]["変わった"] <= t["下限ごと"]["0"]["変わった"]
     assert [c["見る並びの長さ"] for c in r["違和感チェックの確かめ"]] == [3, 4, 5]
     assert R.has_neg("今日は行きません") and not R.has_neg("今日は行きます")
+    assert R.content("魚の定食をタベる") == set("魚定食タベ") and R.kept("abcd", "abxx") == .5
