@@ -3,7 +3,7 @@
 `python tools/make_parts_list.py` で作り直す（手で書き換えない）。説明は、各ファイルの頭の説明の 1 行目（別のプロジェクトの名前だけ「前のプロジェクト」に置き換えている）。
 読み方の案内と、今使えそうな部品・外れた試しのまとめは [experiments_index.md](experiments_index.md)。
 置き場の分け方（2026-11-25 の整理）: 今の土台（`intervention/i49_foundation.py`）と、その数えの道具・試験から読まれる物は元の置き場に残し、それ以外の試しは `past/` に移した。`past/` の物も、今まで通りに動く（試験は `tests/past/`）。
-全部で 414 個。
+全部で 416 個。
 
 
 ## 今の土台が使う部品（intervention/）
@@ -40,6 +40,7 @@
 | `i49zzk_tense_learned.py` | I49zzk: 時制の波を、手で置かずに学習から作る（持ち主の案、未確定の試し）。 |
 | `i49zzp_arith_wave.py` | I49zzp: 算数の文字（0〜9 と ＋ − ＝）の並びだけから、文字の波と位相の関係が出来るかを見る（持ち主の案、未確定の試し）。 |
 | `i49zzq_phase_wave.py` | I49zzq: 状況波を位相の形に置き換える（持ち主の案、未確定の試し）。 |
+| `i49zzr_air.py` | I49zzr: 状況波（位相の形）を自然に出た向きへずらして文の終わりを書き替え、違和感チェックに通す（持ち主の案、未確定の試し）。 |
 
 ### そのほか
 
@@ -113,6 +114,7 @@
 | `i49zzo_steer_run.py` | I49zzo: 状況波を入れ替えて、出る文の終わりが変わるかを見る（持ち主の頼み、未確定の試し）。 |
 | `i49zzp_arith_run.py` | I49zzp: 算数の文字の波を数える道具（`intervention/i49zzp_arith_wave.py`。持ち主の案、未確定の試し）。 |
 | `i49zzq_phase_run.py` | I49zzq: 状況波を位相の形に置き換えて、元の形と比べる道具（`intervention/i49zzq_phase_wave.py`。持ち主の案、未確定の試し）。 |
+| `i49zzr_air_run.py` | I49zzr: 状況波をずらして会話を書き替え、違和感チェックに通す道具（`intervention/i49zzr_air.py`。持ち主の案、未確定の試し）。 |
 
 ### そのほか
 
