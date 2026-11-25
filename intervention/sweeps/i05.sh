@@ -4,6 +4,6 @@ s=$1
 export CUDA_VISIBLE_DEVICES=
 for K in 3 6 12 24; do
   for n in 10 50; do
-    python intervention/i05_more_words.py --K $K --n_train $n --seed $s
+    python intervention/past/i05_more_words.py --K $K --n_train $n --seed $s
   done
 done

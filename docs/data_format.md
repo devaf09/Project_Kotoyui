@@ -20,11 +20,11 @@
     │   ├── realpersonachat/          RealPersonaChat（tools/fetch_dialogue.sh）
     │   ├── jmultiwoz/                JMultiWOZ（tools/fetch_dialogue.sh）
     │   ├── nucc/                     名大会話コーパス（研究の比べ用、tools/fetch_dialogue.sh）
-    │   ├── aozora/                   青空文庫（tools/fetch_aozora.py）
-    │   ├── own/                      使う人が自分で集めた会話（tools/import_dialogues.py）
+    │   ├── aozora/                   青空文庫（tools/past/fetch_aozora.py）
+    │   ├── own/                      使う人が自分で集めた会話（tools/past/import_dialogues.py）
     │   ├── cache/                    実験のキャッシュ（SentencePiece のモデルなど）
     │   ├── characters/ clock_grain.json   （あれば assets/ より優先。自分のキャラクタを置く）
-    │   └── MANIFEST.json             取得元・取得日・ライセンス・指紋（tools/make_manifest.py）
+    │   └── MANIFEST.json             取得元・取得日・ライセンス・指紋（tools/past/make_manifest.py）
     ├── models/                       数えた表・語板（kotoyui.py が初回に作る）
     ├── users/                        話し相手ごとの記憶（個人の情報）
     ├── ratings/ratings.jsonl         会話コンソールの評点（1 行 = 返事 1 つ。履歴・返事・評点・自信・設定）
@@ -38,8 +38,8 @@
 
 ```mermaid
 flowchart LR
-    F["tools/fetch_dialogue.sh<br>tools/fetch_aozora.py"] --> D["data/<br>realpersonachat・jmultiwoz・aozora"]
-    I["tools/import_dialogues.py<br>（自分で集めた会話）"] --> O["data/own/*.jsonl"]
+    F["tools/fetch_dialogue.sh<br>tools/past/fetch_aozora.py"] --> D["data/<br>realpersonachat・jmultiwoz・aozora"]
+    I["tools/past/import_dialogues.py<br>（自分で集めた会話）"] --> O["data/own/*.jsonl"]
     D --> C["load_conversations()<br>会話 → 発言の並び"]
     O --> C
     C --> M["models/tables_版.pkl<br>数えた表・返事の候補"]
@@ -65,8 +65,8 @@ flowchart LR
 ### 2.2 自分で集めた会話を足す
 
 ```bash
-python tools/import_dialogues.py my_chats.txt --check        # 中身を確かめる（書き出さない）
-python tools/import_dialogues.py my_chats.txt --name mine    # → data/own/mine.jsonl
+python tools/past/import_dialogues.py my_chats.txt --check        # 中身を確かめる（書き出さない）
+python tools/past/import_dialogues.py my_chats.txt --name mine    # → data/own/mine.jsonl
 python kotoyui.py --rebuild                                  # 表を作り直す
 ```
 

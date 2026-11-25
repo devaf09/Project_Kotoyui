@@ -6,6 +6,7 @@ import sys
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 sys.path.insert(0, "intervention")
+sys.path.insert(0, "intervention/past")  # 前の試しの部品（past/）
 import chat_partner as C  # noqa: E402
 
 model, host, think = sys.argv[1], sys.argv[2], {"on": True, "off": False, "unset": None}[sys.argv[3]]

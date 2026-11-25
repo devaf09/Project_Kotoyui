@@ -1,6 +1,6 @@
 """部品と道具の全部の一覧を作る（持ち主の頼み「過去の実験の概要も一覧があるといいかも」から）。
 
-intervention/・experiments/・tools/ の .py を全部読み、説明の 1 行目を並べて docs/parts_list.md に書く。
+intervention/・tools/・それぞれの past/（前の試し）・experiments/ の .py を全部読み、説明の 1 行目を並べて docs/parts_list.md に書く。
 手では書き換えない。部品や道具を足したら、これを回して作り直す（tests/test_parts_list.py が、古くなっていないかを確かめる）。
 使い方: python tools/make_parts_list.py [出力.md]
 """
@@ -12,7 +12,9 @@ import re
 import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-DIRS = (("intervention", "介入の研究の部品（intervention/）"), ("experiments", "初めの頃の実験（experiments/）"), ("tools", "数える道具と図の道具（tools/）"))
+DIRS = (("intervention", "今の土台が使う部品（intervention/）"), ("tools", "今の土台が使う道具と図の道具（tools/）"),
+        ("intervention/past", "前の試しの部品（intervention/past/）"), ("tools/past", "前の試しの道具と図の道具（tools/past/）"),
+        ("experiments", "初めの頃の実験（experiments/）"))
 GROUPS = (("i0", "I01〜I09: 小さい世界・逆引き・経験"), ("i1", "I10〜I19: 階層・融合・算数"), ("i2", "I20〜I29: 判断の板・文の板・違和感"),
           ("i3", "I32〜I38: 機能語の層・述語・会話の板"), ("i40", "I40〜I46: 記憶板・融合の流れ"), ("i42", "I40〜I46: 記憶板・融合の流れ"),
           ("memory", "I40〜I46: 記憶板・融合の流れ"), ("i47", "I47: 意味の波と共鳴"), ("i48", "I48: 波の板・語板・介入の板"),
@@ -39,7 +41,9 @@ def group_of(name):
 def build():
     out = ["# 部品と道具の全部の一覧", "",
            "`python tools/make_parts_list.py` で作り直す（手で書き換えない）。説明は、各ファイルの頭の説明の 1 行目（別のプロジェクトの名前だけ「前のプロジェクト」に置き換えている）。",
-           "読み方の案内と、今使えそうな部品・外れた試しのまとめは [experiments_index.md](experiments_index.md)。", ""]
+           "読み方の案内と、今使えそうな部品・外れた試しのまとめは [experiments_index.md](experiments_index.md)。",
+           "置き場の分け方（2026-11-25 の整理）: 今の土台（`intervention/i49_foundation.py`）と、その数えの道具・試験から読まれる物は元の置き場に残し、"
+           "それ以外の試しは `past/` に移した。`past/` の物も、今まで通りに動く（試験は `tests/past/`）。", ""]
     total = 0
     for d, title in DIRS:
         files = sorted(f for f in os.listdir(os.path.join(ROOT, d)) if f.endswith(".py"))
@@ -53,8 +57,8 @@ def build():
                 out.append("| `%s` | %s |" % (f, first_line(os.path.join(ROOT, d, f))))
                 total += 1
             out.append("")
-    out.insert(4, "全部で %d 個。" % total)
-    out.insert(5, "")
+    out.insert(5, "全部で %d 個。" % total)
+    out.insert(6, "")
     return "\n".join(out).rstrip() + "\n"
 
 

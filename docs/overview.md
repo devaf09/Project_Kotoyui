@@ -3,7 +3,7 @@
 > **この文書は最初の段（光の部品と、材料の発言から返事を選ぶ kotoyui.py）の紹介です。** 2026-11-04 からの方向（板とグレイン、自覚と介入の環、記憶、波で読む）は [README](../README.md) にまとめています。
 
 2026-11-03 時点。専門の知識がなくても読めるように書いています。数字の正本は [NOTES.md](../NOTES.md)、実験ごとのやさしい説明は [experiments_guide.md](experiments_guide.md)。
-図は `python tools/fig_overview.py` で作り直せます。
+図は `python tools/past/fig_overview.py` で作り直せます。
 
 ## 0. 三行で
 

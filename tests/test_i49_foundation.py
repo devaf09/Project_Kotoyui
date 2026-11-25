@@ -38,3 +38,12 @@ def test_with_memory_reflects_and_restores():
     assert m.body.ask(2, (tri[0], tri[1], None), cands)["答え"] == tri[2]      # 反映の後は本体だけで答える
     m.restore(snap)
     assert m.body.ask(2, (tri[0], tri[1], None), cands)["答え"] is None          # セーブから戻すと、教わる前に戻る
+
+
+def test_hands_list_matches_the_parts():
+    import i49e_relation as RL
+    rows = {r[0]: r for r in FD.HANDS}
+    assert all(len(r) == 6 for r in FD.HANDS) and len(rows) == len(FD.HANDS)
+    assert rows["薄れる速さ"][1] == FD.HALF
+    assert rows["段の下がる順"][1] == " → ".join(RL.LEVELS)                      # 一覧の値が、部品の今の値と同じ
+    assert {r[4] for r in FD.HANDS} <= {"減らす候補", "形", "場面"}

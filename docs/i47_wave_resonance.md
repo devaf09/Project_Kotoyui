@@ -178,13 +178,13 @@ RealPersonaChat で学ぶ語の波に、物語の資料 300 作品を足した�
 
 ```
 # 意味の波（学ぶ量を変える時は --train_works）
-python intervention/i47_wave_resonance.py --cache <解析済みの資料.json> --test_works 200 --mix 0.6 --out a.json
+python intervention/past/i47_wave_resonance.py --cache <解析済みの資料.json> --test_works 200 --mix 0.6 --out a.json
 # 4 層とそろえ方
-python intervention/i47b_layers_negation.py --cache <資料> --part layers --test_works 500 --out b.json
+python intervention/past/i47b_layers_negation.py --cache <資料> --part layers --test_works 500 --out b.json
 # 否定の帯（図つき）
-python intervention/i47d_negation_band.py --cache <資料> --test_works 50 --fig d.png --out d.json
+python intervention/past/i47d_negation_band.py --cache <資料> --test_works 50 --fig d.png --out d.json
 # 動かす段
-python intervention/i47e_moving_step.py --cache <資料> --test_works 50 --out e.json
+python intervention/past/i47e_moving_step.py --cache <資料> --test_works 50 --out e.json
 ```
 
 資料の形: 作品（対話）のリスト。各作品に `lines`、各行に `text`（台詞は「で始まる）と `toks`（GiNZA の `i`・`lemma`・`pos`・`head`）。

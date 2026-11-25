@@ -5,7 +5,7 @@ export CUDA_VISIBLE_DEVICES=
 for K in 12 24; do
   for P in 0 2 6; do
     for n in 10 50; do
-      python intervention/i06_revise.py --K $K --P $P --n_train $n --seed $s
+      python intervention/past/i06_revise.py --K $K --P $P --n_train $n --seed $s
     done
   done
 done

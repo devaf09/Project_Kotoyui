@@ -1,7 +1,7 @@
 #!/bin/bash
 # 会話のデータを取得する（RealPersonaChat・JMultiWOZ・名大会話コーパス。docs/data_plan.md・docs/data_format.md）。リポジトリ直下で実行: bash tools/fetch_dialogue.sh
 # どちらも非公開の置き場 ../Project_Kotoyui_private/data/ に置く（git の外。配らない。2026-11-03 持ち主の依頼で data/ から移した）。
-# 取ったら python tools/make_manifest.py で MANIFEST.json を作り直す。置き場は KOTOYUI_DATA で変えられる。
+# 取ったら python tools/past/make_manifest.py で MANIFEST.json を作り直す。置き場は KOTOYUI_DATA で変えられる。
 cd "$(dirname "$0")/.."
 D="${KOTOYUI_DATA:-../Project_Kotoyui_private/data}"
 mkdir -p "$D"

@@ -4,6 +4,7 @@ _PRIV = _os.environ.get("KOTOYUI_PRIVATE", _os.path.join(_HERE, "..", "..", ".."
 import json, re, sys, io, collections
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 sys.path.insert(0, _os.path.join(_HERE, ".."))
+sys.path.insert(0, _os.path.join(_HERE, "..", "past"))  # 前の試しの部品（past/）
 import chat_partner as C
 P = _PRIV
 for tag in sys.argv[1:]:

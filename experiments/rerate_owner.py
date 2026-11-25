@@ -9,6 +9,7 @@ import sys
 KOTO_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 PRIV = os.environ.get("KOTOYUI_PRIVATE", os.path.join(KOTO_ROOT, "..", "Project_Kotoyui_private"))   # 非公開の置き場（資料・結果）
 sys.path.insert(0, os.path.join(KOTO_ROOT, "tools"))
+sys.path.insert(0, os.path.join(KOTO_ROOT, "tools", "past"))  # 前の試しの道具（past/）
 from ollama_client import Ollama  # noqa: E402
 
 ap = argparse.ArgumentParser()
