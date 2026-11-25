@@ -86,11 +86,54 @@ def run():
                 形を選ぶ=curve, 時の語ごとに選んだ形=table)
 
 
+def run_spans():
+    """分け方を決めず、動詞の形の切り出しを全部数える形（Spans）を、つなぎの語に分けて持つ形（Learned）と比べる。
+    試すのは学習に出ていない動詞だけ。「決まりの内」と「決まりの中で一番多い時制」の 2 通りで数える。"""
+    stems = set("".join(ZJ.TRAIN + ZJ.TEST)) - set("るくう")
+    sp, tk = TL.Spans(), TL.Learned()
+    seq_sp = []
+    for word, rule in ZJ.RULE.items():
+        for tense, w in rule.items():
+            for _ in range(w):
+                for who in ZJ.WHO:
+                    for v in ZJ.TRAIN:
+                        seq_sp.append((word, who, v, tense))
+    seq_sp = ZJ.golden(seq_sp)
+
+    def score(m, forms_of):
+        ok = top = n = 0
+        for word, rule in ZJ.RULE.items():
+            s = m.state_of(word)
+            for v in ZJ.TEST:
+                n += 1
+                if s is None:
+                    continue
+                p = m.pick(v, forms_of(v), s)
+                ok += int(p in rule)
+                top += int(p == max(rule, key=rule.get))
+        return dict(決まりの内=round(ok / n, 4), 一番多い時制=round(top / n, 4))
+
+    curve = {"切り出しを全部持つ": [], "つなぎの語に分けて持つ": []}
+    for i, (word, who, v, tense) in enumerate(seq_sp, 1):
+        sp.learn(word, who, v, ZJ.FORMS[v][tense])
+        tk.learn(word, who, v, AUX[tense])
+        if i in MARKS:
+            curve["切り出しを全部持つ"].append(dict(文=i, **score(sp, lambda v: ZJ.FORMS[v])))
+            curve["つなぎの語に分けて持つ"].append(dict(文=i, **score(tk, lambda v: AUX)))
+    units = [u for u in sp.count if u[0] == "切り出し"]
+    strength = sorted(((round(sp.strength(u), 4), u[1], sum(sp.count[u].values()), bool(set(u[1]) & stems)) for u in units), reverse=True)
+    table = {w: {v: sp.pick(v, ZJ.FORMS[v], sp.state_of(w)) for v in ZJ.TEST} for w in ZJ.RULE}
+    return dict(学習の文=len(seq_sp), 切り出しの種類=len(units), 形の種類=len(ZJ.TRAIN) * len(TENSES),
+                切り出しごとの強さ=[dict(切り出し=s, 強さ=x, 回数=c, 動詞の字を含む=k) for x, s, c, k in strength],
+                形を選ぶ=curve, 時の語ごとに選んだ形=table)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
+    ap.add_argument("--spans", action="store_true")
     a = ap.parse_args()
-    res = run()
+    res = run_spans() if a.spans else run()
     json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(json.dumps(res, ensure_ascii=False))
 

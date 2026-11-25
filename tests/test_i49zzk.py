@@ -50,3 +50,21 @@ def test_run_small_world():
     t = a["形の波どうしの近さ"]
     i, j, k = (t["時制"].index(x) for x in ("過去進行", "過去", "未来"))
     assert t["表"][i][j] > 0 > t["表"][i][k]                                     # 手で並べていないのに、過去進行は過去に近い
+
+
+def test_spans_learn_every_cut_in_one_hearing():
+    assert len(TL.spans("飛んでいる")) == 15 and "でいる" in TL.spans("飛んでいる")
+    m = TL.Spans()
+    for who in ("犬", "猫"):
+        m.learn("さっき", who, None, "歩いた")
+        m.learn("今", who, None, "歩いている")
+    assert m.strength(("切り出し", "た")) > m.strength(("切り出し", "歩"))       # 時制を運ぶ切り出しが強く、動詞の字は弱い
+    forms = dict(過去="飛んだ", 現在進行="飛んでいる")
+    assert m.pick(None, forms, m.state_of("今")) == "現在進行"                    # 初めての動詞でも、分け方を決めずに選べる
+
+
+def test_run_spans():
+    r = R.run_spans()
+    assert r["形を選ぶ"]["切り出しを全部持つ"][-1]["決まりの内"] == 1.0
+    weak = [x for x in r["切り出しごとの強さ"] if x["切り出し"] in ("歩", "食")]
+    assert all(x["強さ"] < r["切り出しごとの強さ"][0]["強さ"] / 3 for x in weak)

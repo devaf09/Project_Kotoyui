@@ -80,3 +80,16 @@ class Whole(Learned):
 
     def units(self, verb, aux):
         return [("形", verb, tuple(aux))]
+
+
+def spans(text):
+    """文字の並びの、続いた切り出しの全部（「飛んでいる」なら 飛・飛ん・…・いる・る・飛んでいる の 15 個）。"""
+    return [text[i:j] for i in range(len(text)) for j in range(i + 1, len(text) + 1)]
+
+
+class Spans(Learned):
+    """分け方を決めず、動詞の形の切り出しを全部数える（持ち主の案の力業）。
+    verb は使わず、aux に形の文字の並び（「飛んでいる」）をそのまま渡す。同じ切り出しが 2 度出たら 2 度数える。"""
+
+    def units(self, verb, aux):
+        return [("切り出し", s) for s in spans(aux)]
