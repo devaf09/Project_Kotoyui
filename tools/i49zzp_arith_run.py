@@ -15,6 +15,7 @@
   4. 見せていない式の答えを当てる（黄金比の並びで 5 つに 1 つを取り分ける）。
      波で選ぶ（候補は覚えた式に出た答えの全部）、一番多い答えを言い続ける。外れの大きさ（数の差の平均）も出す。
      位相の足し算で選ぶ形は、答えが 1 文字の式だけで数える。
+`--base 16` で、0〜F の 16 進の世界で同じ事を数える（他は同じ）。
 手で置いた物: 世界の作り方、取り分ける割合、確かめ用の並べ替えの作り方、位相の足し算で選ぶ時の決まり（φ(0) を 0 とし、＋は足し、−は引き、一番近い数字を取る）。
 """
 from __future__ import annotations
@@ -36,17 +37,40 @@ PHI = 0.6180339887498949
 HOLD = 5   # 何個に 1 個を取り分けるか（手で置いた値）
 
 
-def world(full=False):
-    add = ["%d+%d=%d" % (a, b, a + b) for a in range(10) for b in range(10) if full or a + b <= 9]
-    sub = ["%d-%d=%d" % (a, b, a - b) for a in range(10) for b in range(10) if full or a >= b]
+HEX = "0123456789ABCDEF"
+
+
+def fmt(n, digits=DIGITS):
+    """数を、digits の進み方で文字の並びにする（16 進なら 26 → "1A"、-3 → "-3"）。"""
+    b, sign, n = len(digits), "-" if n < 0 else "", abs(n)
+    out = digits[n % b]
+    while n >= b:
+        n //= b
+        out = digits[n % b] + out
+    return sign + out
+
+
+def num(text, digits=DIGITS):
+    neg = text.startswith("-")
+    v = 0
+    for c in text.lstrip("-"):
+        v = v * len(digits) + digits.index(c)
+    return -v if neg else v
+
+
+def world(full=False, digits=DIGITS):
+    r = range(len(digits))
+    add = [digits[a] + "+" + digits[b] + "=" + fmt(a + b, digits) for a in r for b in r if full or a + b < len(digits)]
+    sub = [digits[a] + "-" + digits[b] + "=" + fmt(a - b, digits) for a in r for b in r if full or a >= b]
     return add, sub
 
 
-def ring_world():
-    """1 の位だけの世界: 答えを 1 の位だけにする（7+5=2、3-5=8）。どの数字も、どの場所にも同じ回数だけ出る。
+def ring_world(digits=DIGITS):
+    """1 の位だけの世界: 答えを 1 の位だけにする（10 進なら 7+5=2、3-5=8）。どの数字も、どの場所にも同じ回数だけ出る。
     回数の偏りが無いので、数の並びが出るなら、式の関係から出た物。"""
-    add = ["%d+%d=%d" % (a, b, (a + b) % 10) for a in range(10) for b in range(10)]
-    sub = ["%d-%d=%d" % (a, b, (a - b) % 10) for a in range(10) for b in range(10)]
+    r, n = range(len(digits)), len(digits)
+    add = [digits[a] + "+" + digits[b] + "=" + digits[(a + b) % n] for a in r for b in r]
+    sub = [digits[a] + "-" + digits[b] + "=" + digits[(a - b) % n] for a in r for b in r]
     return add, sub
 
 
@@ -74,12 +98,12 @@ def null_world(lines):
     return [head(lines[i]) + ans(lines[order[i]]) for i in range(len(lines))]
 
 
-def by_diff(w):
+def by_diff(w, digits=DIGITS):
     units, m = w.waves()
     n = m / np.maximum(np.linalg.norm(m, axis=1, keepdims=True), 1e-12)
     out = {}
-    for d in range(1, 10):
-        v = [float(n[units.index(DIGITS[i])] @ n[units.index(DIGITS[i + d])]) for i in range(10 - d)]
+    for d in range(1, len(digits)):
+        v = [float(n[units.index(digits[i])] @ n[units.index(digits[i + d])]) for i in range(len(digits) - d)]
         out[str(d)] = round(sum(v) / len(v), 4)
     return out
 
@@ -91,10 +115,10 @@ def rank_corr(x, y):
     return float(rx @ ry) / d if d > 0 else 0.0
 
 
-def phase_report(w):
-    have, p, share = w.plane()
-    _, ph = w.phase()
-    vals = np.array([int(c) for c in have], dtype=np.float64)
+def phase_report(w, digits=DIGITS):
+    have, p, share = w.plane(digits)
+    _, ph = w.phase(digits)
+    vals = np.array([digits.index(c) for c in have], dtype=np.float64)
     turns = np.diff(ph)
     same = int(max((turns > 0).sum(), (turns < 0).sum()))
     units, m = w.waves()
@@ -109,8 +133,8 @@ def phase_report(w):
                 一番強い向きと数の順の合い方=round(abs(rank_corr(p[:, 0], vals)), 4))
 
 
-def phase_answer(w, line):
-    have, ph = w.phase()
+def phase_answer(w, line, digits=DIGITS):
+    have, ph = w.phase(digits)
     f = dict(zip(have, [float(x) for x in ph]))
     a, op, b = line[0], line[1], line[2]
     if a not in f or b not in f:
@@ -124,7 +148,7 @@ def one_digit(lines):
     return [x for x in lines if len(ans(x)) == 1]
 
 
-def held_out(lines, offsets=True):
+def held_out(lines, offsets=True, digits=DIGITS):
     order = golden_order(len(lines))
     test = [lines[i] for k, i in enumerate(order) if k % HOLD == 0]
     hold = set(test)
@@ -142,45 +166,43 @@ def held_out(lines, offsets=True):
         got = {"波で選ぶ": w.answer(head(x), cands)[0][0], "一番多い答えを言い続ける": top}
         for k, g in got.items():
             res[k]["当たり"] += g == ans(x)
-            res[k]["外れの大きさ"] += abs(int(g) - int(ans(x)))
+            res[k]["外れの大きさ"] += abs(num(g, digits) - num(ans(x), digits))
     n = max(len(test), 1)
     out = dict(覚えた式=len(train), 試した式=len(test), **{k: {a: round(b / n, 4) for a, b in v.items()} for k, v in res.items()})
     t1 = one_digit(test)
     if t1:
-        got = [phase_answer(w, x) for x in t1]
+        got = [phase_answer(w, x, digits) for x in t1]
         out["位相の足し算で選ぶ_答えが 1 文字の式"] = dict(試した式=len(t1), 当たり=round(sum(g == ans(x) for g, x in zip(got, t1)) / len(t1), 4),
-                                         外れの大きさ=round(sum(abs(int(g) - int(ans(x))) for g, x in zip(got, t1)) / len(t1), 4))
+                                         外れの大きさ=round(sum(abs(num(g, digits) - num(ans(x), digits)) for g, x in zip(got, t1)) / len(t1), 4))
     return out
 
 
-def run(lines, offsets=True):
+def run(lines, offsets=True, digits=DIGITS):
     w = CharWave(offsets=offsets)
     for x in lines:
         w.learn(x)
     l1 = one_digit(lines)
-    seen = [phase_answer(w, x) == ans(x) for x in l1]
-    return dict(式=len(lines), 席=len(w.seat), 数の差ごとの近さ=by_diff(w), 位相=phase_report(w),
+    seen = [phase_answer(w, x, digits) == ans(x) for x in l1]
+    return dict(式=len(lines), 席=len(w.seat), 数の差ごとの近さ=by_diff(w, digits), 位相=phase_report(w, digits),
                 足すと引くの近さ=round(w.near("+", "-"), 4), 等しいと足すの近さ=round(w.near("=", "+"), 4),
                 位相の足し算が合う式の割合_全部覚えた時=round(sum(seen) / max(len(seen), 1), 4),
-                見せていない式=held_out(lines, offsets))
+                見せていない式=held_out(lines, offsets, digits))
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
+    ap.add_argument("--base", type=int, default=10)   # 何進で数えるか（2〜16。16 なら 0〜F）
     a = ap.parse_args()
     t0 = time.time()
-    res = dict(手で置いた値=dict(HOLD=HOLD))
-    for wname, full in (("小さい世界", False), ("全部の世界", True)):
-        add, sub = world(full)
+    digits = HEX[:a.base]
+    res = dict(手で置いた値=dict(HOLD=HOLD), 数字=digits)
+    worlds = (("小さい世界", world(False, digits)), ("全部の世界", world(True, digits)), ("1 の位だけの世界", ring_world(digits)))
+    for wname, (add, sub) in worlds:
         lines = add + sub
         res[wname] = {}
         for name, ls in (("算数", lines), ("何も関係の無い世界", null_world(lines)), ("足し算だけ", add), ("引き算だけ", sub)):
-            res[wname][name] = dict(離れ方を見る=run(ls, True), 離れ方を見ない=run(ls, False))
-    add, sub = ring_world()
-    res["1 の位だけの世界"] = {}
-    for name, ls in (("算数", add + sub), ("何も関係の無い世界", null_world(add + sub)), ("足し算だけ", add), ("引き算だけ", sub)):
-        res["1 の位だけの世界"][name] = dict(離れ方を見る=run(ls, True), 離れ方を見ない=run(ls, False))
+            res[wname][name] = dict(離れ方を見る=run(ls, True, digits), 離れ方を見ない=run(ls, False, digits))
     res["秒"] = round(time.time() - t0, 2)
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=1)

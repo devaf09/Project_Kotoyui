@@ -67,3 +67,15 @@ def test_answer_handles_strings():
 def test_no_random_same_result_twice():
     add, sub = R.world(full=True)
     assert R.run(add + sub) == R.run(add + sub)
+
+
+def test_hex_world():
+    assert R.fmt(30, R.HEX) == "1E" and R.fmt(-2, R.HEX) == "-2" and R.num("1E", R.HEX) == 30 and R.num("-A", R.HEX) == -10
+    add, sub = R.world(True, R.HEX)
+    assert len(add) == 256 and "F+F=1E" in add and "3-5=-2" in sub
+    add, sub = R.world(False, R.HEX)
+    r = R.run(add + sub, True, R.HEX)
+    assert len(r["数の差ごとの近さ"]) == 15 and r["位相"]["一番強い向きと数の順の合い方"] == 1.0
+    add, sub = R.ring_world(R.HEX)
+    assert "F+3=2" in add
+    assert R.run(add + sub, True, R.HEX)["位相"]["数字の波の散らばり"] < 1e-3     # 16 進でも、回数の偏りが無ければ波は全部同じ
