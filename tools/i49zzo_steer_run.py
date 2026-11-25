@@ -8,7 +8,9 @@
   1. 状況ごとに、上から TOP 個の終わりのうち、印（丁寧・過去・問い・古風）の付いた物の割合。状況を入れ替えると割合が動くか。
   2. 読むための例: 同じ字（行・知・思・来 など）を含む終わりに絞って、状況ごとの上から 3 つ。
 手で置いた物: 入れる終わり PROBES、印の決め方（古風の印はここで足した）、COUNT、TOP、例に使う字。
-出力には材料の文の終わり（6 文字まで）が入るので、リポジトリには入れない。
+  3. `--rewrite`: 行を選び（材料から黄金比の並びで PICK 行と、自分で入れた行）、終わりだけを状況ごとに書き替えた行を出す。
+     終わりの替え方は、つなぎ目の表（左の 2 文字の後に、材料でその終わりが続いた事が有るか）で決める。分ける道具は使わない。
+出力には材料の文や文の終わりが入るので、リポジトリには入れない。
 """
 from __future__ import annotations
 
@@ -80,8 +82,63 @@ def across_pairs(runs):
     return across
 
 
+JOIN = 2     # つなぎ目の左側として見る文字の数（手で置いた値）
+SEEN = 3     # つなぎ目が材料に出た回数の下限（手で置いた値）
+PICK = 6     # 材料から抜き出す行の数（手で置いた値）
+MODE_OF = {"間柄": "同じ話し手が続ける", "言葉づかい": "同じ話し手が続ける", "時": "次の話し手が受ける", "やり取り": "次の話し手が受ける"}
+
+
+def joins(sents):
+    """つなぎ目の表: 文の終わりを k 文字（1〜TAIL）で切った時の、左の JOIN 文字 → 右の終わり → 出た回数。
+    分ける道具は使わない。「この 2 文字の後に、この終わりが続いた事が有る」を数えるだけ。"""
+    out = {}
+    for s in sents:
+        for k in range(1, ZL.TAIL + 1):
+            if len(s) >= k + JOIN:
+                d = out.setdefault(s[-k - JOIN:-k], {})
+                e = s[-k:]
+                d[e] = d.get(e, 0) + 1
+    return out
+
+
+def rewrite(sent, probe, assoc, table, n=1):
+    """行の終わりだけを書き替える。切る所（終わりの 1〜TAIL 文字）ごとに、左の JOIN 文字の後に材料で SEEN 回以上続いた終わりへ替え、
+    状況（probe）との合い方が一番高い物を取る。元の行と同じ物は除く。→ 上から n 個の (書き替えた行, 点)。"""
+    best = {}
+    for k in range(1, ZL.TAIL + 1):
+        if len(sent) < k + JOIN:
+            continue
+        for e, c in table.get(sent[-k - JOIN:-k], {}).items():
+            new = sent[:-k] + e
+            if c < SEEN or new == sent:
+                continue
+            sc = sum(assoc.score(p, ZL.tail_of(new)) for p in probe)
+            if new not in best or sc > best[new]:
+                best[new] = sc
+    return sorted(best.items(), key=lambda x: (-x[1], x[0]))[:n]
+
+
+def run_rewrite(lines, extra=()):
+    sents = ZL.distinct(list(ZL.sentences(lines)))
+    table = joins(sents)
+    inside, _ = ZM.pairs_of(lines)
+    assoc = {"同じ話し手が続ける": ZM.Assoc(inside), "次の話し手が受ける": ZM.Assoc(list(across_pairs(ZM.runs_of(lines))))}
+    pool = [s for s in sents if 10 <= len(s) <= 22]
+    picked = [pool[i] for i in ZL.golden_order(len(pool))[:PICK]] if pool else []
+    out = []
+    for sent in list(extra) + picked:
+        row = dict(元の行=sent, 書き替え={})
+        for name, (wave, _, probe) in PROBES.items():
+            r = rewrite(sent, probe, assoc[MODE_OF[wave]], table, n=2)
+            row["書き替え"][name] = [x for x, _ in r]
+        out.append(row)
+    return dict(文=len(sents), つなぎ目の種類=len(table), 行ごと=out)
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--rewrite", action="store_true")   # 行の終わりを、状況ごとに書き替えて出す
+    ap.add_argument("--lines", default="")              # 自分で入れる行（｜で区切る）
     ap.add_argument("--text", required=True)   # 空の行を続きの切れ目にした、1 行 1 発話のテキスト
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -89,6 +146,11 @@ def main():
     lines = []
     for f in a.text.split(","):
         lines += open(f, encoding="utf-8", errors="replace").read().split("\n")
+    if a.rewrite:
+        res = dict(手で置いた値=dict(JOIN=JOIN, SEEN=SEEN, PICK=PICK, TAIL=ZL.TAIL), **run_rewrite(lines, [x for x in a.lines.split("｜") if x]))
+        res["秒"] = round(time.time() - t0)
+        json.dump(res, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        return
     inside, _ = ZM.pairs_of(lines)
     across = list(across_pairs(ZM.runs_of(lines)))
     res = dict(行=len(lines), 手で置いた値=dict(COUNT=COUNT, TOP=TOP, TAIL=ZL.TAIL, SEATS=ZM.SEATS, MIN=ZM.MIN),

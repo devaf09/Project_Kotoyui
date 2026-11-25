@@ -41,3 +41,20 @@ def test_changing_the_situation_changes_the_ending():
 def test_across_pairs_do_not_cross_breaks():
     runs = ZM.runs_of(["犬だ。", "猫です。", "", "鳥だよ。", "馬か。"])
     assert set(S.across_pairs(runs)) == {("犬だ", "猫です"), ("鳥だよ", "馬か")}
+
+
+def test_rewrite_changes_only_the_ending():
+    import i49zzl_tense_text_run as ZL
+    keep = (ZM.MIN, ZM.SEATS, S.SEEN)
+    ZM.MIN, ZM.SEATS, S.SEEN = 2, 200, 2
+    try:
+        lines = _lines()
+        inside, _ = ZM.pairs_of(lines)
+        table = S.joins(ZL.distinct(list(ZL.sentences(lines))))
+        a = ZM.Assoc(inside)
+        polite = S.rewrite("牛も行くんだ", ("ました", "ますよ"), a, table)[0][0]
+        casual = S.rewrite("牛も行きますよ", ("たんだ", "くんだ"), a, table)[0][0]
+    finally:
+        ZM.MIN, ZM.SEATS, S.SEEN = keep
+    assert polite == "牛も行きますよ" and casual == "牛も行くんだ"      # 頭はそのままで、終わりだけが状況に合わせて替わる
+    assert S.rewrite("あ", ("ました",), a, table) == []
