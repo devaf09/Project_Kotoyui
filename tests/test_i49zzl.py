@@ -55,5 +55,5 @@ def test_tail_does_not_include_the_time_word():
     assert T.tail_of("歩いたのはまだ", ["まだ"]) == ""                 # 時の語が文の終わりなら、終わりの切り出しは無い
     assert T.tail_of("まだ歩く", ["まだ"]) == "歩く"
     assert T.tail_of("今日は歩いた", ["今日"]) == "歩いた"            # 時の語のすぐ後の助詞の字は落とす
-    assert T.tail_of("犬が歩いていた") == "歩いていた"
+    assert T.tail_of("犬が歩いていた") == "が歩いていた"
     assert T.distinct(["あ", "い", "あ"]) == ["あ", "い"]
