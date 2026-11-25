@@ -28,3 +28,26 @@ def test_run_counts_every_answered_question_once():
     assert n > 0 and n + d["数えない問い"] == 6 * 2 * 3                # 後半 6 話 × 3 つ組 2 つ × 席 3 つ
     assert n == sum(c["問い"] for lv in d["段ごと"].values() for c in lv.values())
     assert all(c["一位が当たり"] + c["二位が当たり"] <= c["問い"] for c in d["全部の段"].values())
+
+
+def test_vessel_pick_moves_only_inside_the_tie_band():
+    import numpy as np
+    dirs = dict(x=np.array([1, 0], dtype=np.complex64), y=np.array([0, 1], dtype=np.complex64), z=None)
+    state = np.array([0, 1], dtype=np.complex64)                       # 器は y の向き
+    pts = {"x": 1.0, "y": 0.95, "z": 0.99}
+    assert G.vessel_pick(pts, ["x", "y", "z"], 0.01, state, dirs.get) == "x"      # 幅の中に、向きを持つ候補が 1 位だけ
+    assert G.vessel_pick(pts, ["x", "y", "z"], 0.1, state, dirs.get) == "y"       # 幅を広げると、器に近い y に変わる
+    assert G.vessel_pick(pts, ["x", "y", "z"], 0.1, state, dirs.get, far=True) == "x"
+    assert G.vessel_pick(pts, ["x", "y", "z"], 0.1, None, dirs.get) == "x"        # 器がまだ空なら 1 位のまま
+    assert G.vessel_pick({"z": 1.0, "y": 1.0}, ["z", "y"], 0.1, state, dirs.get) == "z"   # 1 位が向きを持たなければ変えない
+
+
+def test_run_vessel_small_world():
+    get = lambda w: small(w[0])
+    n = len(get(("太郎", "NOUN")))
+    d = G.run_vessel(get, get, _talks(), n, ks=(0,))["元の順"]["幅ごと"]
+    names = [name for _, name in G.BINS]
+    assert list(d) == names and len({c["問い"] for c in d.values()}) == 1
+    ch = [d[x]["答えが変わった"] for x in names]
+    assert ch == sorted(ch)                                             # 幅を広げるほど、変わる答えは減らない
+    assert all(c["当たりに変わった"] + c["外れに変わった"] <= c["答えが変わった"] for c in d.values())
