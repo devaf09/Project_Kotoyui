@@ -29,7 +29,7 @@ for ax, (title, rows) in zip(axes, D.items()):
     ax.set_title(title)
     ax.grid(axis="y", alpha=.3)
 axes[0].set_ylabel("問いの数（並べ替え 3 通りの合計）")
-axes[2].legend(loc="upper right", fontsize=9)
+axes[0].legend(loc="center right", fontsize=9)
 fig.suptitle("本体と外付けの答えが違った問いを、選ぶ時に見た数えの差ごとに分ける（横: (外付けの当たり − 本体の当たり) ÷ √(合計)）")
 fig.tight_layout()
 for out in ("docs/images/i49zzd_gap.png", "/mnt/project-files/kotoyui_intervention/figs/i49zzd_gap.png"):
