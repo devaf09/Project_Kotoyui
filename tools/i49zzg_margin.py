@@ -12,6 +12,8 @@
   問いのたびに、1 位との差の割合が幅以下の候補の中から、器の向き（whole）に一番近い候補を選び直したら、答えが幾つ変わり、
   当たり外れがどう動くかを、幅ごとに数える。本体の答えと学びは変えない（見るだけ）。
   比べ役: 同じ集まりの中から、器の向きに一番「遠い」候補を選ぶ形。器の向きに意味が有れば、近い方が遠い方より当たるはず。
+  オウム返しの確かめ（持ち主の読み「器に直前の単語をそのまま入れたことによる同じ単語のオウム返し」）: 選び直した先が、
+  この話の中でもう聞いた語だった時を別に数える（「聞いた語を選んで_…」）。近い方の損が、聞いた語を選んだ時に片寄っていれば、読みの通り。
 手で置いた物: d の区切り（見るための区切りで、選び方には使わない）、場面の作り方（半分に分ける、並べ替えの k）。乱数は使わない。
 材料の語や例は出さない。出すのは段の名前と集計の数だけ。
 引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --out 記録.json [--ks 1,2,3]
@@ -93,8 +95,9 @@ def count_vessel(body, first, second, attr_of, vessel):
         body.tick()
         vessel.tick()
     keys = ("答えが変わった", "当たりに変わった", "外れに変わった")
-    out = {name: dict(問い=0, **{k: 0 for k in keys}, **{"遠い方_" + k: 0 for k in keys}) for _, name in BINS}
+    out = {name: dict(問い=0, 正解がこの話で聞いた語=0, **{p + h + k: 0 for p in ("", "遠い方_") for h in ("", "聞いた語を選んで_") for k in keys}) for _, name in BINS}
     for tris, words in second:
+        heard = set()          # この話の中で、もう聞いた語（オウム返しかどうかを見るため。I49zzg の続き）
         for tri in tris:
             for si in range(3):
                 cands = sorted({w for w in words if w not in {tri[j] for j in range(3) if j != si}} | {tri[si]}, key=str)
@@ -107,14 +110,20 @@ def count_vessel(body, first, second, attr_of, vessel):
                 for lim, name in BINS:
                     c = out[name]
                     c["問い"] += 1
+                    c["正解がこの話で聞いた語"] += tri[si] in heard
                     for far, pre in ((False, ""), (True, "遠い方_")):
                         a = vessel_pick(o["点"], cands, lim, state, dir_of, far=far)
                         if a != o["答え"]:
                             c[pre + "答えが変わった"] += 1
                             c[pre + "当たりに変わった"] += a == tri[si]
                             c[pre + "外れに変わった"] += o["答え"] == tri[si]
+                            if a in heard:
+                                c[pre + "聞いた語を選んで_答えが変わった"] += 1
+                                c[pre + "聞いた語を選んで_当たりに変わった"] += a == tri[si]
+                                c[pre + "聞いた語を選んで_外れに変わった"] += o["答え"] == tri[si]
             body.learn(tri)
             hear(tri)
+            heard.update(tri)
         body.tick()
         vessel.tick()
     return out
