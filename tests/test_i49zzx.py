@@ -79,3 +79,12 @@ def test_trial_questions_do_not_enter_the_bodys_own_tally():
     b.learn((N("太郎"), N("りんご"), V("食べる")))
     X.fill(b, 1, (N("太郎"), None, V("食べる")), [N("りんご"), N("本"), V("買う")], N("本"))
     assert b._wait == []
+
+
+def test_talk_forms_are_counted_and_never_repeat_a_verb_of_the_talk():
+    d = X.run(_attr, _talks(), PairBody, ks=(0,), dims=512)["元の順"]
+    n = d["比べ"]["問い"]
+    for f in X.TALK:
+        assert d[f]["問い"] == n and d[f]["前の 3 つ組と同じ"] == 0
+    assert d[X.TALK[0]]["どうした"] >= d["動きを引いて、物は本体"]["どうした"]      # この世界では、動きは毎行替わる
+    assert d[X.TALK[1]]["だれが"] == n                                               # 人は話の中に 1 人だけ

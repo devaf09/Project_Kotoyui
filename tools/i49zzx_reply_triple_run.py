@@ -11,6 +11,8 @@ I49zzw（74 節）は席ごとに当てた。ここでは 3 つの席を合わ�
   本体が答えない時は、遷移の波の答えを使う。
   本体への仮の問い（組むための問い）は、本体の中の「どの段が当たるか」の数えに入れない。後半は、今までの場面と同じく、聞く前にその 3 つ組を本体に問う。
     （run70・run71 はここが違っていた: 仮の問いが、次に聞いた別の 3 つ組で採点されていた。75 節の続き 2。）
+  話の形（78 節から。どれも、物は本体で埋め、前と同じ 3 つ組は返さない）:
+    動きは出た語を除く: どうした を、その話でもう出た動きを除いて遷移の波で引く。／人は話の中の人から: だれが を、その話でもう出た人の中から遷移の波で選ぶ。／両方。
   （前と同じ物は返さない）: 上の 3 つの組み方で、組んだ 3 つ組が前の 3 つ組と同じになった時だけ、最後に決めた席を、前の語を除いて選び直す
     （席ごと は どうした を、本体で埋める形は 本体で埋めた席を）。本物の次の 3 つ組が前と同じ事は無かった（75 節）ので足した形。
 数える物: 席ごとの当たり、3 席とも当たり、2 席以上当たり、組んだ 3 つ組が「前に丸ごと聞いた 3 つ組」である割合（まとまり）、前の 3 つ組と同じ割合。
@@ -35,6 +37,7 @@ import i49zzw_next_triple_run as W  # noqa: E402
 
 FORMS = ("全部引き継ぎ", "席ごと（全部、遷移の波）", "席ごと（人は引き継ぎ）", "動きを引いて、物は本体", "物を引いて、動きは本体")
 NOREP = "（前と同じ物は返さない）"
+TALK = ("話の形（動きは出た語を除く）", "話の形（人は話の中の人から）", "話の形（両方）")
 KEYS = ("だれが", "何を", "どうした", "3 席とも", "2 席以上", "前に丸ごと聞いた 3 つ組", "前の 3 つ組と同じ")
 
 
@@ -49,8 +52,9 @@ def fill(body, si, tri, cands, fallback, avoid=None):
     return (o["答え"], True) if o["答え"] is not None else (fallback, False)
 
 
-def replies(prev, cands, wave, body=None):
-    """→ 組み方 → (3 つ組, 本体が答えたか)。body が無い時は、本体を使う組み方を作らない。"""
+def replies(prev, cands, wave, body=None, hist=None):
+    """→ 組み方 → (3 つ組, 本体が答えたか)。body が無い時は、本体を使う組み方を作らない。
+    hist（その話の、ここまでの 3 つ組。prev を含む）を渡すと、話の形（78 節）も作る。"""
     prev = tuple(prev)
     sc = [wave.scores(si, prev, cands) for si in range(3)]
     w = tuple(W.pick(cands, sc[si]) for si in range(3))
@@ -74,6 +78,19 @@ def replies(prev, cands, wave, body=None):
         if out[FORMS[4]][0] == prev:
             v, ok = fill(body, 2, (prev[0], w[1], None), cands, other(2), avoid=prev[2])
             out[FORMS[4] + NOREP] = ((prev[0], w[1], v), ok)
+        if hist is not None:
+            def among(si, keep):
+                ix = [i for i, c in enumerate(cands) if keep(c)]
+                return W.pick([cands[i] for i in ix], [sc[si][i] for i in ix]) if ix else None
+
+            people, verbs = {t[0] for t in hist}, {t[2] for t in hist}
+            who = among(0, lambda c: c in people) or prev[0]
+            act = among(2, lambda c: c not in verbs) or w[2]
+            for name, s0, v0 in zip(TALK, (prev[0], who, who), (act, w[2], act)):
+                o, ok = fill(body, 1, (s0, None, v0), cands, w[1])
+                if (s0, o, v0) == prev:
+                    o, ok = fill(body, 1, (s0, None, v0), cands, other(1), avoid=prev[1])
+                out[name] = ((s0, o, v0), ok)
     return out
 
 
@@ -99,15 +116,17 @@ def count(first, second, attr_of, body=None, dims=None, scale=None):
     for tris, _ in first:
         hear(tris)
     names = [n for f in (FORMS if body is not None else FORMS[:3]) for n in ((f,) if f in FORMS[:2] else (f, f + NOREP))]
+    names += list(TALK) if body is not None else []
     out = {n: dict(問い=0, 本体が答えた=0, **{k: 0 for k in KEYS}) for n in names}
     ref = dict(問い=0, 本物の次が前に丸ごと聞いた物=0, 本物の次が前と同じ=0)
     for tris, words in second:
         cands = sorted(words, key=str)
-        for a, b in zip(tris, tris[1:]):
+        for i in range(1, len(tris)):
+            a, b = tris[i - 1], tris[i]
             ref["問い"] += 1
             ref["本物の次が前に丸ごと聞いた物"] += tuple(b) in heard
             ref["本物の次が前と同じ"] += tuple(b) == tuple(a)
-            for n, (r, ok) in replies(a, cands, wave, body).items():
+            for n, (r, ok) in replies(a, cands, wave, body, [tuple(t) for t in tris[:i]]).items():
                 c = out[n]
                 hits = [r[si] == b[si] for si in range(3)]
                 c["問い"] += 1
