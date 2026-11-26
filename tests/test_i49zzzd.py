@@ -42,6 +42,17 @@ def test_scores_k_with_the_last_line_equals_the_transition_wave():
     cands = [V("買う"), V("食べる"), V("借りる"), V("読む")]
     a, b = w.scores(2, prev, cands), D.scores_k(w, 2, [w._key(j, prev[j]) for j in range(3)], cands)
     assert np.allclose(a, b, atol=1e-5) and W.pick(cands, b) == V("食べる")
+    h = D.Hold(w, (1, 4))
+    h.hear(prev)
+    h.hear((N("花子"), N("本"), V("借りる")))
+    cands = cands + [V("歩く")]                                                # 聞いた事の無い語が混ざっても同じ
+    fast = D.Fast(w)
+    m = fast.many(2, [h.v[1], h.v[4]], cands)
+    assert np.allclose(m[0], D.scores_k(w, 2, h.v[1], cands), atol=1e-4) and np.allclose(m[1], D.scores_k(w, 2, h.v[4], cands), atol=1e-4)
+    people = [N("太郎"), N("花子"), N("次郎")]
+    assert np.allclose(fast.attr(h, 0, people)[1], h.attr(4, 0, people), atol=1e-4)
+    w.learn(prev, (N("太郎"), N("りんご"), V("歩く")))                         # 聞いた後は、表を作り直す
+    assert np.allclose(fast.many(2, [h.v[1]], cands)[0], D.scores_k(w, 2, h.v[1], cands), atol=1e-4)
 
 
 def test_held_wave_finds_the_person_without_being_told_the_talk():

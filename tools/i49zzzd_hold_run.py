@@ -99,32 +99,85 @@ def scores_k(wave, si, ks, cands):
     return out
 
 
-def picks(wave, hold, prev, hist, seat):
+class Fast:
+    """scores_k と同じ式を、幾つもの引き方についてまとめて計算する（表を行列にして持つ。聞いたら作り直す）。"""
+
+    def __init__(self, wave):
+        self.wave, self._t, self._at, self._keys = wave, {}, None, [{}, {}, {}]
+
+    def _table(self, si, j):
+        if self._at != tuple(self.wave.total):
+            self._t, self._at = {}, tuple(self.wave.total)
+        if (si, j) not in self._t:
+            d = self.wave.m.get((si, j)) or {}
+            ws = list(d)
+            self._t[(si, j)] = ({w: i for i, w in enumerate(ws)}, np.stack([d[w] for w in ws]) if ws else None)
+        return self._t[(si, j)]
+
+    def key(self, j, w):
+        k = self._keys[j]
+        if w not in k:
+            k[w] = self.wave._key(j, w)
+        return k[w]
+
+    def many(self, si, K, cands):
+        """K: 引き方ごとの、席 3 つの波。→ 点（引き方 × 候補）。"""
+        wave, out = self.wave, np.zeros((len(K), len(cands)), dtype=np.float64)
+        base = np.array([wave.cnt[si].get(c, 0) / max(wave.total[si], 1) for c in cands])
+        for j in range(3):
+            ix, M = self._table(si, j)
+            if M is None:
+                continue
+            Kj = np.conj(np.stack([k[j] for k in K]))
+            near = np.real(Kj @ wave.all[(si, j)]).astype(np.float64)
+            rows = np.array([ix.get(c, -1) for c in cands])
+            has = rows >= 0
+            vals = np.zeros((len(K), len(cands)), dtype=np.float64)
+            if has.any():
+                vals[:, has] = np.real(Kj @ M[rows[has]].T)
+            ok = near > 0
+            out[ok] += vals[ok] / near[ok, None] - base[None, :]
+        return out
+
+    def attr(self, hold, j, cands):
+        """持った波との共鳴（属性の波）を、半減期の全部について。→ 点（半減期 × 候補）。"""
+        C = np.stack([self.key(j, c) for c in cands])
+        return np.real(np.conj(C) @ np.stack([hold.v[h][j] for h in hold.halves]).T).T
+
+
+def _new(c2, sc, verbs):
+    fresh = [i for i, c in enumerate(c2) if c not in verbs]
+    return W.pick([c2[i] for i in fresh], [sc[i] for i in fresh]) if fresh else W.pick(c2, sc)
+
+
+def picks(fast, hold, prev, hist, seat):
     """→ ({選び方: だれが}, {選び方: どうした})。seat[si] は、その席に置いて良い語（並べた物）。"""
     c0, c2 = seat[0], seat[2]
-    s0 = wave.scores(0, prev, c0)
+    K = [[fast.key(j, prev[j]) for j in range(3)]] + [hold.v[h] for h in hold.halves]
+    s0, s2 = fast.many(0, K, c0), fast.many(2, K, c2)
     people, verbs = {t[0] for t in hist}, {t[2] for t in hist}
     ix = [i for i, c in enumerate(c0) if c in people]
-    who = {HAND: W.pick([c0[i] for i in ix], [s0[i] for i in ix]) if ix else prev[0], LAST: W.pick(c0, s0)}
-    s2 = wave.scores(2, prev, c2)
-    fresh = [i for i, c in enumerate(c2) if c not in verbs]
-
-    def new(sc):
-        return W.pick([c2[i] for i in fresh], [sc[i] for i in fresh]) if fresh else W.pick(c2, sc)
-    act = {LAST: W.pick(c2, s2), LAST + NEW: new(s2)}
-    for h in hold.halves:
-        who[name_of(ATTR, h)] = W.pick(c0, hold.attr(h, 0, c0))
+    who = {HAND: W.pick([c0[i] for i in ix], [s0[0][i] for i in ix]) if ix else prev[0], LAST: W.pick(c0, s0[0])}
+    act = {LAST: W.pick(c2, s2[0]), LAST + NEW: _new(c2, s2[0], verbs)}
+    at = fast.attr(hold, 0, c0)
+    for n, h in enumerate(hold.halves):
+        who[name_of(ATTR, h)] = W.pick(c0, at[n])
         who[name_of(WORD, h)] = W.pick(c0, hold.word(h, 0, c0))
-        who[name_of(HELD, h)] = W.pick(c0, scores_k(wave, 0, hold.v[h], c0))
-        sk = scores_k(wave, 2, hold.v[h], c2)
-        act[name_of(HELD, h)] = W.pick(c2, sk)
-        act[name_of(HELD, h) + NEW] = new(sk)
+        who[name_of(HELD, h)] = W.pick(c0, s0[n + 1])
+        act[name_of(HELD, h)] = W.pick(c2, s2[n + 1])
+        act[name_of(HELD, h) + NEW] = _new(c2, s2[n + 1], verbs)
     return who, act
+
+
+def act_new(fast, hold, prev, hist, c2, h=None):
+    """自分で続ける時の動き: 前の行から（h が無い時）か、持った波（半減期 h）から引く。出た動きは返さない。"""
+    k = [fast.key(j, prev[j]) for j in range(3)] if h is None else hold.v[h]
+    return _new(c2, fast.many(2, [k], c2)[0], {t[2] for t in hist})
 
 
 def run(first, second, attr_of, body=None, halves=HALVES, sample=0, free=30, steps=10, show=2, dims=None, scale=None):
     wave = W.Wave(W.DIMS if dims is None else dims, attr_of, W.SCALE if scale is None else scale)
-    hold = Hold(wave, halves)
+    hold, fast = Hold(wave, halves), Fast(wave)
     heard_seat = [set(), set(), set()]
     mates = {}                                  # 動き → 同じ話に出た事の有る動き
 
@@ -177,7 +230,7 @@ def run(first, second, attr_of, body=None, halves=HALVES, sample=0, free=30, ste
         for i in range(1, len(tris)):
             hold.hear(tris[i - 1])
             if q % every == 0:
-                who, act = picks(wave, hold, tris[i - 1], tris[:i], seats(tris[:i]))
+                who, act = picks(fast, hold, tris[i - 1], tris[:i], seats(tris[:i]))
                 for c, d, si in ((cnt[0], who, 0), (cnt[1], act, 2)):
                     c["問い"] += 1
                     for n, w in d.items():
@@ -187,13 +240,13 @@ def run(first, second, attr_of, body=None, halves=HALVES, sample=0, free=30, ste
         if body is not None and ti % free_every == 0 and ti // free_every < free:
             for step in range(1, min(len(tris), steps + 1)):
                 mark("本物の話", step, together(tris[0][2], tris[step][2]), together(tris[step - 1][2], tris[step][2]))
-            names = [LAST + NEW] + [name_of(HELD, h) + NEW for h in halves]
-            for name in names:
+            names = [(LAST + NEW, None)] + [(name_of(HELD, x) + NEW, x) for x in halves]
+            for name, half in names:
                 h, hist, lines = start.fork(), [tris[0]], []
                 h.hear(tris[0])
                 for step in range(1, steps + 1):
                     st = seats(hist)
-                    v = picks(wave, h, hist[-1], hist, st)[1][name]
+                    v = act_new(fast, h, hist[-1], hist, st[2], half)
                     o, _ = X.fill(body, 1, (tris[0][0], None, v), st[1], W.pick(st[1], wave.scores(1, hist[-1], st[1])))
                     r = (tris[0][0], o, v)
                     mark(name, step, together(tris[0][2], v), together(hist[-1][2], v))
@@ -204,6 +257,8 @@ def run(first, second, attr_of, body=None, halves=HALVES, sample=0, free=30, ste
                 if len(runs) < show * len(names):
                     runs.append(dict(話=ti, 選び方=name, 初めの行="%sが%sを%s。" % tuple(w[0] for w in tris[0]), 続き=lines))
         learn(tris, words)
+        if ti % 20 == 0:
+            print("話", ti, "/", len(second), "問い", cnt[0]["問い"], flush=True)
     return dict(だれが=cnt[0], どうした=cnt[1], 場面=scene, 同じ物をもう一度出した数=said_same, 自分で続ける=runs,
                 広い候補の語の数=[len(s) for s in heard_seat])
 
