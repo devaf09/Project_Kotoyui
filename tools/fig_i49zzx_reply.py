@@ -1,4 +1,4 @@
-"""I49zzx の図: 前の 3 つ組から、次の 3 つ組を 1 つの返事として組む（run70 の合計の数だけ。5,987 問）。"""
+"""I49zzx の図: 前の 3 つ組から、次の 3 つ組を 1 つの返事として組む（run72 の合計の数だけ。5,987 問）。"""
 import os
 
 import matplotlib
@@ -8,10 +8,10 @@ from matplotlib import font_manager as fm
 
 N = 5987
 FORMS = ("全部\n引き継ぎ", "席ごと\n（全部、遷移の波）", "席ごと\n（人は引き継ぎ）", "動きを引いて、\n物は本体", "物を引いて、\n動きは本体")
-WHOLE = (0, 183, 193, 274, 223)
-TWO = (268, 940, 1011, 983, 886)
-HEARD = (780, 665, 507, 1055, 1162)
-SAME = (5987, 172, 304, 427, 661)
+WHOLE = (0, 183, 193, 296, 237)
+TWO = (268, 940, 1011, 994, 888)
+HEARD = (780, 665, 507, 1064, 1191)
+SAME = (5987, 172, 304, 440, 681)
 REAL_HEARD = 764
 
 
@@ -39,7 +39,7 @@ def main():
     ax[1].axhline(REAL_HEARD / N, color="#333333", ls="--", lw=1)
     ax[1].text(1.5, REAL_HEARD / N + .004, "本物の次の 3 つ組が、前に聞いた物: %.2f" % (REAL_HEARD / N), fontsize=8.5, ha="center", va="bottom")
     ax[1].legend(fontsize=9, loc="upper center")
-    fig.suptitle("3 つの席を合わせて 1 つの返事に組む: 残りを本体で埋めると、丸ごとの当たりが上がる（I49zzx、run70）", fontsize=12)
+    fig.suptitle("3 つの席を合わせて 1 つの返事に組む: 残りを本体で埋めると、丸ごとの当たりが上がる（I49zzx、run72）", fontsize=12)
     fig.tight_layout()
     fig.savefig(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "images", "i49zzx_reply.png"), dpi=170)
 
