@@ -36,5 +36,7 @@ def test_loop_outputs_replies_free_runs_and_counts():
     assert len(d["自分で続ける"]) == 2 * 2 and all(len(x["続き"]) == 4 for x in d["自分で続ける"])
     new = [x for x in d["自分で続ける"] if x["組み方"] == C.FORM_NEW]
     assert all(len({s["言い切り"].split("を")[1] for s in x["続き"]}) >= 3 for x in new)   # 出た動きは返さない形は、動きが替わり続ける
+    verbs = ("買う", "食べる", "借りる", "読む", "買います", "食べます", "借ります", "読みます")
+    assert all(s["言い切り"].rstrip("。").endswith(verbs) for x in d["自分で続ける"] for s in x["続き"])   # 動きの席に、物の語を置かない
     c = d["数え_広い候補"][C.FORM]
     assert c["問い"] >= 6 and c["だれが"] == c["問い"]                      # この世界では、人は話の中に 1 人だけ

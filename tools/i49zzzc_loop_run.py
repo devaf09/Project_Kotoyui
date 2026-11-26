@@ -10,7 +10,8 @@
      丁寧は、前の行からは選べない（73 節）ので、状態として固定する（言い切りと丁寧の 2 つを並べて出す）。
   4. 出した 3 つ組を、次の入り口に戻す（自分で続ける形）。
 場面は今までと同じ（話を並べ替えて半分に分け、前半を聞かせる。後半の話で試し、試した後に聞かせる）。
-候補は 2 通り: 狭い（その話の語。先の行の語も入っているので、当たりやすい作り）／広い（ここまでに聞いた全部の語と、その話でここまでに出た語）。
+候補は 2 通り: 狭い（その話の語。先の行の語も入っているので、当たりやすい作り）／広い（ここまでに聞いた全部の語と、その話でここまでに出た語。
+  席ごとに、その席で聞いた事の有る語だけを置く）。
 出す物:
   相手に返す: 後半の初めの話（--talks 個）で、前の行ごとに、本物の次の行と、組んだ返事（狭い／広い）を並べる。
   自分で続ける: 同じ話の初めの 1 行から、返事を次の入り口に戻して --steps 回続ける（広い候補。組み方 2 通り: 上の形／その話で出た動きは返さない形）。
@@ -54,10 +55,18 @@ def lines_of(former, tri):
 
 def run(first, second, attr_of, body, former=None, talks=2, steps=10, sample=300, dims=None, scale=None):
     wave = W.Wave(W.DIMS if dims is None else dims, attr_of, W.SCALE if scale is None else scale)
-    vocab = set()
+    vocab, seat = set(), [set(), set(), set()]
+
+    def allow_with(hist):
+        """その席で聞いた事の有る語（と、その話でその席に出た語）だけを、その席に置く。"""
+        own = [{t[si] for t in hist} for si in range(3)]
+        return lambda si, c: c in seat[si] or c in own[si]
 
     def hear(tris, words=None):
         vocab.update(w for t in tris for w in t)
+        for t in tris:
+            for si in range(3):
+                seat[si].add(t[si])
         for a, b in zip(tris, tris[1:]):
             wave.learn(a, b)
         for t in tris:
@@ -86,7 +95,7 @@ def run(first, second, attr_of, body, former=None, talks=2, steps=10, sample=300
                 continue
             q += 1
             wide = sorted(vocab | {w for t in hist for w in t}, key=str)
-            rw = X.replies(a, wide, wave, body, hist)
+            rw = X.replies(a, wide, wave, body, hist, allow_with(hist))
             for n in COUNTED:
                 r, c = rw[n][0], cnt[n]
                 hits = [r[si] == b[si] for si in range(3)]
@@ -103,7 +112,7 @@ def run(first, second, attr_of, body, former=None, talks=2, steps=10, sample=300
             for name in (FORM, FORM_NEW):
                 hist, said = [tris[0]], []
                 for _ in range(steps):
-                    r = X.replies(hist[-1], sorted(set(wide) | {w for t in hist for w in t}, key=str), wave, body, hist)[name][0]
+                    r = X.replies(hist[-1], sorted(set(wide) | {w for t in hist for w in t}, key=str), wave, body, hist, allow_with(hist))[name][0]
                     cnt_same = r in hist
                     said.append(dict(lines_of(former, r), 前に出した物と同じ=cnt_same))
                     hist.append(r)
