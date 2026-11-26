@@ -63,3 +63,19 @@ def test_no_repeat_forms_never_return_the_previous_triple():
     for f in X.FORMS[2:]:
         assert d[f + X.NOREP]["前の 3 つ組と同じ"] == 0
         assert d[f + X.NOREP]["3 席とも"] >= d[f]["3 席とも"]                 # この世界では、本物の次は前と同じにならない
+
+
+def test_trial_questions_do_not_enter_the_bodys_own_tally():
+    class Waiting(PairBody):
+        def __init__(self):
+            super().__init__()
+            self._wait = []
+
+        def ask(self, si, q, cands):
+            self._wait.append(si)
+            return super().ask(si, q, cands)
+
+    b = Waiting()
+    b.learn((N("太郎"), N("りんご"), V("食べる")))
+    X.fill(b, 1, (N("太郎"), None, V("食べる")), [N("りんご"), N("本"), V("買う")], N("本"))
+    assert b._wait == []

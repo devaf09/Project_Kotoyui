@@ -9,6 +9,8 @@ I49zzw（74 節）は席ごとに当てた。ここでは 3 つの席を合わ�
   動きを引いて、物は本体:    だれが は前の語、どうした は遷移の波。何を は、本体に（だれが, ?, どうした）を問うて埋める。
   物を引いて、動きは本体:    だれが は前の語、何を は遷移の波。どうした は、本体に（だれが, 何を, ?）を問うて埋める。
   本体が答えない時は、遷移の波の答えを使う。
+  本体への仮の問い（組むための問い）は、本体の中の「どの段が当たるか」の数えに入れない。後半は、今までの場面と同じく、聞く前にその 3 つ組を本体に問う。
+    （run70・run71 はここが違っていた: 仮の問いが、次に聞いた別の 3 つ組で採点されていた。75 節の続き 2。）
   （前と同じ物は返さない）: 上の 3 つの組み方で、組んだ 3 つ組が前の 3 つ組と同じになった時だけ、最後に決めた席を、前の語を除いて選び直す
     （席ごと は どうした を、本体で埋める形は 本体で埋めた席を）。本物の次の 3 つ組が前と同じ事は無かった（75 節）ので足した形。
 数える物: 席ごとの当たり、3 席とも当たり、2 席以上当たり、組んだ 3 つ組が「前に丸ごと聞いた 3 つ組」である割合（まとまり）、前の 3 つ組と同じ割合。
@@ -40,7 +42,10 @@ def fill(body, si, tri, cands, fallback, avoid=None):
     """本体に、席 si を問うて埋める。答えない時は fallback。avoid は候補から除く語。→ (語, 本体が答えたか)"""
     q = tuple(None if j == si else tri[j] for j in range(3))
     cs = [c for c in cands if c != avoid and c not in {tri[j] for j in range(3) if j != si}]
+    n = len(getattr(body, "_wait", ()))
     o = body.ask(si, q, cs) if len(cs) >= 2 else {"答え": None}
+    if hasattr(body, "_wait"):
+        del body._wait[n:]          # 仮の問いは、本体の「どの段が当たるか」の数えに入れない（次に聞く 3 つ組の問いではないので）
     return (o["答え"], True) if o["答え"] is not None else (fallback, False)
 
 
@@ -76,12 +81,17 @@ def count(first, second, attr_of, body=None, dims=None, scale=None):
     wave = W.Wave(W.DIMS if dims is None else dims, attr_of, W.SCALE if scale is None else scale)
     heard = set()
 
-    def hear(tris):
+    def hear(tris, words=None):
         for a, b in zip(tris, tris[1:]):
             wave.learn(a, b)
         for t in tris:
             heard.add(tuple(t))
             if body is not None:
+                if words is not None:       # 後半は、今までの場面と同じく、聞く前にその 3 つ組を本体に問う（本体の中の数えを育てるため。答えは使わない）
+                    for si in range(3):
+                        cs = sorted({w for w in words if w not in {t[j] for j in range(3) if j != si}} | {t[si]}, key=str)
+                        if len(cs) >= 2:
+                            body.ask(si, tuple(None if j == si else t[j] for j in range(3)), cs)
                 body.learn(t)
         if body is not None:
             body.tick()
@@ -108,7 +118,7 @@ def count(first, second, attr_of, body=None, dims=None, scale=None):
                 c["2 席以上"] += sum(hits) >= 2
                 c["前に丸ごと聞いた 3 つ組"] += tuple(r) in heard
                 c["前の 3 つ組と同じ"] += tuple(r) == tuple(a)
-        hear(tris)
+        hear(tris, words)
     out["比べ"] = ref
     return out
 
