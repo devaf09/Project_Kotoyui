@@ -70,3 +70,11 @@ def test_mixed_build_keeps_the_fix_and_ignores_a_single_odd_flow():
     assert f.build("持つ", ("丁寧",), quote=False, fix=("混ぜる", 3.0, True)) == "持ちます"
     assert f.build("住む", ("過去",), fix=("混ぜる", 3.0, True)) == "住んだ"
     assert f.build("読む", ("過去",), fix=("混ぜる", 3.0, False)) == "読んだ"
+
+
+def test_plain_form_is_the_lemma_even_when_the_material_has_mid_sentence_stems():
+    its = _its()
+    its[0] += [(SY, "見る", (), "見", ())] * 9                 # 文の途中の形（見、）が、後ろに何も付かない語幹として多く出る材料
+    f = Y.Former(its)
+    assert f.build("見る", (), fix=False) == "見"              # I42 のまま: 一番多い表記を取る
+    assert f.build("見る", (), fix=("混ぜる", 3.0, False)) == "見る"

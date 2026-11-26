@@ -104,7 +104,7 @@ def run(first, second, attr_of, body, former=None, talks=2, steps=10, sample=300
                     c[s] += hits[si]
                 c["3 席とも"] += all(hits)
             if show:
-                rn = X.replies(a, narrow, wave, body, hist)[FORM][0]
+                rn = X.replies(a, narrow, wave, body, hist, lambda si, c: c[1] == ("VERB" if si == 2 else "NOUN"))[FORM][0]
                 reply.append(dict(話=ti, 前の行=line_of(None, a), 本物の次の行=line_of(None, b), 返事_狭い候補=lines_of(former, rn),
                                   返事_広い候補=lines_of(former, rw[FORM][0]), 当たった席_広い候補=[s for si, s in enumerate(ZP.SEATS) if rw[FORM][0][si] == b[si]]))
         if show:
