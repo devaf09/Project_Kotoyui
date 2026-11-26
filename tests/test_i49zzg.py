@@ -51,3 +51,17 @@ def test_run_vessel_small_world():
     ch = [d[x]["答えが変わった"] for x in names]
     assert ch == sorted(ch)                                             # 幅を広げるほど、変わる答えは減らない
     assert all(c["当たりに変わった"] + c["外れに変わった"] <= c["答えが変わった"] for c in d.values())
+
+
+def test_gap_rows_and_table():
+    import i49_foundation as FD
+    import i49a_inner_vessel as IV
+    get = lambda w: small(w[0])
+    talks = _talks()
+    rows = G.count_gap(FD.body(get, get), talks[:6], talks[6:], get, IV.Vessel(12))
+    assert len(rows) == 6 * 2 * 3 and all(0.0 <= r[0] <= 1.0 + 1e-6 for r in rows)
+    assert not any(r[1] for r in rows if r[3] == 0)                    # 話の初めの 3 つ組には、聞いた語がまだ無い
+    t = G.gap_table(rows, parts=2)
+    assert sum(c["問い"] for c in t["話の 2 つ目からの 3 つ組"]) + sum(c["問い"] for c in t["話の初めの 3 つ組"]) == len(rows)
+    d = G.run_gap(get, get, talks, 12, ks=(0,))
+    assert set(d) == {"元の順", "合計"}
