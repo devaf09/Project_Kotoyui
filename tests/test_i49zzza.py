@@ -37,3 +37,9 @@ def test_alternating_people_are_caught_by_run_length():
         c = d[seat]
         assert c["問い"] == who["問い"] and c["話でもう出た語を除く"] >= c["遷移の数え"]
         assert c["当てずっぽう_除いた後"] >= c["当てずっぽう"] - c["正解がもう出た語"]
+
+
+def test_wide_candidates_lower_the_chance_line():
+    n, w = A.run(_talks(), ks=(0,))["元の順"], A.run(_talks(), ks=(0,), wide=True)["元の順"]
+    assert w["どうした"]["当てずっぽう"] < n["どうした"]["当てずっぽう"]
+    assert w["だれが"]["問い"] == n["だれが"]["問い"]

@@ -52,44 +52,50 @@ def fill(body, si, tri, cands, fallback, avoid=None):
     return (o["答え"], True) if o["答え"] is not None else (fallback, False)
 
 
-def replies(prev, cands, wave, body=None, hist=None):
+def replies(prev, cands, wave, body=None, hist=None, allow=None):
     """→ 組み方 → (3 つ組, 本体が答えたか)。body が無い時は、本体を使う組み方を作らない。
-    hist（その話の、ここまでの 3 つ組。prev を含む）を渡すと、話の形（78 節）も作る。"""
+    hist（その話の、ここまでの 3 つ組。prev を含む）を渡すと、話の形（78 節）も作る。
+    allow(席, 語) を渡すと、その席に置いて良い語だけから選ぶ（候補を広げた時に、動きの席へ物の語を置かないため）。"""
     prev = tuple(prev)
     sc = [wave.scores(si, prev, cands) for si in range(3)]
+    if allow is not None:
+        sc = [[x if allow(si, c) else float("-inf") for x, c in zip(sc[si], cands)] for si in range(3)]
+
+    def fill_(body, si, tri, cands, fallback, avoid=None):
+        return fill(body, si, tri, cands if allow is None else [c for c in cands if allow(si, c)], fallback, avoid)
     w = tuple(W.pick(cands, sc[si]) for si in range(3))
 
     def other(si):
         """席 si を、前の語を除いて遷移の波で選び直す。"""
-        keep = [i for i, c in enumerate(cands) if c != prev[si]]
+        keep = [i for i, c in enumerate(cands) if c != prev[si] and (allow is None or allow(si, c))]
         return W.pick([cands[i] for i in keep], [sc[si][i] for i in keep]) if keep else prev[si]
 
     seat = (prev[0], w[1], w[2])
     out = {FORMS[0]: (prev, None), FORMS[1]: (w, None), FORMS[2]: (seat, None),
            FORMS[2] + NOREP: ((prev[0], w[1], other(2)) if seat == prev else seat, None)}
     if body is not None:
-        o, ok = fill(body, 1, (prev[0], None, w[2]), cands, w[1])
+        o, ok = fill_(body, 1, (prev[0], None, w[2]), cands, w[1])
         out[FORMS[3]] = out[FORMS[3] + NOREP] = ((prev[0], o, w[2]), ok)
         if out[FORMS[3]][0] == prev:
-            o, ok = fill(body, 1, (prev[0], None, w[2]), cands, other(1), avoid=prev[1])
+            o, ok = fill_(body, 1, (prev[0], None, w[2]), cands, other(1), avoid=prev[1])
             out[FORMS[3] + NOREP] = ((prev[0], o, w[2]), ok)
-        v, ok = fill(body, 2, (prev[0], w[1], None), cands, w[2])
+        v, ok = fill_(body, 2, (prev[0], w[1], None), cands, w[2])
         out[FORMS[4]] = out[FORMS[4] + NOREP] = ((prev[0], w[1], v), ok)
         if out[FORMS[4]][0] == prev:
-            v, ok = fill(body, 2, (prev[0], w[1], None), cands, other(2), avoid=prev[2])
+            v, ok = fill_(body, 2, (prev[0], w[1], None), cands, other(2), avoid=prev[2])
             out[FORMS[4] + NOREP] = ((prev[0], w[1], v), ok)
         if hist is not None:
             def among(si, keep):
-                ix = [i for i, c in enumerate(cands) if keep(c)]
+                ix = [i for i, c in enumerate(cands) if keep(c) and (allow is None or allow(si, c))]
                 return W.pick([cands[i] for i in ix], [sc[si][i] for i in ix]) if ix else None
 
             people, verbs = {t[0] for t in hist}, {t[2] for t in hist}
             who = among(0, lambda c: c in people) or prev[0]
             act = among(2, lambda c: c not in verbs) or w[2]
             for name, s0, v0 in zip(TALK, (prev[0], who, who), (act, w[2], act)):
-                o, ok = fill(body, 1, (s0, None, v0), cands, w[1])
+                o, ok = fill_(body, 1, (s0, None, v0), cands, w[1])
                 if (s0, o, v0) == prev:
-                    o, ok = fill(body, 1, (s0, None, v0), cands, other(1), avoid=prev[1])
+                    o, ok = fill_(body, 1, (s0, None, v0), cands, other(1), avoid=prev[1])
                 out[name] = ((s0, o, v0), ok)
     return out
 

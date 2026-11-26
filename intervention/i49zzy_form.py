@@ -8,7 +8,8 @@
                 細かい表を先（終わりの字の表の割合で選ぶ。語の類の表の割合を 1 回ぶん足す）／掛け合わせ（更に語の類の表の割合を掛ける）。
   PrevSurface （流れの語, 前の表記の終わりの 1 字）→ 表記 の回数。I42 の表（流れの語, 次の語）と、割合を掛け合わせて選ぶ。
   build       語幹・意味の組 → 形（語幹の表記 ＋ 流れの表記）。fix=False なら I42 のまま。
-手で置いた物: 終わりの 1 字を見る事、前の 1 字を見る事、割合を掛ける事、細かい表に広い表の割合を 1 回ぶん足す事。乱数は使わない。
+  mix / EndFlow.mixed / stem_mixed  広い表と細かい表を、数えの多さを重みにして混ぜる形（κ。追記 16 の案 2）。
+手で置いた物: 言い切りで後ろに何も付かない時は原形を返す事（混ぜる形だけ）、κ、終わりの 1 字を見る事、前の 1 字を見る事、割合を掛ける事、細かい表に広い表の割合を 1 回ぶん足す事。乱数は使わない。
 """
 from __future__ import annotations
 
@@ -30,6 +31,26 @@ def pick(c1, c2, prior=True):
     return max(sorted(c1, key=str), key=lambda y: (c1[y] / n1 if prior else 1.0) * (((c2 or {}).get(y, 0) + c1[y] / n1) / (n2 + 1)))
 
 
+def mix(levels, kappa):
+    """広い表から細かい表へ並べた数え（levels）を、数えの多さを重みにして混ぜる（持ち主がもらった案。ロードマップの追記 16 の案 2）。
+    割合(y) = (その段の回数(y) + κ × 1 つ広い段の割合(y)) / (その段の総回数 + κ)。一番広い段は、そのままの割合。空の段は飛ばす。
+    下限を置かず、1〜2 回しか出ていない段は広い段の割合が強く効き、何度も出た段はその段の数えが勝つ。→ {y: 割合}（空なら {}）。"""
+    p = {}
+    for c in levels:
+        if not c:
+            continue
+        n = sum(c.values())
+        if not p:
+            p = {y: v / n for y, v in c.items()}
+        else:
+            p = {y: (c.get(y, 0) + kappa * p.get(y, 0.0)) / (n + kappa) for y in set(c) | set(p)}
+    return p
+
+
+def best(p):
+    return max(sorted(p, key=str), key=lambda y: p[y]) if p else None
+
+
 class EndFlow:
     def __init__(self, train):
         self.t = defaultdict(Counter)
@@ -46,6 +67,27 @@ class EndFlow:
             if c1:
                 return pick(c1, self.t.get((k, lem[-1:], m)), prior=prior)
         return rev.table(lem, m, pos, quote)
+
+    def mixed(self, rev, lem, m, pos="VERB", quote=False, kappa=3.0):
+        """語の類の表 → 終わりの字の表 → その語の表 を、κ で混ぜて選ぶ。どの表も空なら I42 の逆引きの表。"""
+        k = F.wclass(lem, pos)
+        fl = best(mix([rev.ctab.get((k, m)), self.t.get((k, lem[-1:], m)), rev.stem.get((lem, m))], kappa))
+        return rev.table(lem, m, pos, quote) if fl is None else fl
+
+
+def stem_mixed(surf, lem, fl, pos="VERB", kappa=3.0):
+    """語幹の形を戻す所も、広い決まりから細かい決まりへ κ で混ぜる。I42 は、細かい表が 1 回でも有ればそれを取る。
+    段: 終わりの 1 字 → 終わりの 2 字 → 活用の種類と 1 字 → 活用の種類と 2 字 → その語そのもの。書き替え（終わりの字 → 替える字）で持つ。"""
+    f = fl[0] if fl else F.END
+    k = surf.kind(lem, pos)
+    own = Counter()
+    for x, v in (surf.exact.get((lem, f)) or {}).items():
+        cp = os.path.commonprefix([lem, x])
+        own[(lem[len(cp):], x[len(cp):])] += v
+    levels = [surf.rule.get(key) for key in ((lem[-1:], f), (lem[-2:], f), (k, lem[-1:], f), (k, lem[-2:], f))] + [own]
+    levels = [Counter({r: v for r, v in c.items() if lem.endswith(r[0])}) if c else None for c in levels]
+    r = best(mix(levels, kappa))
+    return lem if r is None else lem[: len(lem) - len(r[0])] + r[1]
 
 
 class PrevSurface:
@@ -77,8 +119,18 @@ class Former:
         self.end, self.prev = EndFlow(its), PrevSurface(its, self.fsurf)
 
     def build(self, lem, m, pos="VERB", quote=True, fix=True):
-        """fix: False = I42 のまま。True か「細かい表を先」= 流れは終わりの字の表を先に見る。「掛け合わせ」= 流れも、語の類の表の割合と掛けて選ぶ。"""
+        """fix: False = I42 のまま。True か「細かい表を先」= 流れは終わりの字の表を先に見る。「掛け合わせ」= 流れも、語の類の表の割合と掛けて選ぶ。
+        ("混ぜる", κ, 語幹の形も混ぜるか) = 流れを mix で選ぶ（その語の表も混ぜる）。3 つ目が True なら、語幹の形も stem_mixed で戻す。"""
         m = tuple(sorted(m))
+        if isinstance(fix, tuple):
+            _, kappa, stem_too = fix
+            fl = self.end.mixed(self.rev, lem, m, pos, quote, kappa)
+            if fl is None:
+                return None
+            if not fl and not m:
+                return lem          # 言い切りで、後ろに何も付かない時は、原形そのもの（材料では、後ろに何も付かない語幹は文の途中の形「見、」が多く、それを取ると「見。」になる。I49zzzc の run74 で見つけた）
+            stem = stem_mixed(self.surf, lem, fl, pos, kappa) if stem_too else self.surf.form(lem, fl, pos)
+            return stem + self.prev.form(fl, stem)
         fl = self.end.flow(self.rev, lem, m, pos, quote, prior=fix == "掛け合わせ") if fix else self.rev.table(lem, m, pos, quote)
         if fl is None:
             return None

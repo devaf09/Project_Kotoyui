@@ -11,7 +11,8 @@
   遷移の数え（比べ役）／話でもう出た語を除く: その話の、その席にもう出た語を候補から除いて、遷移の数えで選ぶ。
   当てずっぽうも 2 つ出す（全部の候補から／除いた後の候補から）。候補は話の中の語なので、除くだけで当たりやすくなる分を見るため。
 手で置いた物: 続いた数を 4 でまとめる事、場面の作り方。乱数は使わない。材料の語や例は出さない。
-引数: --text 材料（カンマ区切り） --out 記録.json [--ks 1,2,3]
+--wide: 候補を、その話の語だけでなく、ここまでに聞いた全部の語まで広げる（78 節の弱い所の確かめ）。
+引数: --text 材料（カンマ区切り） --out 記録.json [--ks 1,2,3] [--wide]
 """
 from __future__ import annotations
 
@@ -59,10 +60,12 @@ def among(cands, scores, keep):
     return W.pick([cands[i] for i in ix], [scores[i] for i in ix]) if ix else None
 
 
-def count(first, second):
-    m, tally = W.Count(), RunTally()
+def count(first, second, wide=False):
+    """wide=True: 候補を、その話の語だけでなく、ここまでに聞いた全部の語まで広げる（除くと候補が減って当たりやすくなる分を、ほぼ無くす）。"""
+    m, tally, vocab = W.Count(), RunTally(), set()
 
     def hear(tris):
+        vocab.update(w for t in tris for w in t)
         for i in range(1, len(tris)):
             m.learn(tris[i - 1], tris[i])
             tally.learn([t[0] for t in tris[:i]], tris[i][0])
@@ -73,7 +76,7 @@ def count(first, second):
     for seat in ZP.SEATS[1:]:
         out[seat] = dict(問い=0, 当てずっぽう=0.0, 当てずっぽう_除いた後=0.0, 正解がもう出た語=0, **{n: 0 for n in WHAT})
     for tris, words in second:
-        cands = sorted(words, key=str)
+        cands = sorted(vocab | set(words) if wide else words, key=str)
         for i in range(1, len(tris)):
             a, b = tris[i - 1], tris[i]
             hist = [t[0] for t in tris[:i]]
@@ -104,11 +107,11 @@ def count(first, second):
     return out
 
 
-def run(talks, ks=(1, 2, 3)):
+def run(talks, ks=(1, 2, 3), wide=False):
     res, total = {}, {}
     for k in ks:
         seq = [talks[i] for i in ZP.order(len(talks), k)]
-        d = count(seq[:len(seq) // 2], seq[len(seq) // 2:])
+        d = count(seq[:len(seq) // 2], seq[len(seq) // 2:], wide)
         res["元の順" if k == 0 else "並べ替え %d" % k] = d
         for seat, c in d.items():
             t = total.setdefault(seat, {})
@@ -123,11 +126,12 @@ def main():
     ap.add_argument("--text", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--ks", default="1,2,3")
+    ap.add_argument("--wide", action="store_true")     # 候補を、ここまでに聞いた全部の語まで広げる
     a = ap.parse_args()
     talks = []
     for f in a.text.split(","):
         talks += [(t[0], t[1]) for t in ZP.talks_of(Z.read(f))[0]]
-    res = dict(話=len(talks), **run(talks, tuple(int(x) for x in a.ks.split(","))))
+    res = dict(話=len(talks), 広い候補=a.wide, **run(talks, tuple(int(x) for x in a.ks.split(",")), a.wide))
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=1)
     for seat, c in res["合計"].items():
