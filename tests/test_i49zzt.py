@@ -127,3 +127,17 @@ def test_run_with_attribute_forms():
     d = RUN.run(get, get, _talks(), ks=(0,), forms={}, count_dims=256, attr=True, attr_forms={"属性で数える": (None, 2.0), "属性で動かす": (0.1, 2.0)})
     c = d["元の順"]["全部"]
     assert all(0 <= c[n] <= c["問い"] for n in ("属性で数える", "属性で動かす"))
+
+
+def test_mix_counts_are_consistent():
+    import i49zzt_triple_run as RUN
+    from test_i49zw import attr as small
+    from test_i49zzg import _talks
+    get = lambda w: small(w[0])
+    d = RUN.run_mix(get, get, _talks(), ks=(0,), count_dims=256)
+    c = d["元の順"]["全部"]
+    assert c["問い"] == 6 * 2 * 3
+    assert c["両方当たり"] + c["本体だけ当たり"] + c["掛け合わせだけ当たり"] <= c["問い"]
+    assert c["問い"] == d["元の順"]["2 語の組を前に聞いた"]["問い"] + d["元の順"]["2 語の組は初めて"]["問い"]
+    assert all(b["当たりに変わった"] + b["外れに変わった"] <= b["答えが変わった"] for b in c["幅ごと"].values())
+    assert d["合計"]["全部"]["問い"] == c["問い"]

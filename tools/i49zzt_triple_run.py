@@ -9,6 +9,8 @@
 手で置いた物: FORMS（次元・動かす大きさ・前半を聞く回数）、場面の作り方。乱数は使わない。
 材料の語や例は出さない。出すのは集計の数だけ。
 --attr を付けると、位相を語板の属性から始める形（数えるだけ／外れた時だけ動かす。写す大きさを変える）も、同じ問いで数える。
+--mix を付けると、本体と「属性から始めて数える形」を組み合わせた時の数えだけをする: どちらが当たるかの重なり、本体が答えられない問い、
+  本体の 1 位との差が小さい候補（同点と見なす幅）の中から、掛け合わせの点で選び直した時の変わり方。
 引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --out 記録.json [--ks 1,2,3] [--attr]
 """
 from __future__ import annotations
@@ -109,6 +111,93 @@ def count(body, first, second, forms=None, count_dims=None, attr_of=None, attr_f
     return out
 
 
+MIX_SCALE = 4.0                          # 組み合わせに使う形の、写す大きさ（run63 で一番良かった値）
+MIX_LIMS = (0.01, 0.05, 0.1, 0.2, 0.5)   # 本体の 1 位との差の割合が、これ以下の候補を「同点」と見なす幅（見るための並び）
+
+
+def count_mix(body, first, second, attr_of, count_dims=None, scale=None):
+    """本体と、属性から始めて数える形を組み合わせた時の数え（見るだけ。本体の答えと学びは変えない）。
+    → 分け方 → dict(問い, 両方当たり, 本体だけ当たり, 掛け合わせだけ当たり, 本体が答えられない, そのうち掛け合わせが当たり,
+                     幅ごと={幅: dict(答えが変わった, 当たりに変わった, 外れに変わった)})
+    幅ごと: 本体の 1 位との差の割合が幅以下の候補の中から、掛け合わせの点が一番高い候補を選び直した時。"""
+    m = T.TripleCount(COUNT_DIMS if count_dims is None else count_dims, attr_of=attr_of, scale=MIX_SCALE if scale is None else scale)
+    pairs = set()
+
+    def hear(tri):
+        body.learn(tri)
+        m.learn(tri)
+        for si in range(3):
+            pairs.add((si,) + tuple(tri[j] for j in range(3) if j != si))
+
+    for tris, _ in first:
+        for tri in tris:
+            hear(tri)
+        body.tick()
+    keys = ("答えが変わった", "当たりに変わった", "外れに変わった")
+    new = lambda: dict(問い=0, 両方当たり=0, 本体だけ当たり=0, 掛け合わせだけ当たり=0, 本体が答えられない=0, そのうち掛け合わせが当たり=0,
+                       幅ごと={str(l): {k: 0 for k in keys} for l in MIX_LIMS})
+    out = {k: new() for k in KINDS[:3]}
+    for tris, words in second:
+        for tri in tris:
+            for si in range(3):
+                cands = cands_of(tri, si, words)
+                if len(cands) < 2:
+                    continue
+                q = tuple(None if j == si else tri[j] for j in range(3))
+                seen = (si,) + tuple(tri[j] for j in range(3) if j != si) in pairs
+                o = body.ask(si, q, cands)
+                w = m.ask(si, q, cands)
+                hb, hw = o["答え"] == tri[si], w["答え"] == tri[si]
+                for kind in ("全部", "2 語の組を前に聞いた" if seen else "2 語の組は初めて"):
+                    c = out[kind]
+                    c["問い"] += 1
+                    c["両方当たり"] += hb and hw
+                    c["本体だけ当たり"] += hb and not hw
+                    c["掛け合わせだけ当たり"] += hw and not hb
+                    if o["答え"] is None or not o.get("点"):
+                        c["本体が答えられない"] += 1
+                        c["そのうち掛け合わせが当たり"] += hw
+                        continue
+                    pts = o["点"]
+                    s1 = float(pts.get(o["答え"], 0.0))
+                    for lim in MIX_LIMS:
+                        tie = [x for x in cands if s1 != 0 and (s1 - float(pts.get(x, 0.0))) / abs(s1) <= lim]
+                        if len(tie) < 2:
+                            continue
+                        a = max(tie, key=lambda x: (w["点"][x], -cands.index(x)))
+                        if a != o["答え"]:
+                            b = c["幅ごと"][str(lim)]
+                            b["答えが変わった"] += 1
+                            b["当たりに変わった"] += a == tri[si]
+                            b["外れに変わった"] += hb
+            hear(tri)
+        body.tick()
+    return out
+
+
+def run_mix(wave_of, attr_of, talks, ks=(1, 2, 3), count_dims=None):
+    import i49_foundation as FD
+    plain = [(t[0], t[1]) for t in talks]
+    res, total = {}, None
+
+    def add(t, c):
+        for k, v in c.items():
+            if isinstance(v, dict):
+                add(t.setdefault(k, {}), v)
+            else:
+                t[k] = t.get(k, 0) + v
+
+    total = {}
+    for k in ks:
+        seq = [plain[i] for i in ZP.order(len(plain), k)]
+        d = count_mix(FD.body(wave_of, attr_of), seq[:len(seq) // 2], seq[len(seq) // 2:], attr_of, count_dims)
+        res["元の順" if k == 0 else "並べ替え %d" % k] = d
+        add(total, d)
+        print(k, {x: d["全部"][x] for x in ("問い", "両方当たり", "本体だけ当たり", "掛け合わせだけ当たり")}, flush=True)
+    res["合計"] = total
+    return res
+
+
 def run(wave_of, attr_of, talks, ks=(1, 2, 3), forms=None, count_dims=None, attr=False, attr_forms=None):
     import i49_foundation as FD
     plain = [(t[0], t[1]) for t in talks]
@@ -136,6 +225,7 @@ def main():
         ap.add_argument("--" + k, required=True)
     ap.add_argument("--ks", default="1,2,3")
     ap.add_argument("--attr", action="store_true")   # 位相を語板の属性から始める形も数える
+    ap.add_argument("--mix", action="store_true")    # 本体と、属性から始めて数える形を組み合わせた時の数えだけをする
     a = ap.parse_args()
     t0 = time.time()
     talks = []
@@ -148,6 +238,14 @@ def main():
         return wv.of(w[0], "PROPN") if v is None and w[1] == "NOUN" else v
 
     full = AB.AttrBase(json.load(open(a.content, encoding="utf-8")))
+    ks = tuple(int(x) for x in a.ks.split(","))
+    if a.mix:
+        res = dict(話=len(talks), 手で置いた値=dict(COUNT_DIMS=COUNT_DIMS, MIX_SCALE=MIX_SCALE, MIX_LIMS=list(MIX_LIMS)), **run_mix(wave_of, full.of, talks, ks=ks))
+        res["秒"] = round(time.time() - t0, 1)
+        with open(a.out, "w", encoding="utf-8") as f:
+            json.dump(res, f, ensure_ascii=False, indent=1)
+        print(json.dumps(res["合計"], ensure_ascii=False, indent=1))
+        return
     res = dict(話=len(talks), 手で置いた値=dict(FORMS={n: list(v) for n, v in FORMS.items()}, COUNT_DIMS=COUNT_DIMS,
                                               ATTR_FORMS={n: list(v) for n, v in ATTR_FORMS.items()} if a.attr else None),
                **run(wave_of, full.of, talks, ks=tuple(int(x) for x in a.ks.split(",")), attr=a.attr))
