@@ -54,4 +54,12 @@ def test_whole_reply_is_counted_and_body_makes_it_hang_together():
 
 def test_without_body_only_three_forms():
     d = X.run(_attr, _talks(), None, ks=(0,), dims=512)["元の順"]
-    assert set(d) == set(X.FORMS[:3]) | {"比べ"}
+    assert set(d) == set(X.FORMS[:3]) | {X.FORMS[2] + X.NOREP, "比べ"}
+
+
+def test_no_repeat_forms_never_return_the_previous_triple():
+    d = X.run(_attr, _talks(), PairBody, ks=(0,), dims=512)["元の順"]
+    assert d["物を引いて、動きは本体"]["前の 3 つ組と同じ"] > 0               # 元の形は、オウム返しをする
+    for f in X.FORMS[2:]:
+        assert d[f + X.NOREP]["前の 3 つ組と同じ"] == 0
+        assert d[f + X.NOREP]["3 席とも"] >= d[f]["3 席とも"]                 # この世界では、本物の次は前と同じにならない

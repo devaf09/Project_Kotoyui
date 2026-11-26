@@ -9,6 +9,8 @@ I49zzw（74 節）は席ごとに当てた。ここでは 3 つの席を合わ�
   動きを引いて、物は本体:    だれが は前の語、どうした は遷移の波。何を は、本体に（だれが, ?, どうした）を問うて埋める。
   物を引いて、動きは本体:    だれが は前の語、何を は遷移の波。どうした は、本体に（だれが, 何を, ?）を問うて埋める。
   本体が答えない時は、遷移の波の答えを使う。
+  （前と同じ物は返さない）: 上の 3 つの組み方で、組んだ 3 つ組が前の 3 つ組と同じになった時だけ、最後に決めた席を、前の語を除いて選び直す
+    （席ごと は どうした を、本体で埋める形は 本体で埋めた席を）。本物の次の 3 つ組が前と同じ事は無かった（75 節）ので足した形。
 数える物: 席ごとの当たり、3 席とも当たり、2 席以上当たり、組んだ 3 つ組が「前に丸ごと聞いた 3 つ組」である割合（まとまり）、前の 3 つ組と同じ割合。
   比べ: 本物の次の 3 つ組が、前に丸ごと聞いた物である割合。
 手で置いた物: 次元、属性を位相へ写す大きさ（I49zzw と同じ）、場面の作り方、組み方の並び。乱数は使わない。材料の語や例は出さない。
@@ -30,26 +32,43 @@ import i49zp_text_talks_run as ZP  # noqa: E402
 import i49zzw_next_triple_run as W  # noqa: E402
 
 FORMS = ("全部引き継ぎ", "席ごと（全部、遷移の波）", "席ごと（人は引き継ぎ）", "動きを引いて、物は本体", "物を引いて、動きは本体")
+NOREP = "（前と同じ物は返さない）"
 KEYS = ("だれが", "何を", "どうした", "3 席とも", "2 席以上", "前に丸ごと聞いた 3 つ組", "前の 3 つ組と同じ")
 
 
-def fill(body, si, tri, cands, fallback):
-    """本体に、席 si を問うて埋める。答えない時は fallback。→ (語, 本体が答えたか)"""
+def fill(body, si, tri, cands, fallback, avoid=None):
+    """本体に、席 si を問うて埋める。答えない時は fallback。avoid は候補から除く語。→ (語, 本体が答えたか)"""
     q = tuple(None if j == si else tri[j] for j in range(3))
-    cs = [c for c in cands if c not in {tri[j] for j in range(3) if j != si}]
+    cs = [c for c in cands if c != avoid and c not in {tri[j] for j in range(3) if j != si}]
     o = body.ask(si, q, cs) if len(cs) >= 2 else {"答え": None}
     return (o["答え"], True) if o["答え"] is not None else (fallback, False)
 
 
 def replies(prev, cands, wave, body=None):
     """→ 組み方 → (3 つ組, 本体が答えたか)。body が無い時は、本体を使う組み方を作らない。"""
-    w = tuple(W.pick(cands, wave.scores(si, prev, cands)) for si in range(3))
-    out = {FORMS[0]: (tuple(prev), None), FORMS[1]: (w, None), FORMS[2]: ((prev[0], w[1], w[2]), None)}
+    prev = tuple(prev)
+    sc = [wave.scores(si, prev, cands) for si in range(3)]
+    w = tuple(W.pick(cands, sc[si]) for si in range(3))
+
+    def other(si):
+        """席 si を、前の語を除いて遷移の波で選び直す。"""
+        keep = [i for i, c in enumerate(cands) if c != prev[si]]
+        return W.pick([cands[i] for i in keep], [sc[si][i] for i in keep]) if keep else prev[si]
+
+    seat = (prev[0], w[1], w[2])
+    out = {FORMS[0]: (prev, None), FORMS[1]: (w, None), FORMS[2]: (seat, None),
+           FORMS[2] + NOREP: ((prev[0], w[1], other(2)) if seat == prev else seat, None)}
     if body is not None:
         o, ok = fill(body, 1, (prev[0], None, w[2]), cands, w[1])
-        out[FORMS[3]] = ((prev[0], o, w[2]), ok)
+        out[FORMS[3]] = out[FORMS[3] + NOREP] = ((prev[0], o, w[2]), ok)
+        if out[FORMS[3]][0] == prev:
+            o, ok = fill(body, 1, (prev[0], None, w[2]), cands, other(1), avoid=prev[1])
+            out[FORMS[3] + NOREP] = ((prev[0], o, w[2]), ok)
         v, ok = fill(body, 2, (prev[0], w[1], None), cands, w[2])
-        out[FORMS[4]] = ((prev[0], w[1], v), ok)
+        out[FORMS[4]] = out[FORMS[4] + NOREP] = ((prev[0], w[1], v), ok)
+        if out[FORMS[4]][0] == prev:
+            v, ok = fill(body, 2, (prev[0], w[1], None), cands, other(2), avoid=prev[2])
+            out[FORMS[4] + NOREP] = ((prev[0], w[1], v), ok)
     return out
 
 
@@ -69,7 +88,7 @@ def count(first, second, attr_of, body=None, dims=None, scale=None):
 
     for tris, _ in first:
         hear(tris)
-    names = FORMS if body is not None else FORMS[:3]
+    names = [n for f in (FORMS if body is not None else FORMS[:3]) for n in ((f,) if f in FORMS[:2] else (f, f + NOREP))]
     out = {n: dict(問い=0, 本体が答えた=0, **{k: 0 for k in KEYS}) for n in names}
     ref = dict(問い=0, 本物の次が前に丸ごと聞いた物=0, 本物の次が前と同じ=0)
     for tris, words in second:
