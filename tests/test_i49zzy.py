@@ -50,3 +50,23 @@ def test_count_splits_by_kind_and_known():
     d = R.count(f, Counter({"読む": 2, "住む": 1, "来る": 5}), refs)
     assert d["直した形（細かい表を先）"]["全部"]["過去"] == [3, 3] and d["I42 のまま"]["全部"]["過去"] == [3, 0]
     assert d["直した形（細かい表を先）"]["五段のマ行"]["過去"] == [3, 3] and "材料に有った語" in d["直した形（掛け合わせ）"]
+
+
+def test_mix_weights_by_count():
+    wide = Counter({"ます": 90, "です": 10})
+    assert Y.best(Y.mix([wide, Counter({"です": 1})], 3.0)) == "ます"         # 1 回だけの珍しい物には振り回されない
+    assert Y.best(Y.mix([wide, Counter({"です": 20})], 3.0)) == "です"        # 何度も出た物は、その語の数えが勝つ
+    assert Y.mix([None, None], 3.0) == {} and Y.best({}) is None
+    p = Y.mix([wide, None, Counter({"です": 1})], 3.0)
+    assert abs(sum(p.values()) - 1.0) < 1e-9
+
+
+def test_mixed_build_keeps_the_fix_and_ignores_a_single_odd_flow():
+    its = _its()
+    its[0] += [(SY, "持つ", ("です",), "持つ", ("です",))]                   # その語に 1 回だけ付いた、珍しい丁寧の流れ
+    its[0] += [(SY, "立つ", ("ます",), "立ち", ("ます",))] * 6
+    f = Y.Former(its)
+    assert f.build("持つ", ("丁寧",), quote=False, fix="細かい表を先") == "持つです"   # その語の表が 1 回でも有れば、それを取る
+    assert f.build("持つ", ("丁寧",), quote=False, fix=("混ぜる", 3.0, True)) == "持ちます"
+    assert f.build("住む", ("過去",), fix=("混ぜる", 3.0, True)) == "住んだ"
+    assert f.build("読む", ("過去",), fix=("混ぜる", 3.0, False)) == "読んだ"
