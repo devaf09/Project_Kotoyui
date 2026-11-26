@@ -7,7 +7,10 @@
 見る物:
   覚えた組を引けるか（聞いた組での当たり）と、見ていない組が当たるか（外して置いた組での当たり）。
   外す組は、a と b を入れ替えた組も一緒に外す（入れ替えの組が残っていると、同じ表を使う形ではそれだけで当たるため）。
-手で置いた物: BASES、HOLDS、DIMS、動かす大きさ、回す上限。
+  語の類の世界: 「誰が・何を・どうする」のように、席ごとに語が違う世界。誰が の語も 何を の語も、G 個の類に M 語ずつ分かれ（類は見せない）、
+              どうする は 2 つの類の組で決まる（類の番号の足し算の輪。周りの回数は均一）。同じ類の語は同じ振る舞いをするので、
+              聞いていない組（その 誰が と 何を の組は聞いていないが、それぞれの語は別の組で聞いた）に届くかを見る。表は席ごと。
+手で置いた物: BASES、HOLDS、DIMS、動かす大きさ、回す上限、類の数と語の数（CLASSES）、隠す割合（CLASS_HOLDS）。
 """
 from __future__ import annotations
 
@@ -48,6 +51,39 @@ def world(base, hold, null=False):
     return both(out[k:]), both(out[:k])
 
 
+CLASSES = ((2, 4), (4, 5), (4, 10), (8, 5))   # (類の数, 類ごとの語の数)
+CLASS_HOLDS = (0.2, 0.5, 0.8)
+
+
+def class_world(g, m, hold, null=False):
+    """→ (聞く組, 外して置く組, 席ごとの語の数)。組は (誰が, 何を, どうする)。語の番号と類は、黄金比 × 2 乗の並びで混ぜる。"""
+    n = g * m
+    mix = scramble(n)
+    gs = [mix.index(i) % g for i in range(n)]
+    go = [mix[i] % g for i in range(n)]
+    pairs = [(s, o) for s in range(n) for o in range(n)]
+    ans = {(s, o): (gs[s] + go[o]) % g for s, o in pairs}
+    if null:
+        ans = {pairs[i]: (gs[pairs[j][0]] + go[pairs[j][1]]) % g for i, j in enumerate(scramble(len(pairs)))}
+    order = [pairs[i] for i in SIT.golden_order(len(pairs))]
+    k = int(len(pairs) * hold)
+    f = lambda ps: [(s, o, ans[(s, o)]) for s, o in ps]
+    return f(order[k:]), f(order[:k]), n
+
+
+def class_one(g, m, hold, dims, null=False):
+    tr, te, n = class_world(g, m, hold, null)
+    row = dict(聞く組=len(tr), 外した組=len(te), 当てずっぽう=round(1 / g, 4))
+    for name, mk in (("2 つずつの数え", lambda: B.PairSum(n, tr, g)), ("掛け合わせて数える", lambda: B.BindCount(n, tr, dims, g))):
+        mod = mk()
+        row[name] = [round(B.accuracy(mod, tr), 4), round(B.accuracy(mod, te), 4)]
+    for eta in ETAS:
+        mod = B.BindNudge(n, dims, False, g)
+        miss = mod.learn(tr, eta=eta)
+        row["外れた時だけ動かす（席ごとの表）、動かす大きさ %s" % eta] = dict(後=[round(B.accuracy(mod, tr), 4), round(B.accuracy(mod, te), 4)], 回した数=len(miss))
+    return row
+
+
 def ladder(m, base):
     """同じ表の位相が、足し算の形（θ(a＋1) − θ(a) が、どの a でも θ(1) と同じ）にどれだけ揃っているか。次元ごとの揃い方の平均（1 で全部揃う）。"""
     t = m.a.astype(np.float64)
@@ -82,6 +118,9 @@ def run():
                            for null in (False,) for b in BASES for h in HOLDS[1:] for e in ETAS}
     res["動かす大きさを替える（でたらめ）"] = {"%d 進、外す割合 %s、動かす大きさ %s" % (b, h, e): one(b, h, 4096, True, eta=e)
                                   for b in BASES for h in HOLDS[1:] for e in ETAS}
+    res["手で置いた値"].update(CLASSES=[list(x) for x in CLASSES], CLASS_HOLDS=list(CLASS_HOLDS))
+    for name, null in (("語の類の世界", False), ("語の類の世界（でたらめ）", True)):
+        res[name] = {"類 %d × %d 語、外す割合 %s" % (g, m, h): class_one(g, m, h, 4096, null) for g, m in CLASSES for h in CLASS_HOLDS}
     return res
 
 

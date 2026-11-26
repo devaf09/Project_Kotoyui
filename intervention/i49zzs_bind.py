@@ -40,9 +40,10 @@ def sym_phases(n, dims, skip=0):
 
 
 class PairSum:
-    def __init__(self, n, triples):
-        self.c1 = np.zeros((n, n), dtype=np.float32)
-        self.c2 = np.zeros((n, n), dtype=np.float32)
+    def __init__(self, n, triples, answers=None):
+        k = n if answers is None else answers
+        self.c1 = np.zeros((n, k), dtype=np.float32)
+        self.c2 = np.zeros((n, k), dtype=np.float32)
         for a, b, c in triples:
             self.c1[a, c] += 1
             self.c2[b, c] += 1
@@ -52,9 +53,9 @@ class PairSum:
 
 
 class BindCount:
-    def __init__(self, n, triples, dims):
+    def __init__(self, n, triples, dims, answers=None):
         self.t1, self.t2 = sym_phases(n, dims), sym_phases(n, dims, n)
-        self.m = np.zeros((n, dims), dtype=np.complex64)
+        self.m = np.zeros((n if answers is None else answers, dims), dtype=np.complex64)
         for a, b, c in triples:
             self.m[c] += self.key(a, b)
 
@@ -66,10 +67,11 @@ class BindCount:
 
 
 class BindNudge:
-    def __init__(self, n, dims, shared=True):
+    def __init__(self, n, dims, shared=True, answers=None):
+        """answers: 答えの種類の数（席ごとの表の時だけ。無ければ n）。"""
         self.a = sym_phases(n, dims)
         self.b = self.a if shared else sym_phases(n, dims, n)
-        self.c = self.a if shared else sym_phases(n, dims, 2 * n)
+        self.c = self.a if shared else sym_phases(n if answers is None else answers, dims, 2 * n)
         self.shared = shared
 
     def scores(self, a, b):

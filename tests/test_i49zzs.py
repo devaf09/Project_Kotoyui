@@ -59,3 +59,15 @@ def test_nudge_does_nothing_when_right():
     keep = m.a.copy()
     assert m.hear(1, 2, c) is False
     assert np.array_equal(keep, m.a)
+
+
+def test_class_world_reaches_unseen_pairs_with_separate_tables():
+    """席ごとに語が違っても、語に類が有れば、外れた時だけ動かす形は聞いていない組に届く。数えるだけでは届かない。"""
+    tr, te, n = R.class_world(4, 5, 0.2)
+    assert n == 20 and len(tr) + len(te) == 400
+    seen = {(s, o) for s, o, _ in tr}
+    assert all((s, o) not in seen for s, o, _ in te)
+    assert B.accuracy(B.BindCount(n, tr, 1024, 4), te) < 0.45
+    m = B.BindNudge(n, 1024, False, 4)
+    m.learn(tr, eta=0.3)
+    assert B.accuracy(m, tr) == 1.0 and B.accuracy(m, te) > 0.7
