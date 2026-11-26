@@ -76,3 +76,54 @@ def test_run_asks_every_form_the_same_questions():
     assert c["問い"] == d["元の順"]["2 語の組を前に聞いた"]["問い"] + d["元の順"]["2 語の組は初めて"]["問い"]
     assert all(0 <= c[n] <= c["問い"] for n in ("本体", "掛け合わせて数える", "動かす"))
     assert d["合計"]["全部"]["問い"] == c["問い"]
+
+
+def _class_attr():
+    """類ごとの属性（類の印 1 つ ＋ 語ごとの印 1 つ）。類は、誰が と 何を で別の決め方（i49zzs_bind_run.class_world と同じ）。"""
+    g, m = 4, 5
+    n = g * m
+    mix = R.scramble(n)
+    cls = {"誰": [mix.index(i) % g for i in range(n)], "何": [mix[i] % g for i in range(n)]}
+
+    def attr(w):
+        name = w[0]
+        if name[0] not in cls:
+            return None
+        i = int(name[1:])
+        v = np.zeros(g + n, dtype=np.complex64)
+        v[cls[name[0]][i]] = 1.0
+        v[g + i] = 0.5
+        return v
+    return attr
+
+
+def test_attribute_phases_let_counting_reach_unheard_pairs():
+    """位相を属性から始めると、似た語の組の数えが届くので、数えるだけで聞いていない組が当たる。"""
+    tr, te, verbs = _world(0.5)
+    plain, withattr = T.TripleCount(2048), T.TripleCount(2048, attr_of=_class_attr())
+    for t in tr:
+        plain.learn(t)
+        withattr.learn(t)
+    assert _acc(plain, te, verbs) < 0.5
+    assert _acc(withattr, te, verbs) > 0.8
+    assert _acc(withattr, tr, verbs) > 0.8
+
+
+def test_similar_attributes_start_with_near_phases():
+    m = T.TripleNudge(1024, attr_of=_class_attr())
+    r = [m.row(0, ("誰%d" % i, "NOUN")) for i in range(20)]
+    attr = _class_attr()
+    same = [(i, j) for i in range(20) for j in range(i) if np.argmax(np.real(attr(("誰%d" % i, 0))[:4])) == np.argmax(np.real(attr(("誰%d" % j, 0))[:4]))]
+    diff = [(i, j) for i in range(20) for j in range(i) if (i, j) not in same]
+    near = lambda ps: float(np.mean([np.cos(m.th[0][r[i]] - m.th[0][r[j]]).mean() for i, j in ps]))
+    assert near(same) > near(diff) + 0.2
+
+
+def test_run_with_attribute_forms():
+    import i49zzt_triple_run as RUN
+    from test_i49zw import attr as small
+    from test_i49zzg import _talks
+    get = lambda w: small(w[0])
+    d = RUN.run(get, get, _talks(), ks=(0,), forms={}, count_dims=256, attr=True, attr_forms={"属性で数える": (None, 2.0), "属性で動かす": (0.1, 2.0)})
+    c = d["元の順"]["全部"]
+    assert all(0 <= c[n] <= c["問い"] for n in ("属性で数える", "属性で動かす"))

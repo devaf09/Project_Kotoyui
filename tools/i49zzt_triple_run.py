@@ -8,7 +8,8 @@
   「隠した席の他の 2 語の組を、前に聞いた事が有るか」と「正解の語を、その席で前に聞いた事が有るか」。
 手で置いた物: FORMS（次元・動かす大きさ・前半を聞く回数）、場面の作り方。乱数は使わない。
 材料の語や例は出さない。出すのは集計の数だけ。
-引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --out 記録.json [--ks 1,2,3]
+--attr を付けると、位相を語板の属性から始める形（数えるだけ／外れた時だけ動かす。写す大きさを変える）も、同じ問いで数える。
+引数: --text 材料（カンマ区切り） --wave 語の波 --content 内容語の板 --out 記録.json [--ks 1,2,3] [--attr]
 """
 from __future__ import annotations
 
@@ -29,6 +30,10 @@ import i49zzt_triple as T  # noqa: E402
 FORMS = {"動かす（4096 次元、大きさ .1、1 回）": (4096, 0.1, 1), "動かす（4096 次元、大きさ .3、1 回）": (4096, 0.3, 1),
          "動かす（4096 次元、大きさ .3、4 回）": (4096, 0.3, 4), "動かす（1024 次元、大きさ .3、4 回）": (1024, 0.3, 4)}
 COUNT_DIMS = 4096
+# 位相を語板の属性から始める形（--attr を付けた時）。名前 → (動かす大きさ。None は数えるだけ, 属性を位相へ写す大きさ)
+ATTR_FORMS = {"属性から始めて数える（写す大きさ 1）": (None, 1.0), "属性から始めて数える（2）": (None, 2.0), "属性から始めて数える（4）": (None, 4.0),
+              "属性から始めて数える（8）": (None, 8.0), "属性から始めて動かす（2、大きさ .03）": (0.03, 2.0), "属性から始めて動かす（2、大きさ .1）": (0.1, 2.0),
+              "属性から始めて動かす（4、大きさ .03）": (0.03, 4.0), "属性から始めて動かす（4、大きさ .1）": (0.1, 4.0)}
 KINDS = ("全部", "2 語の組を前に聞いた", "2 語の組は初めて", "2 語の組は初めてで、正解の語はその席で聞いた")
 
 
@@ -36,13 +41,22 @@ def cands_of(tri, si, words):
     return sorted({w for w in words if w not in {tri[j] for j in range(3) if j != si}} | {tri[si]}, key=str)
 
 
-def count(body, first, second, forms=None, count_dims=None):
+def count(body, first, second, forms=None, count_dims=None, attr_of=None, attr_forms=None):
     forms = FORMS if forms is None else forms
-    models = {"掛け合わせて数える": T.TripleCount(COUNT_DIMS if count_dims is None else count_dims)}
-    passes = {}
+    cd = COUNT_DIMS if count_dims is None else count_dims
+    models = {"掛け合わせて数える": T.TripleCount(cd)}
+    passes, counters = {}, ["掛け合わせて数える"]
     for name, (dims, eta, p) in forms.items():
         models[name] = T.TripleNudge(dims, eta)
         passes[name] = p
+    if attr_of is not None:
+        for name, (eta, scale) in (ATTR_FORMS if attr_forms is None else attr_forms).items():
+            if eta is None:
+                models[name] = T.TripleCount(cd, attr_of=attr_of, scale=scale)
+                counters.append(name)
+            else:
+                models[name] = T.TripleNudge(cd, eta, attr_of=attr_of, scale=scale)
+                passes[name] = 1
     pairs, seat = set(), set()
 
     def note(tri):
@@ -53,7 +67,8 @@ def count(body, first, second, forms=None, count_dims=None):
     for tris, words in first:
         for tri in tris:
             body.learn(tri)
-            models["掛け合わせて数える"].learn(tri)
+            for name in counters:
+                models[name].learn(tri)
             note(tri)
         body.tick()
     for name, p in passes.items():
@@ -83,7 +98,8 @@ def count(body, first, second, forms=None, count_dims=None):
                     for n in names:
                         out[k][n] += ans[n] == tri[si]
             body.learn(tri)
-            models["掛け合わせて数える"].learn(tri)
+            for name in counters:
+                models[name].learn(tri)
             for name in passes:
                 models[name].learn(tri, sorted(words, key=str))
             note(tri)
@@ -93,13 +109,14 @@ def count(body, first, second, forms=None, count_dims=None):
     return out
 
 
-def run(wave_of, attr_of, talks, ks=(1, 2, 3), forms=None, count_dims=None):
+def run(wave_of, attr_of, talks, ks=(1, 2, 3), forms=None, count_dims=None, attr=False, attr_forms=None):
     import i49_foundation as FD
     plain = [(t[0], t[1]) for t in talks]
     res = {}
     for k in ks:
         seq = [plain[i] for i in ZP.order(len(plain), k)]
-        res["元の順" if k == 0 else "並べ替え %d" % k] = count(FD.body(wave_of, attr_of), seq[:len(seq) // 2], seq[len(seq) // 2:], forms, count_dims)
+        res["元の順" if k == 0 else "並べ替え %d" % k] = count(FD.body(wave_of, attr_of), seq[:len(seq) // 2], seq[len(seq) // 2:], forms, count_dims,
+                                                        attr_of if attr else None, attr_forms)
         print(k, res["元の順" if k == 0 else "並べ替え %d" % k]["全部"], flush=True)
     total = {}
     for d in res.values():
@@ -118,6 +135,7 @@ def main():
     for k in ("text", "wave", "content", "out"):
         ap.add_argument("--" + k, required=True)
     ap.add_argument("--ks", default="1,2,3")
+    ap.add_argument("--attr", action="store_true")   # 位相を語板の属性から始める形も数える
     a = ap.parse_args()
     t0 = time.time()
     talks = []
@@ -130,8 +148,9 @@ def main():
         return wv.of(w[0], "PROPN") if v is None and w[1] == "NOUN" else v
 
     full = AB.AttrBase(json.load(open(a.content, encoding="utf-8")))
-    res = dict(話=len(talks), 手で置いた値=dict(FORMS={n: list(v) for n, v in FORMS.items()}, COUNT_DIMS=COUNT_DIMS),
-               **run(wave_of, full.of, talks, ks=tuple(int(x) for x in a.ks.split(","))))
+    res = dict(話=len(talks), 手で置いた値=dict(FORMS={n: list(v) for n, v in FORMS.items()}, COUNT_DIMS=COUNT_DIMS,
+                                              ATTR_FORMS={n: list(v) for n, v in ATTR_FORMS.items()} if a.attr else None),
+               **run(wave_of, full.of, talks, ks=tuple(int(x) for x in a.ks.split(",")), attr=a.attr))
     res["秒"] = round(time.time() - t0, 1)
     with open(a.out, "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=1)

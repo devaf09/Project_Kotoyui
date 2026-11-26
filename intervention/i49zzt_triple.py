@@ -6,7 +6,10 @@
   TripleNudge: 3 つ組の点は Σ cos(θ誰が + θ何を + θどうする)。聞いた 3 つ組について、席ごとに候補の中の 1 位を出し、外れた時だけ、
                正しい 3 つ組は点が上がる向きへ、間違って選んだ語との 3 つ組は点が下がる向きへ、位相を少し動かす。
 どちらも ask(si, tri, cands) → dict(答え, 点) と learn(tri, cands) を持つ（本体 i49_foundation.body の ask と同じ問い方）。
-手で置いた物: 次元、動かす大きさ（i49zzs_bind.ETA）、周波数の決め方。
+attr_of を渡すと、語の位相を、語板の属性から始める（I49zzt の続き）: 属性の波（長さ 1 にした物）を、決まった行列で位相へ写す（θ = SCALE × P・属性）。
+  似た属性の語は近い位相から始まるので、掛け合わせた鍵も、似た 2 語の組どうしで近くなる（聞いていない組にも、似た組の数えが届く）。
+  属性の無い語は、元のまま（語ごとの位相）。行列 P は席ごとに別で、素数の平方根から作る（乱数は使わない）。
+手で置いた物: 次元、動かす大きさ（i49zzs_bind.ETA）、周波数の決め方、SCALE（属性の違いを、位相の違いへどれだけ大きく写すか）。
 """
 from __future__ import annotations
 
@@ -15,11 +18,22 @@ import numpy as np
 import i49zzs_bind as B
 
 GROW = 256   # 語の表を広げる時の刻み（速さのためだけ）
+SCALE = 4.0  # 属性の違いを位相の違いへ写す大きさ（手で置いた値）
+
+
+def attr_matrix(n, dims, si):
+    """属性（実部と虚部を並べた長さ 2n）を位相へ写す行列（dims × 2n、値は −1〜1）。席 si ごとに別。"""
+    r = np.sqrt(np.array(B.primes(2 * n * (si + 1))[2 * n * si:], dtype=np.float64))[None, :]
+    d = np.arange(dims, dtype=np.float64)[:, None] + 1.0
+    return (2.0 * ((r * d) % 1.0) - 1.0).astype(np.float32)
 
 
 class _Tables:
-    def __init__(self, dims):
+    def __init__(self, dims, attr_of=None, scale=None):
         self.dims = dims
+        self.attr_of = attr_of
+        self.scale = np.float32(SCALE if scale is None else scale)
+        self._p = [None, None, None]
         self.ix = [{}, {}, {}]
         self.th = [np.zeros((0, dims), dtype=np.float32) for _ in range(3)]
         self._pr = []
@@ -37,8 +51,16 @@ class _Tables:
             ix[w] = i
             if i >= len(self.th[si]):
                 self.th[si] = np.concatenate([self.th[si], np.zeros((GROW, self.dims), dtype=np.float32)])
-            d = np.arange(self.dims, dtype=np.float64) + 1.0
-            self.th[si][i] = (2.0 * np.pi * ((np.sqrt(float(self._prime(3 * i + si))) * d) % 1.0)).astype(np.float32)
+            v = self.attr_of(w) if self.attr_of is not None else None
+            n = float(np.linalg.norm(v)) if v is not None else 0.0
+            if n > 0:
+                a = np.concatenate([np.real(v), np.imag(v)]).astype(np.float32) / np.float32(n)
+                if self._p[si] is None:
+                    self._p[si] = attr_matrix(len(v), self.dims, si)
+                self.th[si][i] = self.scale * (self._p[si] @ a)
+            else:
+                d = np.arange(self.dims, dtype=np.float64) + 1.0
+                self.th[si][i] = (2.0 * np.pi * ((np.sqrt(float(self._prime(3 * i + si))) * d) % 1.0)).astype(np.float32)
         return ix[w]
 
 
@@ -48,8 +70,8 @@ def _pick(cands, scores):
 
 
 class TripleCount(_Tables):
-    def __init__(self, dims):
-        super().__init__(dims)
+    def __init__(self, dims, attr_of=None, scale=None):
+        super().__init__(dims, attr_of, scale)
         self.m = [{}, {}, {}]
 
     def _key(self, si, tri):
@@ -74,8 +96,8 @@ class TripleCount(_Tables):
 
 
 class TripleNudge(_Tables):
-    def __init__(self, dims, eta=None):
-        super().__init__(dims)
+    def __init__(self, dims, eta=None, attr_of=None, scale=None):
+        super().__init__(dims, attr_of, scale)
         self.eta = np.float32(B.ETA if eta is None else eta)
 
     def _base(self, si, tri):
