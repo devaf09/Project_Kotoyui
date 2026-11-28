@@ -63,16 +63,19 @@ class Hold:
         o.n = {h: [dict(d) for d in n] for h, n in self.n.items()}
         return o
 
-    def hear(self, tri):
+    def hear(self, tri, weight=1.0, late=None):
+        """weight: 薄めて聞く時の重さ。late: 待たせた行を後から聞く時の、待った行の数（今持っている物は薄めず、その行だけを帯ごとに薄めて足す）。"""
         keys = [self.wave._key(j, tri[j]) for j in range(3)]
         for h in self.halves:
             f = np.float32(0.5 ** (1.0 / h))
+            g = float(weight) * (1.0 if late is None else float(f) ** late)
             for j in range(3):
-                self.v[h][j] = (self.v[h][j] * f + keys[j]).astype(np.complex64)
+                self.v[h][j] = ((self.v[h][j] if late is not None else self.v[h][j] * f) + np.float32(g) * keys[j]).astype(np.complex64)
                 d = self.n[h][j]
-                for w in d:
-                    d[w] *= float(f)
-                d[tri[j]] = d.get(tri[j], 0.0) + 1.0
+                if late is None:
+                    for w in d:
+                        d[w] *= float(f)
+                d[tri[j]] = d.get(tri[j], 0.0) + g
 
     def attr(self, h, j, cands):
         v = self.v[h][j]
