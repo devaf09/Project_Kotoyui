@@ -53,6 +53,9 @@ def theme(d):
         for x, v in zip(xs, vs):
             ax[1].text(x, v + .008, "%.2f" % v, ha="center", fontsize=6.5)
     n = max((sc[x][0] for x in sc), default=0)
+    top = max((sc[x][k] / max(sc[x][0], 1) for x in sc for k in range(1, 5)), default=1)
+    ax[1].set_ylim(0, top * 1.18)
+    ax[0].set_ylim(0, max(vals) * 1.15 if vals else 1)
     ax[1].set_title("2. 自分で続けた時の場面の物差し（引き方ごとに %d 個）" % n, fontsize=10.5); ax[1].legend(fontsize=8, loc="upper center", bbox_to_anchor=(.5, -.22), ncol=2)
     for a in ax:
         a.set_xticks(range(len(names))); a.set_xticklabels(short, fontsize=7.5); a.grid(alpha=.3, axis="y")
